@@ -1,68 +1,56 @@
 // @ts-nocheck
+/**
+ * Thin adapter over the admin-panel axios client.
+ *
+ * Originally this class talked to a Remnawave Panel directly using a
+ * user-supplied access token (the upstream xray-config-ui-editor is a
+ * standalone webapp). Inside our admin panel we already have an
+ * authenticated JWT session and a backend proxy that wraps Panel calls
+ * with RBAC, audit logging, and access-policy scoping, so we route the
+ * editor's requests through `/api/v2/config-profiles/*` instead.
+ *
+ * `setToken`/`baseUrl` are kept as no-ops so the rest of the upstream
+ * code (configStore, useRemnawaveEditor) keeps compiling.
+ */
+import client from '@/api/client';
 import type { RemnawaveProfile } from '../types/remnawave.types';
 
 export class RemnawaveClient {
-    private baseUrl: string;
-    private token: string | null = null;
-
-    constructor(url: string) {
-        this.baseUrl = url.replace(/\/$/, '');
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    constructor(_baseUrl?: string) {
+        // The admin panel's axios client is preconfigured with the right base URL
+        // and JWT, so the constructor argument is intentionally ignored.
     }
 
-    setToken(token: string | null) {
-        this.token = token;
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    setToken(_token: string | null) {
+        // JWT auth is handled by the global axios interceptor — nothing to do here.
     }
 
-    private async request(endpoint: string, options: RequestInit = {}) {
-        const headers: Record<string, string> = {
-            'Content-Type': 'application/json',
-            Accept: 'application/json',
-        };
-
-        if (this.token) {
-            headers['Authorization'] = `Bearer ${this.token}`;
-        }
-
-        const res = await fetch(`${this.baseUrl}${endpoint}`, {
-            ...options,
-            headers: { ...headers, ...(options.headers as Record<string, string> | undefined) },
-        });
-
-        if (res.status === 204) return null;
-
-        const data = await res.json();
-
-        if (!res.ok) {
-            const errorMsg = data.message || data.error || 'Unknown error';
-            throw new Error(`API Error ${res.status}: ${errorMsg}`);
-        }
-
-        return data;
-    }
-
-    async login(username: string, password: string): Promise<string> {
-        const data = await this.request('/api/auth/login', {
-            method: 'POST',
-            body: JSON.stringify({ username, password }),
-        });
-        if (data.response?.accessToken) return data.response.accessToken;
-        throw new Error('AccessToken not found in response');
+    async login(_username: string, _password: string): Promise<string> {
+        // The editor lives inside an already-authenticated admin session, so
+        // a separate Panel login is unnecessary. We return a sentinel string
+        // to keep the legacy "connect via login" UI path satisfied.
+        return 'session';
     }
 
     async getConfigProfiles(): Promise<RemnawaveProfile[]> {
-        const data = await this.request('/api/config-profiles');
-        return data.response?.configProfiles || [];
+        const { data } = await client.get('/config-profiles');
+        // Backend already unwraps Panel's `{response: {configProfiles: [...]}}`
+        // into `{items, total}`.
+        return Array.isArray(data?.items) ? data.items : [];
     }
 
     async getConfigProfile(uuid: string): Promise<unknown> {
-        const data = await this.request(`/api/config-profiles/${uuid}`);
-        return data.response?.config || null;
+        const { data } = await client.get(`/config-profiles/${uuid}`);
+        // Backend returns Panel's `response` payload. Panel nests the editable
+        // JSON under `configProfile.config` (newer schema) or `config` (older).
+        return data?.config ?? data?.configProfile?.config ?? data?.response?.config ?? null;
     }
 
     async updateConfigProfile(uuid: string, config: unknown): Promise<void> {
-        await this.request('/api/config-profiles', {
-            method: 'PATCH',
-            body: JSON.stringify({ uuid, config }),
-        });
+        // Backend wraps Panel's PATCH /api/config-profiles. Body is just the
+        // raw editor config — the uuid travels in the URL.
+        await client.patch(`/config-profiles/${uuid}`, config);
     }
 }
