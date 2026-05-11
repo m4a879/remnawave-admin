@@ -125,6 +125,34 @@
  */
 .xray-page {
     touch-action: manipulation;
+    /* Reserve room for iPhone notch / Dynamic Island and the home-indicator
+     * gesture bar so fixed top/bottom UI never sits under system chrome. */
+    padding-top: env(safe-area-inset-top);
+    padding-bottom: env(safe-area-inset-bottom);
+    padding-left: env(safe-area-inset-left);
+    padding-right: env(safe-area-inset-right);
+}
+
+/* AppNav is the sticky top header — its background should bleed into the
+ * notch area while content keeps the safe-area offset (handled above by
+ * the .xray-page padding). */
+.xray-page > nav {
+    margin-left: calc(-1 * env(safe-area-inset-left));
+    margin-right: calc(-1 * env(safe-area-inset-right));
+    padding-left: calc(1rem + env(safe-area-inset-left));
+    padding-right: calc(1rem + env(safe-area-inset-right));
+}
+
+/* Modal footer with primary/secondary CTA — push it above the iOS gesture
+ * bar so the Save/Close buttons don't get hijacked by swipe-home. */
+[data-radix-dialog-content] > div:last-child {
+    padding-bottom: calc(1rem + env(safe-area-inset-bottom));
+}
+
+@media (min-width: 768px) {
+    [data-radix-dialog-content] > div:last-child {
+        padding-bottom: 1.25rem;
+    }
 }
 
 @media (max-width: 767px) {
