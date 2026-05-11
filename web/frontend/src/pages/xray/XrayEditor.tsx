@@ -1,6 +1,7 @@
 // @ts-nocheck
 import React from 'react';
 import { Toaster } from 'sonner';
+import './xray-editor.css';
 import { useAppLogic } from './hooks/useAppLogic';
 import { getPresets } from './core/presets';
 import {
