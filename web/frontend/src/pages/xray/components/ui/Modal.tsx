@@ -33,6 +33,8 @@ interface ModalProps {
     extraButtons?: React.ReactNode;
     className?: string;
     isSecondary?: boolean;
+    /** Disable the inner content's vertical scroll (useful for editors that own their own scroll, e.g. JSON view). Default false. */
+    disableContentScroll?: boolean;
 }
 
 const DISMISS_THRESHOLD_PX = 80;
@@ -45,6 +47,7 @@ export const Modal = ({
     extraButtons = null,
     className = '',
     isSecondary = false,
+    disableContentScroll = false,
 }: ModalProps) => {
     const [isFullScreen, setIsFullScreen] = React.useState(false);
     const [dragY, setDragY] = React.useState(0);
@@ -89,8 +92,10 @@ export const Modal = ({
             <DialogPrimitive.Portal>
                 <DialogPrimitive.Overlay
                     className={cn(
-                        'fixed inset-0 z-50 backdrop-blur-sm data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0',
-                        isSecondary ? 'bg-black/40' : 'bg-black/80',
+                        'fixed inset-0 backdrop-blur-sm data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0',
+                        // Stacked dialogs: secondary modals (e.g. TagDetailsModal opened
+                        // over the main editor) must sit above the primary z-50 overlay.
+                        isSecondary ? 'bg-black/40 z-[60]' : 'bg-black/80 z-50',
                     )}
                     style={dragY > 0 ? { opacity: Math.max(0.3, 1 - dragY / 400) } : undefined}
                 />
@@ -99,7 +104,8 @@ export const Modal = ({
                     onInteractOutside={(e) => e.preventDefault()}
                     onPointerDownOutside={(e) => e.preventDefault()}
                     className={cn(
-                        'fixed z-50 flex flex-col gap-0 bg-slate-900 border border-slate-700 shadow-2xl p-0',
+                        'fixed flex flex-col gap-0 bg-slate-900 border border-slate-700 shadow-2xl p-0',
+                        isSecondary ? 'z-[60]' : 'z-50',
                         'duration-200 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0',
                         'data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95',
                         'left-[50%] top-[50%] translate-x-[-50%] translate-y-[-50%]',
@@ -158,7 +164,7 @@ export const Modal = ({
                         className={cn(
                             'flex-1 relative flex flex-col min-h-0 custom-scroll',
                             isFullScreen ? 'p-1' : 'p-4 md:p-6',
-                            className?.includes?.('overflow-hidden') ? 'overflow-hidden' : 'overflow-y-auto',
+                            disableContentScroll ? 'overflow-hidden' : 'overflow-y-auto',
                         )}
                     >
                         {children}

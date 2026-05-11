@@ -47,12 +47,16 @@ export const EditorLayout = ({
     );
 
     return (
-        <Modal 
-            title={rawMode ? `${title} (JSON)` : title} 
-            onClose={onClose} 
+        <Modal
+            title={rawMode ? `${title} (JSON)` : title}
+            onClose={onClose}
             onSave={onSave}
             extraButtons={modalButtons}
-            className="h-full overflow-hidden"
+            // Don't pass "overflow-hidden" here — earlier Modal saw it via
+            // className.includes() and disabled the content scroll, which
+            // also clipped any portal-less popper inside (Select, hint
+            // tooltips, etc). Modal owns its own scroll container.
+            className="h-full"
         >
             {errors.length > 0 && (
                 <div className="mb-4 p-3 bg-rose-900/20 border border-rose-500/50 rounded-xl text-rose-200 text-xs animate-in fade-in slide-in-from-top-2 shrink-0">
@@ -77,7 +81,7 @@ export const EditorLayout = ({
                     />
                 </div>
             ) : (
-                <div className="flex flex-col h-full md:max-h-[60vh] adaptive-height overflow-y-auto custom-scroll p-1 pb-10">
+                <div className="flex flex-col h-full md:max-h-[60vh] adaptive-height p-1 pb-10">
                     {children}
                 </div>
             )}

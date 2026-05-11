@@ -1,4 +1,5 @@
-import React, { useEffect } from "react";
+import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { Icon } from "./Icon";
 import { toast } from "sonner";
 import { useSmartTagInput } from "../../hooks/useSmartTagInput";
@@ -48,6 +49,37 @@ export const SmartTagInput = ({
         processAndAddTags,
         removeTag
     } = useSmartTagInput(value, onChange, suggestions, prefix, cleanRegex);
+
+    // Anchor the suggestions popup to the actual input via a fixed-position
+    // portal so it doesn't get clipped by an overflow-scroll editor parent
+    // (RuleEditor, EditorLayout, etc).
+    const inputRef = useRef<HTMLInputElement>(null);
+    const [suggestStyle, setSuggestStyle] = useState<React.CSSProperties>({});
+
+    useLayoutEffect(() => {
+        if (!showSuggest || !input || filteredSuggestions.length === 0) return;
+        const reposition = () => {
+            const el = inputRef.current;
+            if (!el) return;
+            const rect = el.getBoundingClientRect();
+            const MAX_H = 224; // matches max-h-56
+            const GAP = 6;
+            const spaceBelow = window.innerHeight - rect.bottom;
+            const placeAbove = spaceBelow < MAX_H && rect.top > spaceBelow;
+            setSuggestStyle({
+                top: placeAbove ? Math.max(8, rect.top - MAX_H - GAP) : rect.bottom + GAP,
+                left: rect.left,
+                width: Math.max(rect.width, 250),
+            });
+        };
+        reposition();
+        window.addEventListener('resize', reposition);
+        window.addEventListener('scroll', reposition, true);
+        return () => {
+            window.removeEventListener('resize', reposition);
+            window.removeEventListener('scroll', reposition, true);
+        };
+    }, [showSuggest, input, filteredSuggestions.length]);
 
     const handleKeyDown = (e: React.KeyboardEvent) => {
         if (e.key === 'ArrowDown') {
@@ -192,10 +224,11 @@ export const SmartTagInput = ({
 
                 <div className="relative flex-1 min-w-[120px]">
                     <input
+                        ref={inputRef as any}
                         className="bg-transparent outline-none text-sm text-white w-full h-full font-mono placeholder:text-slate-600"
                         value={input}
-                        onChange={e => { 
-                            setInput(e.target.value); 
+                        onChange={e => {
+                            setInput(e.target.value);
                             setShowSuggest(true);
                             setFocusedIndex(-1);
                         }}
@@ -207,11 +240,12 @@ export const SmartTagInput = ({
                         inputMode="text"
                         autoComplete="off"
                     />
-                    
-                    {showSuggest && input && filteredSuggestions.length > 0 && (
-                        <div 
+
+                    {showSuggest && input && filteredSuggestions.length > 0 && createPortal(
+                        <div
                             ref={suggestionsRef}
-                            className="absolute top-full left-0 mt-2 w-full min-w-[250px] bg-slate-800 border border-slate-700 rounded-lg shadow-xl z-50 max-h-56 overflow-y-auto custom-scroll"
+                            style={suggestStyle}
+                            className="fixed bg-slate-800 border border-slate-700 rounded-lg shadow-xl z-[9999] max-h-56 overflow-y-auto custom-scroll animate-in fade-in zoom-in-95 duration-150"
                         >
                             {filteredSuggestions.map((s, index) => {
                                 const isFocused = focusedIndex === index;
@@ -236,7 +270,8 @@ export const SmartTagInput = ({
                                     </button>
                                 );
                             })}
-                        </div>
+                        </div>,
+                        document.body,
                     )}
                 </div>
             </div>
