@@ -1,6 +1,7 @@
 // @ts-nocheck
 import React from 'react';
 import { Toaster } from 'sonner';
+import { useNavigate } from 'react-router-dom';
 import './xray-editor.css';
 import { useAppLogic } from './hooks/useAppLogic';
 import { getPresets } from './core/presets';
@@ -13,6 +14,7 @@ import {
 } from './components/layout';
 
 export default function XrayEditor() {
+    const navigate = useNavigate();
     const [modulesVisible, setModulesVisible] = React.useState(false);
     const {
         config, setConfig, deleteItem, addItem, remnawave, disconnectRemnawave, initDns,
@@ -68,6 +70,7 @@ export default function XrayEditor() {
                 criticalCount={criticalCount}
                 warningCount={warningCount}
                 hasConfig={!!config}
+                onBack={() => navigate('/')}
                 onOpenDiagnostics={() => setDiagnosticsOpen(true)}
                 onOpenRemnawave={() => setRemnawaveModalOpen(true)}
                 onOpenSwitchProfile={() => setRemnawaveModalOpen(true)}

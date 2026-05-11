@@ -21,6 +21,8 @@ interface AppNavProps {
     onFileUpload: (e: React.ChangeEvent<HTMLInputElement>) => void;
     onDownload: () => void;
     hasConfig: boolean;
+    /** Optional "back to admin" callback shown as a chevron-left button on the left. */
+    onBack?: () => void;
 }
 
 /**
@@ -40,10 +42,22 @@ export const AppNav = ({
     onFileUpload,
     onDownload,
     hasConfig,
+    onBack,
 }: AppNavProps) => (
     <nav className="h-14 shrink-0 z-40 bg-slate-900/80 backdrop-blur-xl border-b border-slate-800/50 px-4 shadow-2xl flex items-center justify-between">
         {/* Left: Logo + Status */}
         <div className="flex items-center gap-3 min-w-0">
+            {onBack && (
+                <button
+                    type="button"
+                    onClick={onBack}
+                    className="shrink-0 p-2 rounded-lg text-slate-300 hover:text-white hover:bg-slate-800/60 transition-colors"
+                    title="Назад в админку"
+                    aria-label="Назад в админку"
+                >
+                    <Icon name="ArrowLeft" weight="bold" className="text-lg" />
+                </button>
+            )}
             <div className="bg-gradient-to-br from-indigo-500 to-purple-600 p-2 rounded-xl text-white shadow-lg shadow-indigo-500/20 shrink-0">
                 <Icon name="Planet" weight="fill" className="text-xl" />
             </div>

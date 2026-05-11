@@ -100,8 +100,6 @@ function ProtectedShell() {
             <Route path="/bedolaga/marketing" element={<BedolagaMarketing />} />
             <Route path="/bedolaga/referrals" element={<BedolagaReferrals />} />
             <Route path="/settings" element={<Settings />} />
-            {/* Xray editor — скрыт от sidebar до завершения интеграции (этап 4) */}
-            <Route path="/resources/xray" element={<XrayEditor />} />
             {pluginRouteEntries.map(({ key, path, Component }) => (
               <Route key={key} path={path} element={<Component />} />
             ))}
@@ -181,7 +179,19 @@ export default function App() {
             <Route path="/login" element={<Login />} />
             <Route path="/reset-password" element={<ResetPassword />} />
 
-            {/* Protected routes */}
+            {/* Full-screen protected pages (own chrome, no admin sidebar/header) */}
+            <Route
+              path="/resources/xray"
+              element={
+                <ProtectedRoute>
+                  <Suspense fallback={null}>
+                    <XrayEditor />
+                  </Suspense>
+                </ProtectedRoute>
+              }
+            />
+
+            {/* Standard protected pages (inside admin Layout) */}
             <Route path="/*" element={<ProtectedShell />} />
           </Routes>
         </BrowserRouter>
