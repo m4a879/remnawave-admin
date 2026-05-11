@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import './xray-editor.css';
 import { useAppLogic } from './hooks/useAppLogic';
 import { getPresets } from './core/presets';
+import { useConfigStore } from './store/configStore';
 import {
     AppNav,
     WelcomeScreen,
@@ -15,6 +16,32 @@ import {
 export default function XrayEditor() {
     const navigate = useNavigate();
     const [modulesVisible, setModulesVisible] = React.useState(false);
+
+    // Auto-connect through the admin's JWT (no login form needed) and, if
+    // exactly one config-profile exists in the Panel, pre-load it so the
+    // user lands on the editor instead of WelcomeScreen.
+    const autoConnect = useConfigStore((s: any) => s.autoConnectAdminSession);
+    const fetchProfiles = useConfigStore((s: any) => s.fetchRemnawaveProfiles);
+    const loadProfile = useConfigStore((s: any) => s.loadRemnawaveProfile);
+    const activeProfileUuid = useConfigStore((s: any) => s.remnawave.activeProfileUuid);
+
+    React.useEffect(() => {
+        let cancelled = false;
+        autoConnect();
+        (async () => {
+            try {
+                const profiles = await fetchProfiles();
+                if (cancelled || !Array.isArray(profiles) || profiles.length === 0) return;
+                if (activeProfileUuid) return;
+                if (profiles.length === 1) {
+                    await loadProfile(profiles[0].uuid);
+                }
+            } catch {
+                // Network/RBAC issue — WelcomeScreen still renders.
+            }
+        })();
+        return () => { cancelled = true; };
+    }, [autoConnect, fetchProfiles, loadProfile, activeProfileUuid]);
     const {
         config, setConfig, deleteItem, addItem, remnawave, disconnectRemnawave, initDns,
         modal, setModal,

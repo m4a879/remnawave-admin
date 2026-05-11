@@ -95,12 +95,12 @@ export const useConfigStore = create(
                 state.remnawave.token = null;
                 state.remnawave.connected = false;
                 state.remnawave.activeProfileUuid = null;
-                toast.info("Remnawave connection closed");
+                toast.info("Соединение с панелью закрыто");
             })),
 
             connectRemnawaveToken: (url, token) => {
                 if (!url || !token) {
-                    toast.error("URL and Token are required");
+                    toast.error("Нужны URL и токен");
                     return;
                 }
                 set(produce((state) => {
@@ -108,50 +108,61 @@ export const useConfigStore = create(
                     state.remnawave.token = token;
                     state.remnawave.connected = true;
                 }));
-                toast.success("Linked to Remnawave via Token");
+                toast.success("Подключено к Remnawave");
+            },
+
+            /**
+             * Auto-connect using the admin-panel session — there's no user-supplied
+             * URL/token here. The RemnawaveClient adapter routes everything through
+             * our `@/api/client` (JWT cookie + RBAC), so we just flip `connected`
+             * and stash a sentinel so the url/token guards in the legacy actions
+             * stay happy. Idempotent: bails out if already connected.
+             */
+            autoConnectAdminSession: () => {
+                if (get().remnawave.connected) return;
+                set(produce((state) => {
+                    state.remnawave.url = 'admin-session';
+                    state.remnawave.token = 'admin-session';
+                    state.remnawave.connected = true;
+                }));
             },
 
             fetchRemnawaveProfiles: async () => {
-                const { url, token } = get().remnawave;
-                if (!url || !token) throw new Error("Not authenticated");
-                
-                const client = new RemnawaveClient(url);
-                client.setToken(token);
+                // Admin-session auto-connect populates url/token with sentinels,
+                // so the legacy guard becomes a no-op. Real auth happens at the
+                // axios client layer.
+                const client = new RemnawaveClient();
                 try {
                     return await client.getConfigProfiles();
                 } catch (e: any) {
-                    if (e.message.includes("401")) {
+                    if (e.message?.includes?.("401")) {
                         get().disconnectRemnawave();
-                        toast.error("Session expired");
+                        toast.error("Сессия истекла");
                     }
                     throw e;
                 }
             },
 
             loadRemnawaveProfile: async (uuid) => {
-                const { url, token } = get().remnawave;
-                if (!url || !token) return;
-
-                const client = new RemnawaveClient(url);
-                client.setToken(token);
+                const client = new RemnawaveClient();
                 try {
                     const configData = await client.getConfigProfile(uuid);
                     set({ config: configData as XrayConfig });
                     set(produce((state) => {
                         state.remnawave.activeProfileUuid = uuid;
                     }));
-                    toast.success("Profile config loaded");
+                    toast.success("Профиль загружен");
                 } catch (e: any) {
-                    toast.error("Failed to load profile from cloud");
+                    toast.error("Не удалось загрузить профиль");
                 }
             },
 
             saveToRemnawave: async () => {
-                const { url, token, activeProfileUuid } = get().remnawave;
+                const { activeProfileUuid } = get().remnawave;
                 const { config } = get();
 
-                if (!url || !token || !activeProfileUuid || !config) {
-                    toast.error("Cannot save: No active cloud profile");
+                if (!activeProfileUuid || !config) {
+                    toast.error("Профиль не выбран");
                     return;
                 }
 
@@ -167,14 +178,12 @@ export const useConfigStore = create(
                     return;
                 }
 
-                const client = new RemnawaveClient(url);
-                client.setToken(token);
-
+                const client = new RemnawaveClient();
                 try {
                     await client.updateConfigProfile(activeProfileUuid, config);
-                    toast.success("Cloud Profile Updated!");
+                    toast.success("Профиль сохранён в панели");
                 } catch (e: any) {
-                    toast.error("Failed to push config to cloud");
+                    toast.error("Не удалось отправить конфиг в панель");
                 }
             },
 

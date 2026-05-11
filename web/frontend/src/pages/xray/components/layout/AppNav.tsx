@@ -60,15 +60,15 @@ export const AppNav = ({
             <div className="bg-gradient-to-br from-indigo-500 to-purple-600 p-2 rounded-xl text-white shadow-lg shadow-indigo-500/20 shrink-0">
                 <Icon name="Planet" weight="fill" className="text-xl" />
             </div>
-            <div className="flex flex-col leading-tight hidden sm:flex">
-                <span className="font-black text-sm tracking-tight text-white uppercase">Xray-редактор</span>
+            <div className="hidden sm:flex flex-col leading-tight min-w-0 shrink">
+                <span className="font-black text-sm tracking-tight text-white uppercase truncate">Xray-редактор</span>
                 {connected ? (
-                    <span className="text-[10px] text-emerald-400 font-bold flex items-center gap-1">
-                        <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse" />
-                        Подключено к панели
+                    <span className="text-[10px] text-emerald-400 font-bold flex items-center gap-1 truncate">
+                        <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse shrink-0" />
+                        <span className="truncate">Подключено к панели</span>
                     </span>
                 ) : (
-                    <span className="text-[10px] text-slate-500 font-medium">Локальный режим</span>
+                    <span className="text-[10px] text-slate-500 font-medium truncate">Локальный режим</span>
                 )}
             </div>
 
