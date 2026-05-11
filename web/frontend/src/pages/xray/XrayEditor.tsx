@@ -10,7 +10,7 @@ import {
     ModalManager,
 } from './components/layout';
 
-export const App = () => {
+export default function XrayEditor() {
     const [modulesVisible, setModulesVisible] = React.useState(false);
     const {
         config, setConfig, deleteItem, addItem, remnawave, disconnectRemnawave, initDns,
@@ -147,4 +147,4 @@ export const App = () => {
             />
         </div>
     );
-};
+}
