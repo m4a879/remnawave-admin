@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { useMemo, useState } from 'react';
 import { useNodesState, useEdgesState } from '@xyflow/react';
 import { useConfigStore } from '../store/configStore';

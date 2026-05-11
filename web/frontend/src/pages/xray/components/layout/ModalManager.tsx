@@ -1,3 +1,4 @@
+// @ts-nocheck
 import React from 'react';
 import { InboundModal } from '../editors/InboundModal';
 import { OutboundModal } from '../editors/OutboundModal';

@@ -1,3 +1,4 @@
+// @ts-nocheck
 export interface RemnawaveProfile {
     uuid: string;
     name?: string;

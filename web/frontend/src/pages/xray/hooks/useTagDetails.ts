@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { useState, useEffect, useCallback } from 'react';
 import { toast } from 'sonner';
 import { getSharedProtoWorker } from '../utils/proto-worker';

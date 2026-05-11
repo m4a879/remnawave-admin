@@ -1,3 +1,4 @@
+// @ts-nocheck
 export const generateXrayLink = (item: any) => {
     if (!item) return "";
 

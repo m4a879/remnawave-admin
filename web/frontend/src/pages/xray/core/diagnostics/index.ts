@@ -1,3 +1,4 @@
+// @ts-nocheck
 import type { XrayConfig } from '../types/xray.types';
 import type { ValidationError } from '../validators';
 

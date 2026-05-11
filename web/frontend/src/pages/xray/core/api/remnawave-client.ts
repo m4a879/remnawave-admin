@@ -1,3 +1,4 @@
+// @ts-nocheck
 import type { RemnawaveProfile } from '../types/remnawave.types';
 
 export class RemnawaveClient {

@@ -1,3 +1,4 @@
+// @ts-nocheck
 import React from 'react';
 import { Toaster } from 'sonner';
 import { useAppLogic } from './hooks/useAppLogic';

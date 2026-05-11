@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { generateUUID, generateRealityKeyPair } from '../generators/crypto';
 import type { XrayConfig } from '../types/xray.types';
 

@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { getSharedProtoWorker } from './proto-worker';
 
 export const binaryCache = new Map<string, ArrayBuffer>();

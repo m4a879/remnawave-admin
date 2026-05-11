@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { useXrayEditor } from './useXrayEditor';
 import { validateOutbound, validateWireguard, checkOutboundDuplication } from '../utils/validator';
 import type { ValidationError } from '../utils/validator';

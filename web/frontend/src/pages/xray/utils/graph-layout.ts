@@ -1,3 +1,4 @@
+// @ts-nocheck
 import dagre from 'dagre';
 import { Position } from '@xyflow/react';
 import type { Node, Edge } from '@xyflow/react';

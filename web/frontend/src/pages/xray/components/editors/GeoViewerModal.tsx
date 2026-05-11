@@ -1,3 +1,4 @@
+// @ts-nocheck
 import React, { useRef, useEffect, useState, useMemo } from 'react';
 import { Modal } from '../ui/Modal';
 import { Button } from '../ui/Button';

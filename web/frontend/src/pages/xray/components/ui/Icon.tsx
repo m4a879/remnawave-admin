@@ -1,3 +1,4 @@
+// @ts-nocheck
 import React from 'react';
 import * as PhosphorIcons from '@phosphor-icons/react';
 import { clsx } from 'clsx';

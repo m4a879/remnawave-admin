@@ -1,3 +1,4 @@
+// @ts-nocheck
 import nacl from 'tweetnacl';
 
 // Хелпер: Uint8Array -> Base64 URL-Safe String

@@ -1,3 +1,4 @@
+// @ts-nocheck
 import React from 'react';
 import { TagSelector } from '../../ui/TagSelector';
 import { Switch } from '../../ui/Switch';

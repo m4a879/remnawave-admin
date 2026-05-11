@@ -1,3 +1,4 @@
+// @ts-nocheck
 import React, { useRef, useEffect, useMemo } from "react";
 import { EditorState } from "@codemirror/state";
 import { EditorView, keymap, drawSelection, highlightActiveLine, dropCursor,

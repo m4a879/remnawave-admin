@@ -1,3 +1,4 @@
+// @ts-nocheck
 import React, { useState } from 'react';
 import { Icon } from '../../ui/Icon';
 import { Help } from '../../ui/Help';

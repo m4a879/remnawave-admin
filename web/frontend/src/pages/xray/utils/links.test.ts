@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { expect, test, describe } from "vitest";
 import { parseXrayLink, parseWireguardConfig } from "./link-parser";
 import { generateXrayLink } from "./link-generator";

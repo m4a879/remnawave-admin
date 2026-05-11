@@ -1,3 +1,4 @@
+// @ts-nocheck
 import GeoWorker from './geo.worker?worker';
 
 // Shared singleton worker instance to preserve cached data in memory

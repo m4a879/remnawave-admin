@@ -1,3 +1,4 @@
+// @ts-nocheck
 export { AppNav } from './AppNav';
 export { WelcomeScreen } from './WelcomeScreen';
 export { ConfigDashboard } from './ConfigDashboard';

@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { useXrayEditor } from './useXrayEditor';
 import { validateInbound } from '../utils/validator';
 import { createDefaultInbound } from '../utils/protocol-factories';

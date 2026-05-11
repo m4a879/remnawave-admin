@@ -46,6 +46,7 @@ const BedolagaCustomerDetail = lazy(() => import('./pages/bedolaga/BedolagaCusto
 const BedolagaPromo = lazy(() => import('./pages/bedolaga/BedolagaPromo'))
 const BedolagaMarketing = lazy(() => import('./pages/bedolaga/BedolagaMarketing'))
 const BedolagaReferrals = lazy(() => import('./pages/bedolaga/BedolagaReferrals'))
+const XrayEditor = lazy(() => import('./pages/xray/XrayEditor'))
 const NotFound = lazy(() => import('./pages/NotFound'))
 
 // Plugin UI route registry — see web/frontend/src/plugins/registry.tsx
@@ -99,6 +100,8 @@ function ProtectedShell() {
             <Route path="/bedolaga/marketing" element={<BedolagaMarketing />} />
             <Route path="/bedolaga/referrals" element={<BedolagaReferrals />} />
             <Route path="/settings" element={<Settings />} />
+            {/* Xray editor — скрыт от sidebar до завершения интеграции (этап 4) */}
+            <Route path="/resources/xray" element={<XrayEditor />} />
             {pluginRouteEntries.map(({ key, path, Component }) => (
               <Route key={key} path={path} element={<Component />} />
             ))}

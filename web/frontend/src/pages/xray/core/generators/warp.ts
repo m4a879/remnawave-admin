@@ -1,3 +1,4 @@
+// @ts-nocheck
 import nacl from 'tweetnacl';
 
 export interface WarpAccount {

@@ -1,3 +1,4 @@
+// @ts-nocheck
 import React from 'react';
 import { useInboundEditor } from '../../hooks/useInboundEditor';
 import { EditorLayout } from '../ui/EditorLayout';

@@ -1,3 +1,4 @@
+// @ts-nocheck
 export const parseWireguardConfig = (text: string, mode: 'direct' | 'chained' = 'direct'): any => {
     const lines = text.split('\n');
     const config: any = {

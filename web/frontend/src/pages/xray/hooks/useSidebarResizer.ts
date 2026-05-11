@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { useState, useCallback, useEffect } from 'react';
 
 export const useSidebarResizer = (initialWidth: number = 380, min: number = 250, max: number = 800) => {

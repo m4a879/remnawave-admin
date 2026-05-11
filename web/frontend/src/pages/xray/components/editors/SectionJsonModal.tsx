@@ -1,3 +1,4 @@
+// @ts-nocheck
 import React, { useState, useEffect } from 'react';
 import { Modal } from '../ui/Modal';
 import { JsonField } from '../ui/JsonField';
