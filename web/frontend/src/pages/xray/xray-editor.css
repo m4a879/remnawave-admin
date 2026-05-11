@@ -94,7 +94,7 @@
 }
 
 .label-xs {
-    @apply block text-[10px] uppercase text-slate-500 font-bold mb-1 tracking-wider;
+    @apply block text-xs md:text-[11px] uppercase text-slate-500 font-bold mb-1 tracking-wider;
 }
 
 .card-item {
@@ -152,6 +152,35 @@
 @media (min-width: 768px) {
     [data-radix-dialog-content] > div:last-child {
         padding-bottom: 1.25rem;
+    }
+}
+
+/* On mobile, the upstream's text-[10px] (10px) labels are below comfortable
+ * reading and below WCAG SC 1.4.4 (resize text up to 200%). Bump them to
+ * 12px / text-xs on small screens and let desktop keep its tight rhythm. */
+@media (max-width: 767px) {
+    .xray-page label[class*="text-[10px]"],
+    .xray-page span[class*="text-[10px]"],
+    .xray-page p[class*="text-[10px]"],
+    .xray-page div[class*="text-[10px]"] {
+        font-size: 0.75rem; /* 12px */
+        line-height: 1rem;
+    }
+}
+
+/* Drag-handle hit area for Outbound reordering — 16px Phosphor icon is
+ * too small to grab on a phone. Wrap-grab area enlarged to 32px on
+ * mobile via the inline-flex padding around the dnd-kit listener target.
+ */
+.xray-page .cursor-grab {
+    padding: 0.5rem;
+    margin: -0.5rem;
+}
+
+@media (min-width: 768px) {
+    .xray-page .cursor-grab {
+        padding: 0;
+        margin: 0;
     }
 }
 
