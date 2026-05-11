@@ -877,7 +877,18 @@
       "offline": "Офлайн",
       "disabled": "Отключены",
       "users": "Пользователей",
-      "today": "Сегодня"
+      "today": "Сегодня",
+      "agents": "Агентов онлайн",
+      "agentsMissing": "{{count}} без агента"
+    },
+    "agent": {
+      "connected": "Агент",
+      "connectedSince": "Агент онлайн · последний пинг {{ago}}",
+      "offline": "Агент офлайн",
+      "offlineSince": "Агент офлайн · последний пинг {{ago}}",
+      "offlineNever": "Токен выпущен, агент ни разу не выходил на связь",
+      "missing": "Нет агента",
+      "missingHint": "Сгенерируйте токен и установите Node Agent на сервере"
     },
     "actions": {
       "restart": "Перезапустить",

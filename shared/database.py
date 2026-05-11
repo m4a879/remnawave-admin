@@ -1304,13 +1304,45 @@ class DatabaseService:
         """Получить токен агента для ноды (если установлен)."""
         if not self.is_connected:
             return None
-        
+
         async with self.acquire() as conn:
             row = await conn.fetchrow(
                 "SELECT agent_token FROM nodes WHERE uuid = $1",
                 uuid
             )
             return row["agent_token"] if row and row["agent_token"] else None
+
+    async def get_nodes_agent_state(self) -> Dict[str, Dict[str, Any]]:
+        """Per-node agent flags: has_agent_token, agent_v2_connected, agent_v2_last_ping.
+
+        Returned dict is keyed by lowercase uuid string. The token value itself
+        is NOT returned — only a boolean indicating whether it is set, to keep
+        the secret off API responses.
+        """
+        if not self.is_connected:
+            return {}
+
+        async with self.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT uuid,
+                       (agent_token IS NOT NULL AND agent_token <> '') AS has_agent_token,
+                       COALESCE(agent_v2_connected, false) AS agent_v2_connected,
+                       agent_v2_last_ping
+                FROM nodes
+                """
+            )
+
+        result: Dict[str, Dict[str, Any]] = {}
+        for row in rows:
+            uid = str(row["uuid"]).lower()
+            last_ping = row["agent_v2_last_ping"]
+            result[uid] = {
+                "has_agent_token": bool(row["has_agent_token"]),
+                "agent_v2_connected": bool(row["agent_v2_connected"]),
+                "agent_v2_last_ping": last_ping.isoformat() if last_ping else None,
+            }
+        return result
     
     async def get_nodes_stats(self) -> Dict[str, int]:
         """

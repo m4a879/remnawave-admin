@@ -877,7 +877,18 @@
       "offline": "Offline",
       "disabled": "Disabled",
       "users": "Users",
-      "today": "Today"
+      "today": "Today",
+      "agents": "Agents online",
+      "agentsMissing": "{{count}} without agent"
+    },
+    "agent": {
+      "connected": "Agent",
+      "connectedSince": "Agent online · last ping {{ago}}",
+      "offline": "Agent offline",
+      "offlineSince": "Agent offline · last ping {{ago}}",
+      "offlineNever": "Token is issued, but the agent has never connected",
+      "missing": "No agent",
+      "missingHint": "Generate a token and install Node Agent on the server"
     },
     "actions": {
       "restart": "Restart",
