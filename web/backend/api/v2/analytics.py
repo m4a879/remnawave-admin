@@ -820,13 +820,13 @@ async def get_online_trend(
         now = datetime.utcnow()
         if period == "24h":
             start_dt = now - timedelta(hours=24)
-            bucket_minutes = 60
+            bucket_minutes = 15        # 96 points/day — visible granularity
         elif period == "7d":
             start_dt = now - timedelta(days=7)
-            bucket_minutes = 60
+            bucket_minutes = 60        # 168 points/week
         else:
             start_dt = now - timedelta(days=30)
-            bucket_minutes = 60 * 24
+            bucket_minutes = 60 * 24   # 30 points/month (daily)
 
         from shared.database import db_service
         rows = await db_service.get_online_users_trend(
