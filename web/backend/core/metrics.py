@@ -240,7 +240,7 @@ class GaugeUpdater:
                      WHERE is_connected = true AND NOT is_disabled
                     ) AS online_nodes,
                     (SELECT COUNT(*) FROM violations
-                     WHERE COALESCE(status, 'ACTIVE') = 'ACTIVE'
+                     WHERE action_taken IS NULL
                     ) AS violations_open
                 """
             )

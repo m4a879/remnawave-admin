@@ -189,7 +189,7 @@ scrape_configs:
 | `panel_online_users` | Уникальные `user_uuid` в `user_connections` за последние 2 мин |
 | `panel_total_users` / `panel_active_users` | Всего юзеров / в статусе ACTIVE |
 | `panel_total_nodes` / `panel_online_nodes` | Всего нод / `is_connected AND NOT is_disabled` |
-| `panel_violations_open` | Нарушения со status=ACTIVE |
+| `panel_violations_open` | Нарушения с `action_taken IS NULL` (не закрытые) |
 | `panel_db_pool_size` / `panel_db_pool_used` | Размер пула / занято |
 
 ### События (Counter — экспортируются, инкременты добавляются по мере необходимости)
