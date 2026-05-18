@@ -11,6 +11,7 @@ from typing import Optional
 logger = logging.getLogger(__name__)
 
 DEFAULT_INTERVAL_SECONDS = 300       # 5 min
+DEFAULT_WINDOW_MINUTES = 5           # online = unique users seen in last N minutes
 DEFAULT_RETENTION_DAYS = 31
 CLEANUP_EVERY_TICKS = 12 * 24        # once a day at 5-min ticks
 
@@ -59,19 +60,36 @@ class OnlineSnapshotRecorder:
         except Exception:
             return DEFAULT_RETENTION_DAYS
 
+    def _window_minutes(self) -> int:
+        try:
+            from shared.config_service import config_service
+            return int(config_service.get(
+                "online_snapshot_window_minutes", DEFAULT_WINDOW_MINUTES,
+            ) or DEFAULT_WINDOW_MINUTES)
+        except Exception:
+            return DEFAULT_WINDOW_MINUTES
+
     async def _capture(self) -> None:
-        """Read total online users from DB and append a snapshot row."""
+        """Count unique users seen in the last window_minutes and append a snapshot row.
+
+        Source: user_connections, which node-agent populates via /collector/batch every
+        ~30 sec. SUM(nodes.users_online) was unreliable because that column only refreshes
+        on Panel sync (rare and often zero).
+        """
         from shared.database import db_service
         if not db_service.is_connected:
             return
         try:
+            window = self._window_minutes()
             async with db_service.acquire() as conn:
                 total = await conn.fetchval(
                     """
-                    SELECT COALESCE(SUM(users_online), 0)::int
-                    FROM nodes
-                    WHERE is_connected = true AND NOT is_disabled
-                    """
+                    SELECT COUNT(DISTINCT user_uuid)
+                    FROM user_connections
+                    WHERE user_uuid IS NOT NULL
+                      AND connected_at >= NOW() - make_interval(mins => $1)
+                    """,
+                    window,
                 )
             await db_service.insert_online_users_snapshot(int(total or 0))
         except Exception as e:
