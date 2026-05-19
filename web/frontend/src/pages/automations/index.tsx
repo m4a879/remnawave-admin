@@ -9,6 +9,9 @@ import {
   Clock,
   ChevronLeft,
   ChevronRight,
+  Bell,
+  Terminal,
+  CalendarClock,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -30,6 +33,11 @@ import { LogsTimeline } from './LogsTimeline'
 import { TestResultDialog } from './TestResultDialog'
 import { CATEGORIES } from './helpers'
 import { useFormatters } from '@/lib/useFormatters'
+import { useTabParam } from '@/lib/useTabParam'
+import { AlertRulesTab } from '@/pages/Notifications'
+import { NodeScriptsPanel, SchedulesPanel } from './HubLinkCards'
+
+const HUB_SECTIONS = ['rules', 'alerts', 'scripts', 'schedules'] as const
 
 export default function Automations() {
   const { t } = useTranslation()
@@ -39,6 +47,11 @@ export default function Automations() {
   const canEdit = useHasPermission('automation', 'edit')
   const canDelete = useHasPermission('automation', 'delete')
   const canRun = useHasPermission('automation', 'run')
+  const canNotificationsCreate = useHasPermission('notifications', 'create')
+  const canNotificationsEdit = useHasPermission('notifications', 'edit')
+  const canNotificationsDelete = useHasPermission('notifications', 'delete')
+
+  const [section, setSection] = useTabParam('rules', [...HUB_SECTIONS])
 
   // State
   const [page, setPage] = useState(1)
@@ -148,24 +161,47 @@ export default function Automations() {
         </PermissionGate>
       </div>
 
-      {/* Stats cards */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <StatCard label={t('automations.stats.totalRules')} value={totalRules} icon={Zap} />
-        <StatCard label={t('automations.stats.active')} value={activeRules} icon={Activity} />
-        <StatCard
-          label={t('automations.stats.totalTriggers')}
-          value={totalTriggers}
-          icon={Zap}
-        />
-        <StatCard
-          label={t('automations.stats.lastTrigger')}
-          value={lastTriggered ? formatDate(lastTriggered) : '\u2014'}
-          icon={Clock}
-          isText
-        />
-      </div>
+      {/* Hub outer tabs */}
+      <Tabs value={section} onValueChange={(v) => setSection(v as typeof HUB_SECTIONS[number])} className="space-y-4">
+        <TabsList className="bg-[var(--glass-bg)] border border-[var(--glass-border)] flex flex-wrap h-auto">
+          <TabsTrigger value="rules" className="gap-1.5">
+            <Zap className="w-3.5 h-3.5" />
+            {t('automations.hub.sections.rules', { defaultValue: '\u041f\u0440\u0430\u0432\u0438\u043b\u0430' })}
+          </TabsTrigger>
+          <TabsTrigger value="alerts" className="gap-1.5">
+            <Bell className="w-3.5 h-3.5" />
+            {t('automations.hub.sections.alerts', { defaultValue: '\u0410\u043b\u0435\u0440\u0442\u044b' })}
+          </TabsTrigger>
+          <TabsTrigger value="scripts" className="gap-1.5">
+            <Terminal className="w-3.5 h-3.5" />
+            {t('automations.hub.sections.scripts', { defaultValue: '\u0421\u043a\u0440\u0438\u043f\u0442\u044b \u043d\u043e\u0434' })}
+          </TabsTrigger>
+          <TabsTrigger value="schedules" className="gap-1.5">
+            <CalendarClock className="w-3.5 h-3.5" />
+            {t('automations.hub.sections.schedules', { defaultValue: '\u0420\u0430\u0441\u043f\u0438\u0441\u0430\u043d\u0438\u044f' })}
+          </TabsTrigger>
+        </TabsList>
 
-      {/* Tabs */}
+        {/* \u2500\u2500 Section: Rules \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500 */}
+        <TabsContent value="rules" className="space-y-6">
+          {/* Stats cards (\u0442\u043e\u043b\u044c\u043a\u043e \u0432 \u0440\u0430\u0437\u0434\u0435\u043b\u0435 \u00ab\u041f\u0440\u0430\u0432\u0438\u043b\u0430\u00bb) */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <StatCard label={t('automations.stats.totalRules')} value={totalRules} icon={Zap} />
+            <StatCard label={t('automations.stats.active')} value={activeRules} icon={Activity} />
+            <StatCard
+              label={t('automations.stats.totalTriggers')}
+              value={totalTriggers}
+              icon={Zap}
+            />
+            <StatCard
+              label={t('automations.stats.lastTrigger')}
+              value={lastTriggered ? formatDate(lastTriggered) : '\u2014'}
+              icon={Clock}
+              isText
+            />
+          </div>
+
+          {/* Inner tabs: rules / templates / logs */}
       <Tabs defaultValue="rules" className="space-y-4">
         <TabsList className="bg-[var(--glass-bg)] border border-[var(--glass-border)]">
           <TabsTrigger value="rules">{t('automations.tabs.rules')}</TabsTrigger>
@@ -302,6 +338,27 @@ export default function Automations() {
         {/* Logs tab */}
         <TabsContent value="logs">
           <LogsTimeline />
+        </TabsContent>
+      </Tabs>
+        </TabsContent>
+
+        {/* ── Section: Alerts ─────────────────────────────────── */}
+        <TabsContent value="alerts" className="space-y-4">
+          <AlertRulesTab
+            canEdit={canNotificationsEdit}
+            canCreate={canNotificationsCreate}
+            canDelete={canNotificationsDelete}
+          />
+        </TabsContent>
+
+        {/* ── Section: Node scripts ───────────────────────────── */}
+        <TabsContent value="scripts" className="space-y-4">
+          <NodeScriptsPanel />
+        </TabsContent>
+
+        {/* ── Section: Schedules ──────────────────────────────── */}
+        <TabsContent value="schedules" className="space-y-4">
+          <SchedulesPanel />
         </TabsContent>
       </Tabs>
 

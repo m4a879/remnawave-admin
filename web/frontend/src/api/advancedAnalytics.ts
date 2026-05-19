@@ -80,6 +80,13 @@ export interface TimeseriesPoint {
   value: number
 }
 
+export interface OnlineTrendResponse {
+  period: string
+  aggregation: 'avg' | 'max'
+  bucket_minutes: number
+  points: TimeseriesPoint[]
+}
+
 export interface TimeseriesResponse {
   points: TimeseriesPoint[]
   node_points?: { timestamp: string; nodes: Record<string, number> }[]
@@ -192,6 +199,12 @@ export const advancedAnalyticsApi = {
   /** Fetch real traffic timeseries from /analytics/timeseries (daily consumption). */
   timeseries: async (period = '30d', metric = 'traffic'): Promise<TimeseriesResponse> => {
     const { data } = await client.get('/analytics/timeseries', { params: { period, metric } })
+    return data
+  },
+
+  /** Cluster-wide online users trend (avg/max per bucket). */
+  onlineTrend: async (period: '24h' | '7d' | '30d' = '24h', aggregation: 'avg' | 'max' = 'avg'): Promise<OnlineTrendResponse> => {
+    const { data } = await client.get('/analytics/online-trend', { params: { period, aggregation } })
     return data
   },
 

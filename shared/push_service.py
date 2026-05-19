@@ -18,6 +18,8 @@ import logging
 import os
 from typing import Any, Dict, List, Optional, Sequence
 
+from shared.metrics import NOTIFICATIONS_FAILED, NOTIFICATIONS_SENT
+
 logger = logging.getLogger(__name__)
 
 
@@ -243,6 +245,11 @@ async def _send_via_fcm(
     )
     sent = sum(1 for r in results if r)
     failed = len(results) - sent
+
+    if sent:
+        NOTIFICATIONS_SENT.labels(channel="push").inc(sent)
+    if failed:
+        NOTIFICATIONS_FAILED.labels(channel="push").inc(failed)
 
     if invalid_tokens:
         logger.info("FCM: cleaning %d invalid tokens", len(invalid_tokens))

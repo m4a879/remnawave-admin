@@ -137,6 +137,40 @@ services:
         condition: service_started
 
   # ===========================================
+  # Мониторинг (--profile monitoring)
+  # Поднимает Prometheus для сбора /metrics панели.
+  # Grafana остаётся отдельным сервисом — подключи свою к http://server:9090
+  # ===========================================
+
+  prometheus:
+    image: prom/prometheus:v3.0.1
+    container_name: remnawave-prometheus
+    restart: unless-stopped
+    profiles: [monitoring]
+    user: "65534:65534"  # nobody:nobody, владелец /prometheus в образе
+    volumes:
+      - ./monitoring/prometheus.yml.tmpl:/etc/prometheus/prometheus.yml.tmpl:ro
+      - ./monitoring/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
+      - prometheus_data:/prometheus
+    environment:
+      METRICS_AUTH_TOKEN: ${METRICS_AUTH_TOKEN:-}
+      PROMETHEUS_RETENTION: ${PROMETHEUS_RETENTION:-30d}
+    entrypoint: ["/bin/sh", "/usr/local/bin/entrypoint.sh"]
+    ports:
+      - "${PROMETHEUS_PORT:-9090}:9090"
+    networks:
+      - remnawave-network
+    depends_on:
+      web-backend:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:9090/-/ready"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  # ===========================================
   # Redis (опционально, раскомментировать при >1 инстансе web-backend
   # для общего кеша аналитики и distributed rate limiting)
   # ===========================================
@@ -158,6 +192,7 @@ services:
 volumes:
   postgres_data:
   geoip_data:
+  prometheus_data:
   # redis_data:
 
 networks:

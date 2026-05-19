@@ -11,6 +11,8 @@ from typing import Any, Dict, List, Optional
 
 import httpx
 
+from shared.metrics import NOTIFICATIONS_FAILED, NOTIFICATIONS_SENT
+
 logger = logging.getLogger(__name__)
 
 
@@ -130,6 +132,7 @@ async def send_email(
             )
             if queue_id:
                 logger.info("Email queued via built-in mail server: id=%s to=%s", queue_id, to_email)
+                NOTIFICATIONS_SENT.labels(channel="email").inc()
                 return True
     except Exception as e:
         logger.debug("Built-in mail server unavailable, falling back to SMTP relay: %s", e)
@@ -181,9 +184,15 @@ async def send_email(
             return False
 
     try:
-        return await asyncio.get_event_loop().run_in_executor(None, _send)
+        ok = await asyncio.get_event_loop().run_in_executor(None, _send)
+        if ok:
+            NOTIFICATIONS_SENT.labels(channel="email").inc()
+        else:
+            NOTIFICATIONS_FAILED.labels(channel="email").inc()
+        return ok
     except Exception as e:
         logger.error("Email send error: %s", e, exc_info=True)
+        NOTIFICATIONS_FAILED.labels(channel="email").inc()
         return False
 
 
@@ -242,11 +251,14 @@ async def send_telegram(
             )
             if resp.status_code == 200:
                 logger.info("Telegram notification sent to chat_id=%s", chat_id)
+                NOTIFICATIONS_SENT.labels(channel="telegram").inc()
                 return True
             logger.error("Telegram send failed (chat_id=%s): %s %s", chat_id, resp.status_code, resp.text, exc_info=True)
+            NOTIFICATIONS_FAILED.labels(channel="telegram").inc()
             return False
     except Exception as e:
         logger.error("Telegram notification error (chat_id=%s): %s", chat_id, e, exc_info=True)
+        NOTIFICATIONS_FAILED.labels(channel="telegram").inc()
         return False
 
 
@@ -297,11 +309,14 @@ async def send_webhook(
                 resp = await client.post(url, json=payload)
 
             if resp.status_code < 300:
+                NOTIFICATIONS_SENT.labels(channel="webhook").inc()
                 return True
             logger.error("Webhook send failed: %s %s", resp.status_code, resp.text[:200], exc_info=True)
+            NOTIFICATIONS_FAILED.labels(channel="webhook").inc()
             return False
     except Exception as e:
         logger.error("Webhook notification error: %s", e, exc_info=True)
+        NOTIFICATIONS_FAILED.labels(channel="webhook").inc()
         return False
 
 
@@ -358,6 +373,8 @@ async def create_notification(
                     "VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id",
                     admin_id, type, severity, title, body, link, source, source_id, group_key,
                 )
+                if notification_id is not None:
+                    NOTIFICATIONS_SENT.labels(channel="in_app").inc()
         else:
             # Broadcast to all admins
             all_deduplicated = True
@@ -385,6 +402,8 @@ async def create_notification(
                         "VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id",
                         aid, type, severity, title, body, link, source, source_id, group_key,
                     )
+                    if nid is not None:
+                        NOTIFICATIONS_SENT.labels(channel="in_app").inc()
                     if notification_id is None:
                         notification_id = nid
 

@@ -70,6 +70,14 @@ class TimeseriesResponse(BaseModel):
     node_names: Dict[str, str] = {}
 
 
+class OnlineTrendResponse(BaseModel):
+    """Response for online-users trend endpoint."""
+    period: str
+    aggregation: str           # "avg" | "max"
+    bucket_minutes: int
+    points: List[TimeseriesPoint] = []
+
+
 class DeltaStats(BaseModel):
     """Delta indicators for stat cards."""
     users_delta: Optional[float] = None         # % change in total users (24h)
@@ -794,6 +802,58 @@ async def _compute_deltas() -> DeltaStats:
         logger.debug("Failed to compute violations delta: %s", e)
 
     return result
+
+
+@router.get("/online-trend", response_model=OnlineTrendResponse)
+@limiter.limit(RATE_ANALYTICS)
+async def get_online_trend(
+    request: Request,
+    period: str = Query("24h", regex="^(24h|7d|30d)$"),
+    aggregation: str = Query("avg", regex="^(avg|max)$"),
+    admin: AdminUser = Depends(require_permission("analytics", "view")),
+):
+    """Bucketed online-users trend (cluster-wide).
+
+    Bucket sizing scales with period: 24h → 60min, 7d → 60min, 30d → 1440min (daily).
+    """
+    try:
+        now = datetime.utcnow()
+        if period == "24h":
+            start_dt = now - timedelta(hours=24)
+            bucket_minutes = 1         # 1440 points/day — per-minute granularity
+        elif period == "7d":
+            start_dt = now - timedelta(days=7)
+            bucket_minutes = 60        # 168 points/week
+        else:
+            start_dt = now - timedelta(days=30)
+            bucket_minutes = 60 * 24   # 30 points/month (daily)
+
+        from shared.database import db_service
+        rows = await db_service.get_online_users_trend(
+            since=start_dt, until=now,
+            bucket_minutes=bucket_minutes,
+            aggregation=aggregation,
+        )
+
+        points = [
+            TimeseriesPoint(
+                timestamp=r["bucket"].strftime("%Y-%m-%dT%H:%M"),
+                value=int(r["value"]),
+            )
+            for r in rows
+        ]
+
+        return OnlineTrendResponse(
+            period=period,
+            aggregation=aggregation,
+            bucket_minutes=bucket_minutes,
+            points=points,
+        )
+    except Exception as e:
+        logger.error("Error getting online trend: %s", e, exc_info=True)
+        return OnlineTrendResponse(
+            period=period, aggregation=aggregation, bucket_minutes=60, points=[],
+        )
 
 
 @router.get("/deltas", response_model=DeltaStats)

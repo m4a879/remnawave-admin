@@ -30,7 +30,28 @@ import {
   Loader2,
   Bot,
   BotOff,
+  GripVertical,
+  ArrowUpDown,
+  RotateCcw,
 } from 'lucide-react'
+import {
+  DndContext,
+  PointerSensor,
+  KeyboardSensor,
+  TouchSensor,
+  useSensor,
+  useSensors,
+  closestCenter,
+  type DragEndEvent,
+} from '@dnd-kit/core'
+import {
+  SortableContext,
+  rectSortingStrategy,
+  useSortable,
+  arrayMove,
+  sortableKeyboardCoordinates,
+} from '@dnd-kit/sortable'
+import { CSS } from '@dnd-kit/utilities'
 import client from '../api/client'
 import { resourcesApi } from '../api/resources'
 import { Button } from '@/components/ui/button'
@@ -881,6 +902,8 @@ function NodeCard({
   onFetchIps,
   canEdit,
   canDelete,
+  dragHandle,
+  isDragging,
 }: {
   node: Node
   onRestart: () => void
@@ -892,6 +915,8 @@ function NodeCard({
   onFetchIps: () => void
   canEdit: boolean
   canDelete: boolean
+  dragHandle?: React.ReactNode
+  isDragging?: boolean
 }) {
   const { t } = useTranslation()
   const { formatBytes, formatTimeAgo } = useFormatters()
@@ -919,6 +944,7 @@ function NodeCard({
     <Card className={cn(
       'relative group transition-all duration-300',
       node.is_disabled && 'opacity-60',
+      isDragging && 'ring-2 ring-primary-500/60 shadow-[0_0_24px_-4px_rgba(99,102,241,0.45)]',
       isOnline
         ? 'hover:-translate-y-0.5 hover:shadow-[0_0_20px_-6px_rgba(34,197,94,0.2)]'
         : !node.is_disabled && 'hover:shadow-[0_0_20px_-6px_rgba(239,68,68,0.15)]'
@@ -938,6 +964,7 @@ function NodeCard({
         {/* Header */}
         <div className="flex items-start justify-between">
           <div className="flex items-center gap-3">
+            {dragHandle}
             <div
               className={cn(
                 'relative p-2.5 rounded-lg',
@@ -1123,6 +1150,157 @@ function NodeSkeleton() {
   )
 }
 
+// ── Sorting presets ─────────────────────────────────────────────
+
+type SortPreset = 'auto' | 'name' | 'users' | 'today' | 'lastSeen' | 'created' | 'custom'
+
+const SORT_PRESETS: SortPreset[] = ['auto', 'name', 'users', 'today', 'lastSeen', 'created', 'custom']
+
+interface SortState {
+  preset: SortPreset
+  customOrder: string[]
+}
+
+const SORT_STORAGE_KEY = 'nodes-sort-state-v1'
+
+const DEFAULT_SORT_STATE: SortState = { preset: 'auto', customOrder: [] }
+
+function loadSortState(): SortState {
+  try {
+    const raw = localStorage.getItem(SORT_STORAGE_KEY)
+    if (!raw) return DEFAULT_SORT_STATE
+    const parsed = JSON.parse(raw) as Partial<SortState>
+    const preset = SORT_PRESETS.includes(parsed.preset as SortPreset)
+      ? (parsed.preset as SortPreset)
+      : 'auto'
+    const customOrder = Array.isArray(parsed.customOrder)
+      ? parsed.customOrder.filter((x): x is string => typeof x === 'string')
+      : []
+    return { preset, customOrder }
+  } catch {
+    return DEFAULT_SORT_STATE
+  }
+}
+
+function saveSortState(state: SortState) {
+  try {
+    localStorage.setItem(SORT_STORAGE_KEY, JSON.stringify(state))
+  } catch {
+    /* quota or disabled storage — ignore */
+  }
+}
+
+function autoPriority(n: Node): number {
+  if (!n.is_connected && !n.is_disabled) return 0 // offline — top
+  if (n.is_disabled) return 1
+  return 2
+}
+
+function compareByPreset(preset: SortPreset, a: Node, b: Node): number {
+  switch (preset) {
+    case 'name':
+      return (a.name || '').localeCompare(b.name || '')
+    case 'users':
+      return (b.users_online || 0) - (a.users_online || 0)
+    case 'today':
+      return (b.traffic_today_bytes || 0) - (a.traffic_today_bytes || 0)
+    case 'lastSeen': {
+      const at = a.last_seen_at ? Date.parse(a.last_seen_at) : 0
+      const bt = b.last_seen_at ? Date.parse(b.last_seen_at) : 0
+      return bt - at
+    }
+    case 'created':
+      return Date.parse(b.created_at || '') - Date.parse(a.created_at || '')
+    case 'auto':
+    default: {
+      const diff = autoPriority(a) - autoPriority(b)
+      return diff !== 0 ? diff : (a.name || '').localeCompare(b.name || '')
+    }
+  }
+}
+
+function applySortPreset(nodes: Node[], state: SortState): Node[] {
+  if (state.preset === 'custom') {
+    const indexOf = (uuid: string) => {
+      const i = state.customOrder.indexOf(uuid)
+      return i === -1 ? Number.MAX_SAFE_INTEGER : i
+    }
+    const sorted = [...nodes].sort((a, b) => {
+      const ai = indexOf(a.uuid)
+      const bi = indexOf(b.uuid)
+      if (ai !== bi) return ai - bi
+      // fallback for nodes not in stored order: keep auto order
+      return compareByPreset('auto', a, b)
+    })
+    return sorted
+  }
+  return [...nodes].sort((a, b) => compareByPreset(state.preset, a, b))
+}
+
+// ── Sortable wrapper for NodeCard ───────────────────────────────
+
+function SortableNodeCard({
+  node,
+  enabled,
+  ...props
+}: {
+  node: Node
+  enabled: boolean
+  onRestart: () => void
+  onEdit: () => void
+  onEnable: () => void
+  onDisable: () => void
+  onDelete: () => void
+  onTokenManage: () => void
+  onFetchIps: () => void
+  canEdit: boolean
+  canDelete: boolean
+}) {
+  const { t } = useTranslation()
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id: node.uuid,
+    disabled: !enabled,
+  })
+
+  const style: React.CSSProperties = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    zIndex: isDragging ? 50 : undefined,
+  }
+
+  const handle = enabled ? (
+    <button
+      type="button"
+      ref={(el) => {
+        // attach drag handle ref via attributes — handle is the listener target
+        if (el) el.setAttribute('data-drag-handle', '1')
+      }}
+      className={cn(
+        'flex items-center justify-center h-7 w-5 -ml-1 rounded text-dark-300 cursor-grab touch-none',
+        'opacity-0 group-hover:opacity-100 transition-opacity',
+        'hover:text-white hover:bg-white/5 active:cursor-grabbing',
+      )}
+      aria-label={t('nodes.sort.dragHandle', { defaultValue: 'Перетащите для изменения порядка' })}
+      title={t('nodes.sort.dragHandle', { defaultValue: 'Перетащите для изменения порядка' })}
+      {...attributes}
+      {...listeners}
+    >
+      <GripVertical className="w-4 h-4" />
+    </button>
+  ) : undefined
+
+  return (
+    <div ref={setNodeRef} style={style}>
+      <NodeCard
+        node={node}
+        {...props}
+        dragHandle={handle}
+        isDragging={isDragging}
+      />
+    </div>
+  )
+}
+
 export default function Nodes() {
   const { t } = useTranslation()
   const queryClient = useQueryClient()
@@ -1137,6 +1315,21 @@ export default function Nodes() {
   const [ipsNode, setIpsNode] = useState<Node | null>(null)
   const [confirmAction, setConfirmAction] = useState<{ type: string; uuid: string } | null>(null)
   const { schedule: scheduleAction } = useDeferredAction()
+  const [sortState, setSortStateRaw] = useState<SortState>(() => loadSortState())
+
+  const setSortState = (next: SortState | ((prev: SortState) => SortState)) => {
+    setSortStateRaw((prev) => {
+      const value = typeof next === 'function' ? (next as (p: SortState) => SortState)(prev) : next
+      saveSortState(value)
+      return value
+    })
+  }
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 200, tolerance: 8 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  )
 
   // Fetch nodes
   const { data: nodes = [], isLoading, refetch } = useQuery({
@@ -1219,17 +1412,24 @@ export default function Nodes() {
     },
   })
 
-  // Sort: offline (problems) first, then disabled, then online
-  const sortedNodes = [...nodes].sort((a, b) => {
-    const priority = (n: Node) => {
-      if (!n.is_connected && !n.is_disabled) return 0 // Offline — top priority
-      if (n.is_disabled) return 1
-      return 2 // Online — last
-    }
-    const diff = priority(a) - priority(b)
-    if (diff !== 0) return diff
-    return (a.name || '').localeCompare(b.name || '')
-  })
+  // Apply sort preset (or stored custom order)
+  const sortedNodes = applySortPreset(nodes, sortState)
+  const sortedIds = sortedNodes.map((n) => n.uuid)
+
+  const handleDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event
+    if (!over || active.id === over.id) return
+    const oldIndex = sortedIds.indexOf(String(active.id))
+    const newIndex = sortedIds.indexOf(String(over.id))
+    if (oldIndex < 0 || newIndex < 0) return
+    const reordered = arrayMove(sortedIds, oldIndex, newIndex)
+    // Dragging always switches to "custom" preset and fixes the order
+    setSortState({ preset: 'custom', customOrder: reordered })
+  }
+
+  const resetCustomOrder = () => {
+    setSortState({ preset: 'auto', customOrder: [] })
+  }
 
   // Calculate stats
   const totalNodes = nodes.length
@@ -1337,39 +1537,90 @@ export default function Nodes() {
         </Card>
       </div>
 
-      {/* Nodes grid */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        {isLoading ? (
-          // Loading skeletons
-          Array.from({ length: 4 }).map((_, i) => <NodeSkeleton key={i} />)
-        ) : sortedNodes.length === 0 ? (
-          <div className="col-span-full">
-            <Card className="text-center py-12">
-              <CardContent>
-                <WifiOff className="w-12 h-12 text-dark-300 mx-auto mb-3" />
-                <p className="text-dark-200">{t('nodes.status.noNodes')}</p>
-              </CardContent>
-            </Card>
+      {/* Sort controls */}
+      {!isLoading && sortedNodes.length > 0 && (
+        <div className="flex items-center gap-2 flex-wrap">
+          <div className="flex items-center gap-1.5 text-xs text-dark-200">
+            <ArrowUpDown className="w-3.5 h-3.5" />
+            <span>{t('nodes.sort.label', { defaultValue: 'Сортировка' })}</span>
           </div>
-        ) : (
-          sortedNodes.map((node, i) => (
-            <div key={node.uuid} className="animate-fade-in-up" style={{ animationDelay: `${0.1 + i * 0.06}s` }}>
-              <NodeCard
-                node={node}
-                onRestart={() => restartNode.mutate(node.uuid)}
-                onEdit={() => { setEditingNode(node); setEditError('') }}
-                onEnable={() => enableNode.mutate(node.uuid)}
-                onDisable={() => setConfirmAction({ type: 'disable', uuid: node.uuid })}
-                onDelete={() => setConfirmAction({ type: 'delete', uuid: node.uuid })}
-                onTokenManage={() => setTokenNode(node)}
-                onFetchIps={() => setIpsNode(node)}
-                canEdit={canEdit}
-                canDelete={canDelete}
-              />
-            </div>
-          ))
-        )}
-      </div>
+          <Select
+            value={sortState.preset}
+            onValueChange={(v) =>
+              setSortState((prev) => {
+                const next = v as SortPreset
+                // When user picks "custom" without dragging yet — seed customOrder from current visible order
+                if (next === 'custom' && prev.customOrder.length === 0) {
+                  return { preset: 'custom', customOrder: sortedIds }
+                }
+                return { ...prev, preset: next }
+              })
+            }
+          >
+            <SelectTrigger className="h-8 w-[240px] text-xs">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {SORT_PRESETS.map((p) => (
+                <SelectItem key={p} value={p} className="text-xs">
+                  {t(`nodes.sort.preset.${p}`)}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          {sortState.preset === 'custom' && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-8 px-2 text-xs text-dark-200 hover:text-white"
+              onClick={resetCustomOrder}
+              title={t('nodes.sort.resetCustom', { defaultValue: 'Сбросить порядок' })}
+            >
+              <RotateCcw className="w-3.5 h-3.5 mr-1.5" />
+              {t('nodes.sort.resetCustom', { defaultValue: 'Сбросить порядок' })}
+            </Button>
+          )}
+        </div>
+      )}
+
+      {/* Nodes grid */}
+      <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+        <SortableContext items={sortedIds} strategy={rectSortingStrategy}>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            {isLoading ? (
+              // Loading skeletons
+              Array.from({ length: 4 }).map((_, i) => <NodeSkeleton key={i} />)
+            ) : sortedNodes.length === 0 ? (
+              <div className="col-span-full">
+                <Card className="text-center py-12">
+                  <CardContent>
+                    <WifiOff className="w-12 h-12 text-dark-300 mx-auto mb-3" />
+                    <p className="text-dark-200">{t('nodes.status.noNodes')}</p>
+                  </CardContent>
+                </Card>
+              </div>
+            ) : (
+              sortedNodes.map((node, i) => (
+                <div key={node.uuid} className="animate-fade-in-up" style={{ animationDelay: `${0.05 + i * 0.04}s` }}>
+                  <SortableNodeCard
+                    node={node}
+                    enabled
+                    onRestart={() => restartNode.mutate(node.uuid)}
+                    onEdit={() => { setEditingNode(node); setEditError('') }}
+                    onEnable={() => enableNode.mutate(node.uuid)}
+                    onDisable={() => setConfirmAction({ type: 'disable', uuid: node.uuid })}
+                    onDelete={() => setConfirmAction({ type: 'delete', uuid: node.uuid })}
+                    onTokenManage={() => setTokenNode(node)}
+                    onFetchIps={() => setIpsNode(node)}
+                    canEdit={canEdit}
+                    canDelete={canDelete}
+                  />
+                </div>
+              ))
+            )}
+          </div>
+        </SortableContext>
+      </DndContext>
 
       {/* Edit modal */}
       {editingNode && (

@@ -58,6 +58,24 @@ import TerminalDialog from '@/components/fleet/TerminalDialog'
 import type { Script } from '@/components/fleet/ScriptCatalog'
 import type { ScheduledTask as FleetScheduledTask } from '@/api/fleet'
 import { ConfirmDialog } from '@/components/ConfirmDialog'
+import { SortableSection } from '@/components/SortableSection'
+import { useOrderPreference } from '@/lib/useOrderPreference'
+import {
+  DndContext,
+  PointerSensor,
+  KeyboardSensor,
+  TouchSensor,
+  useSensor,
+  useSensors,
+  closestCenter,
+  type DragEndEvent,
+} from '@dnd-kit/core'
+import {
+  SortableContext,
+  rectSortingStrategy,
+  arrayMove,
+  sortableKeyboardCoordinates,
+} from '@dnd-kit/sortable'
 
 const ScriptCatalog = lazy(() => import('@/components/fleet/ScriptCatalog'))
 const RunScriptDialog = lazy(() => import('@/components/fleet/RunScriptDialog'))
@@ -74,7 +92,7 @@ interface FleetResponse {
   disabled: number
 }
 
-type SortField = 'name' | 'status' | 'cpu' | 'ram' | 'disk' | 'speed' | 'users' | 'traffic' | 'uptime'
+type SortField = 'name' | 'status' | 'cpu' | 'ram' | 'disk' | 'speed' | 'users' | 'traffic' | 'uptime' | 'custom'
 type SortDir = 'asc' | 'desc'
 type StatusFilter = 'all' | 'online' | 'offline' | 'disabled'
 
@@ -113,6 +131,7 @@ const SORT_FIELDS: { value: SortField; labelKey: string }[] = [
   { value: 'users', labelKey: 'fleet.table.users' },
   { value: 'traffic', labelKey: 'fleet.table.traffic' },
   { value: 'uptime', labelKey: 'fleet.table.uptime' },
+  { value: 'custom', labelKey: 'fleet.sort.custom' },
 ]
 
 // ── Node Detail Panel ────────────────────────────────────────────
@@ -431,6 +450,13 @@ export default function Fleet() {
 
   // ── Sorting ───────────────────────────────────────────────────
 
+  const customOrder = useOrderPreference('fleet-row-order-v1')
+  const dndSensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 200, tolerance: 8 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  )
+
   const toggleSort = (field: SortField) => {
     if (sortField === field) {
       setSortDir(sortDir === 'asc' ? 'desc' : 'asc')
@@ -455,6 +481,13 @@ export default function Fleet() {
     // Filter by status
     if (statusFilter !== 'all') {
       nodes = nodes.filter((n) => getNodeStatus(n) === statusFilter)
+    }
+
+    // Custom order takes precedence: arrange by stored uuid sequence
+    if (sortField === 'custom') {
+      const orderedIds = customOrder.applyOrder(nodes.map((n) => n.uuid))
+      const byUuid = new Map(nodes.map((n) => [n.uuid, n]))
+      return orderedIds.map((id) => byUuid.get(id)!).filter(Boolean)
     }
 
     const statusPriority = (n: FleetNode) => {
@@ -499,7 +532,25 @@ export default function Fleet() {
     })
 
     return nodes
-  }, [fleet?.nodes, sortField, sortDir, searchQuery, statusFilter])
+  }, [fleet?.nodes, sortField, sortDir, searchQuery, statusFilter, customOrder])
+
+  const sortedIds = sortedNodes.map((n) => n.uuid)
+
+  const handleRowDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event
+    if (!over || active.id === over.id) return
+    const oldIndex = sortedIds.indexOf(String(active.id))
+    const newIndex = sortedIds.indexOf(String(over.id))
+    if (oldIndex < 0 || newIndex < 0) return
+    customOrder.setCustomOrder(arrayMove(sortedIds, oldIndex, newIndex))
+    // Dragging always switches to "custom" preset
+    if (sortField !== 'custom') setSortField('custom')
+  }
+
+  const resetCustomLayout = () => {
+    customOrder.reset()
+    if (sortField === 'custom') setSortField('status')
+  }
 
   // ── Aggregates ────────────────────────────────────────────────
 
@@ -687,30 +738,54 @@ export default function Fleet() {
               ))}
             </div>
             {/* Sort dropdown */}
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="secondary" size="sm" className="h-8 gap-1.5 ml-auto">
-                  <ArrowUpDown className="w-3.5 h-3.5" />
-                  <span className="text-xs">{t('fleet.sort.label')}</span>
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                <DropdownMenuRadioGroup
-                  value={`${sortField}-${sortDir}`}
-                  onValueChange={(v) => {
-                    const [field, dir] = v.split('-') as [SortField, SortDir]
-                    setSortField(field)
-                    setSortDir(dir)
-                  }}
+            <div className="flex items-center gap-1.5 ml-auto">
+              {(sortField === 'custom' || customOrder.isCustomized) && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-8 gap-1.5 text-xs text-dark-200 hover:text-white"
+                  onClick={resetCustomLayout}
+                  title={t('fleet.sort.resetCustom', { defaultValue: 'Сбросить порядок' })}
                 >
-                  {SORT_FIELDS.map(({ value, labelKey }) => (
-                    <DropdownMenuRadioItem key={`${value}-asc`} value={`${value}-${sortField === value && sortDir === 'asc' ? 'desc' : 'asc'}`} onClick={() => toggleSort(value)}>
-                      {t(labelKey)} {sortField === value ? (sortDir === 'asc' ? '↑' : '↓') : ''}
-                    </DropdownMenuRadioItem>
-                  ))}
-                </DropdownMenuRadioGroup>
-              </DropdownMenuContent>
-            </DropdownMenu>
+                  <RotateCcw className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline">{t('fleet.sort.resetCustom', { defaultValue: 'Сбросить порядок' })}</span>
+                </Button>
+              )}
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="secondary" size="sm" className="h-8 gap-1.5">
+                    <ArrowUpDown className="w-3.5 h-3.5" />
+                    <span className="text-xs">{t('fleet.sort.label')}</span>
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuRadioGroup
+                    value={`${sortField}-${sortDir}`}
+                    onValueChange={(v) => {
+                      const [field, dir] = v.split('-') as [SortField, SortDir]
+                      setSortField(field)
+                      setSortDir(dir)
+                    }}
+                  >
+                    {SORT_FIELDS.map(({ value, labelKey }) => (
+                      value === 'custom' ? (
+                        <DropdownMenuRadioItem
+                          key="custom-asc"
+                          value="custom-asc"
+                          onClick={() => setSortField('custom')}
+                        >
+                          {t(labelKey)} {sortField === 'custom' ? '✓' : ''}
+                        </DropdownMenuRadioItem>
+                      ) : (
+                        <DropdownMenuRadioItem key={`${value}-asc`} value={`${value}-${sortField === value && sortDir === 'asc' ? 'desc' : 'asc'}`} onClick={() => toggleSort(value)}>
+                          {t(labelKey)} {sortField === value ? (sortDir === 'asc' ? '↑' : '↓') : ''}
+                        </DropdownMenuRadioItem>
+                      )
+                    ))}
+                  </DropdownMenuRadioGroup>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
           </div>
 
           {/* Node card grid */}
@@ -734,26 +809,31 @@ export default function Fleet() {
               </CardContent>
             </Card>
           ) : (
-            <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4">
-              {sortedNodes.map((node) => (
-                <NodeCard
-                  key={node.uuid}
-                  node={node}
-                  isExpanded={expandedUuid === node.uuid}
-                  onToggle={() => setExpandedUuid(expandedUuid === node.uuid ? null : node.uuid)}
-                  onTerminalConnect={canTerminal ? () => setTerminalNode({ uuid: node.uuid, name: node.name }) : undefined}
-                >
-                  <NodeDetailPanel
-                    node={node}
-                    canEdit={canEditNodes}
-                    onRestart={() => restartNode.mutate(node.uuid)}
-                    onEnable={() => enableNode.mutate(node.uuid)}
-                    onDisable={() => disableNode.mutate(node.uuid)}
-                    isPending={mutationPending}
-                  />
-                </NodeCard>
-              ))}
-            </div>
+            <DndContext sensors={dndSensors} collisionDetection={closestCenter} onDragEnd={handleRowDragEnd}>
+              <SortableContext items={sortedIds} strategy={rectSortingStrategy}>
+                <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4">
+                  {sortedNodes.map((node) => (
+                    <SortableSection key={node.uuid} id={node.uuid} handlePosition="top-left">
+                      <NodeCard
+                        node={node}
+                        isExpanded={expandedUuid === node.uuid}
+                        onToggle={() => setExpandedUuid(expandedUuid === node.uuid ? null : node.uuid)}
+                        onTerminalConnect={canTerminal ? () => setTerminalNode({ uuid: node.uuid, name: node.name }) : undefined}
+                      >
+                        <NodeDetailPanel
+                          node={node}
+                          canEdit={canEditNodes}
+                          onRestart={() => restartNode.mutate(node.uuid)}
+                          onEnable={() => enableNode.mutate(node.uuid)}
+                          onDisable={() => disableNode.mutate(node.uuid)}
+                          isPending={mutationPending}
+                        />
+                      </NodeCard>
+                    </SortableSection>
+                  ))}
+                </div>
+              </SortableContext>
+            </DndContext>
           )}
         </TabsContent>
 

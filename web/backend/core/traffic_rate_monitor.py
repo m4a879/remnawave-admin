@@ -293,6 +293,10 @@ class TrafficRateMonitor:
                 f"{extra_block}"
             )
 
+            # Plain text body for in-app/web notifications (strip HTML tags)
+            import re
+            plain_body = re.sub(r'<[^>]+>', '', body)
+
             keyboard = {
                 "inline_keyboard": [
                     [
@@ -311,7 +315,7 @@ class TrafficRateMonitor:
 
             await create_notification(
                 title=title,
-                body=body,
+                body=plain_body,
                 type="traffic_rate",
                 severity="warning",
                 source="traffic_rate_monitor",

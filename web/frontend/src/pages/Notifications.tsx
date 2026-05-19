@@ -366,7 +366,7 @@ function NotificationsTab() {
 // Tab: Alert Rules
 // ══════════════════════════════════════════════════════════════════
 
-function AlertRulesTab({ canEdit, canCreate, canDelete }: { canEdit: boolean; canCreate: boolean; canDelete: boolean }) {
+export function AlertRulesTab({ canEdit, canCreate, canDelete }: { canEdit: boolean; canCreate: boolean; canDelete: boolean }) {
   const { t } = useTranslation()
   const { formatDate } = useFormatters()
   const queryClient = useQueryClient()

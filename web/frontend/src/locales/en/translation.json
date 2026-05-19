@@ -36,6 +36,7 @@
     "nextPage": "Next page",
     "remove": "Remove",
     "toggleSort": "Toggle sort order",
+    "dragToReorder": "Drag to reorder",
     "loading": "Loading...",
     "error": "Error",
     "loadError": "Failed to load data. Please try again.",
@@ -282,6 +283,7 @@
     "refresh": "Refresh",
     "loadError": "Failed to load data",
     "retry": "Retry",
+    "resetLayout": "Reset widget order",
     "period24h": "24h",
     "period7d": "7d",
     "period30d": "30d",
@@ -946,6 +948,20 @@
       "found": "Found",
       "users": "users",
       "error": "Failed to start scan"
+    },
+    "sort": {
+      "label": "Sort",
+      "resetCustom": "Reset order",
+      "dragHandle": "Drag to reorder",
+      "preset": {
+        "auto": "Auto (issues first)",
+        "name": "Name (A→Z)",
+        "users": "Online users (↓)",
+        "today": "Today's traffic (↓)",
+        "lastSeen": "Last ping (↓)",
+        "created": "Created date (↓)",
+        "custom": "Custom order"
+      }
     }
   },
   "fleet": {
@@ -1024,7 +1040,9 @@
       "disk": "Disk"
     },
     "sort": {
-      "label": "Sort"
+      "label": "Sort",
+      "custom": "Custom order",
+      "resetCustom": "Reset order"
     },
     "scripts": {
       "catalog": "Script Catalog",
@@ -1985,6 +2003,16 @@
         "traffic": "Traffic"
       }
     },
+    "onlineTrend": {
+      "title": "Online trend",
+      "tooltip": "Sum of users_online across active nodes. Samples every 5 min, bucketed at read time.",
+      "avg": "Average",
+      "max": "Peak",
+      "peak": "Peak",
+      "average": "Avg",
+      "points": "Points",
+      "empty": "No data yet — samples accumulate every 5 minutes."
+    },
     "sharedHwids": {
       "title": "Shared HWID Devices",
       "tooltip": "Devices (HWID) used by multiple accounts — indicates trial abuse",
@@ -2109,7 +2137,32 @@
   },
   "automations": {
     "title": "Automations",
-    "subtitle": "Automation rules management",
+    "subtitle": "All automations in one place: rules, alerts, scripts, schedules",
+    "hub": {
+      "open": "Open",
+      "sections": {
+        "rules": "Rules",
+        "alerts": "Alerts",
+        "scripts": "Node scripts",
+        "schedules": "Schedules"
+      },
+      "nodeScriptsHint": "Shell-script catalog, run history and scheduled jobs live on the Fleet page. Jump straight to the section you need.",
+      "schedulesHint": "Scheduled jobs run scripts on nodes by cron expression. Create and edit them on Fleet → Scheduled.",
+      "scripts": {
+        "catalog": "Script catalog",
+        "catalogDesc": "Built-in and custom shell scripts. Run manually or on a schedule.",
+        "history": "Run history",
+        "historyDesc": "Logs of executed scripts, exit codes, output and per-node search.",
+        "terminal": "Node terminal",
+        "terminalDesc": "Direct SSH terminal into a node through the panel."
+      },
+      "schedules": {
+        "fleet": "Scheduled jobs (Fleet)",
+        "fleetDesc": "CRON schedule for scripts on nodes. History, enable/disable.",
+        "rules": "Schedule-triggered rules",
+        "rulesDesc": "Rules with schedule trigger (cron/interval) — managed under the «Rules» tab."
+      }
+    },
     "createRule": "Create rule",
     "newRule": "New rule",
     "editRule": "Edit rule",

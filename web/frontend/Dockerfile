@@ -25,7 +25,7 @@ COPY index.html vite.config.ts tsconfig.json tsconfig.node.json postcss.config.j
 RUN npm run build
 
 # Production stage - minimal nginx image
-FROM nginx:1.27-alpine
+FROM nginx:1.30.1-alpine
 
 COPY --from=build /app/dist /usr/share/nginx/html
 COPY nginx.conf /etc/nginx/conf.d/default.conf

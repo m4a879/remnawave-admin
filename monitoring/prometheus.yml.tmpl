@@ -1,0 +1,33 @@
+# Prometheus scrape config (TEMPLATE) для Remnawave Admin Panel.
+#
+# Этот файл — шаблон. Реальный конфиг генерируется entrypoint-скриптом
+# контейнера prometheus: плейсхолдер __METRICS_AUTH_TOKEN__ заменяется
+# значением переменной окружения METRICS_AUTH_TOKEN из .env и кладётся
+# в /tmp/prometheus.yml. Если переменная пуста — авторизация уходит
+# из конфига и /metrics дёргается без Bearer.
+#
+# Запуск:  docker compose --profile monitoring up -d
+# Доступ:  http://server:9090 (или ${PROMETHEUS_PORT})
+
+global:
+  scrape_interval: 15s
+  scrape_timeout: 10s
+  external_labels:
+    instance_name: remnawave-panel
+
+scrape_configs:
+  - job_name: remnawave-panel
+    metrics_path: /metrics
+    static_configs:
+      - targets:
+          - remnawave-web-backend:8081
+        labels:
+          service: panel
+    authorization:
+      type: Bearer
+      credentials: __METRICS_AUTH_TOKEN__
+
+  - job_name: prometheus
+    static_configs:
+      - targets:
+          - localhost:9090

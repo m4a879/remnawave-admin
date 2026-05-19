@@ -785,6 +785,176 @@ const UsageBar = memo(function UsageBar({ percent }: { percent: number }) {
 
 // ── Trends Card ─────────────────────────────────────────────────
 
+// ── Online Users Trend ──────────────────────────────────────────
+
+function OnlineTrendCard() {
+  const { t } = useTranslation()
+  const chart = useChartTheme()
+  const [period, setPeriod] = useUrlParam('online_period', '24h')
+  const [aggRaw, setAgg] = useUrlParam('online_agg', 'avg')
+  const aggregation = aggRaw === 'max' ? 'max' : 'avg'
+
+  const { data, isLoading, isError, refetch } = useQuery({
+    queryKey: ['analytics-online-trend', period, aggregation],
+    queryFn: () => advancedAnalyticsApi.onlineTrend(
+      (period === '7d' || period === '30d' ? period : '24h') as '24h' | '7d' | '30d',
+      aggregation as 'avg' | 'max',
+    ),
+    staleTime: 30_000,
+    refetchInterval: 60_000,
+  })
+
+  const chartData = useMemo(() => {
+    const points = data?.points || []
+    return points.map((p) => {
+      const dt = new Date(p.timestamp.replace(' ', 'T'))
+      let label: string
+      if (period === '24h') {
+        label = dt.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
+      } else if (period === '30d') {
+        label = dt.toLocaleDateString(undefined, { day: '2-digit', month: '2-digit' })
+      } else {
+        label = dt.toLocaleString(undefined, { day: '2-digit', month: '2-digit', hour: '2-digit' })
+      }
+      return { label, value: p.value }
+    })
+  }, [data, period])
+
+  const peak = chartData.reduce((m, p) => Math.max(m, p.value), 0)
+  const average = chartData.length > 0
+    ? Math.round(chartData.reduce((s, p) => s + p.value, 0) / chartData.length)
+    : 0
+
+  return (
+    <Card className="animate-fade-in-up" style={{ animationDelay: '0.2s' }}>
+      <CardHeader className="pb-2">
+        <div className="flex items-center justify-between flex-wrap gap-2">
+          <div className="flex items-center gap-2">
+            <Wifi className="w-5 h-5 text-primary-400" />
+            <CardTitle className="text-base">
+              {t('analytics.onlineTrend.title', { defaultValue: 'Тренд онлайна' })}
+            </CardTitle>
+            <InfoTooltip
+              text={t('analytics.onlineTrend.tooltip', {
+                defaultValue: 'Сумма users_online по активным нодам. Снимок раз в 5 мин, агрегация в бакеты при чтении.',
+              })}
+              side="right"
+            />
+          </div>
+          <div className="flex items-center gap-2 flex-wrap">
+            {/* Aggregation switch (slide-tab) */}
+            <div className="flex items-center gap-1 bg-[var(--glass-bg)] rounded-lg p-0.5">
+              {([
+                { value: 'avg', label: t('analytics.onlineTrend.avg', { defaultValue: 'Средний' }) },
+                { value: 'max', label: t('analytics.onlineTrend.max', { defaultValue: 'Максимум' }) },
+              ] as const).map((opt) => (
+                <button
+                  key={opt.value}
+                  onClick={() => setAgg(opt.value)}
+                  className={cn(
+                    'px-2.5 py-1 text-xs rounded-md transition-all duration-200',
+                    aggregation === opt.value
+                      ? 'bg-primary/20 text-primary-400 font-medium'
+                      : 'text-muted-foreground hover:text-white',
+                  )}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+            <PeriodSwitcher
+              value={period}
+              onChange={setPeriod}
+              options={[
+                { value: '24h', label: t('dashboard.period24h', { defaultValue: '24ч' }) },
+                { value: '7d', label: t('dashboard.period7d', { defaultValue: '7д' }) },
+                { value: '30d', label: t('dashboard.period30d', { defaultValue: '30д' }) },
+              ]}
+            />
+          </div>
+        </div>
+      </CardHeader>
+      <CardContent>
+        {isError ? (
+          <div className="h-[240px] flex flex-col items-center justify-center gap-2">
+            <p className="text-sm text-red-400">{t('common.loadError')}</p>
+            <Button variant="secondary" size="sm" onClick={() => refetch()}>
+              {t('common.retry')}
+            </Button>
+          </div>
+        ) : isLoading ? (
+          <Skeleton className="h-[240px] w-full" />
+        ) : chartData.length === 0 ? (
+          <div className="h-[240px] flex items-center justify-center">
+            <p className="text-sm text-muted-foreground">
+              {t('analytics.onlineTrend.empty', {
+                defaultValue: 'Пока нет данных. Снимки накапливаются с 5-минутным интервалом.',
+              })}
+            </p>
+          </div>
+        ) : (
+          <>
+            <div className="flex items-center gap-4 mb-2 text-xs">
+              <span className="text-muted-foreground">
+                {t('analytics.onlineTrend.peak', { defaultValue: 'Пик' })}:
+                <span className="text-white font-mono ml-1">{peak}</span>
+              </span>
+              <span className="text-muted-foreground">
+                {t('analytics.onlineTrend.average', { defaultValue: 'Средне' })}:
+                <span className="text-white font-mono ml-1">{average}</span>
+              </span>
+              <span className="text-muted-foreground ml-auto">
+                {t('analytics.onlineTrend.points', { defaultValue: 'Точек' })}:
+                <span className="text-white font-mono ml-1">{chartData.length}</span>
+              </span>
+            </div>
+            <ResponsiveContainer width="100%" height={240}>
+              <AreaChart data={chartData}>
+                <defs>
+                  <linearGradient id="onlineGrad" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor={chart.accentColor} stopOpacity={0.35} />
+                    <stop offset="100%" stopColor={chart.accentColor} stopOpacity={0.02} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" stroke={chart.grid} vertical={false} />
+                <XAxis
+                  dataKey="label"
+                  stroke={chart.axis}
+                  fontSize={10}
+                  tickLine={false}
+                  axisLine={false}
+                  interval="preserveStartEnd"
+                  minTickGap={20}
+                />
+                <YAxis
+                  stroke={chart.axis}
+                  fontSize={10}
+                  tickLine={false}
+                  axisLine={false}
+                  allowDecimals={false}
+                />
+                <RechartsTooltip contentStyle={chart.tooltipStyle} />
+                <Area
+                  type="monotone"
+                  dataKey="value"
+                  stroke={chart.accentColor}
+                  strokeWidth={2}
+                  fill="url(#onlineGrad)"
+                  dot={false}
+                  activeDot={{ r: 4, fill: chart.accentColor }}
+                  name={aggregation === 'max'
+                    ? t('analytics.onlineTrend.max', { defaultValue: 'Максимум' })
+                    : t('analytics.onlineTrend.avg', { defaultValue: 'Средний' })}
+                />
+              </AreaChart>
+            </ResponsiveContainer>
+          </>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
 function TrendsCard() {
   const { t } = useTranslation()
   const { formatBytes } = useFormatters()
@@ -2967,7 +3137,8 @@ export default function Analytics() {
           <TopUsersCard />
         </TabsContent>
 
-        <TabsContent value="trends">
+        <TabsContent value="trends" className="space-y-4">
+          <OnlineTrendCard />
           <TrendsCard />
         </TabsContent>
 

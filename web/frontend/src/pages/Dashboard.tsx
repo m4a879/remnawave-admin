@@ -22,7 +22,26 @@ import {
   ChevronDown,
   ChevronUp,
   Tag,
+  RotateCcw,
 } from 'lucide-react'
+import {
+  DndContext,
+  PointerSensor,
+  KeyboardSensor,
+  TouchSensor,
+  useSensor,
+  useSensors,
+  closestCenter,
+  type DragEndEvent,
+} from '@dnd-kit/core'
+import {
+  SortableContext,
+  verticalListSortingStrategy,
+  arrayMove,
+  sortableKeyboardCoordinates,
+} from '@dnd-kit/sortable'
+import { SortableSection } from '@/components/SortableSection'
+import { useOrderPreference } from '@/lib/useOrderPreference'
 import {
   BarChart,
   Bar,
@@ -1708,6 +1727,24 @@ export default function Dashboard() {
   const canViewBilling = hasPermission('billing', 'view')
   const canViewAudit = hasPermission('audit', 'view')
   const canViewFleet = hasPermission('fleet', 'view')
+
+  // Widget ordering (DnD reorder, persists to localStorage)
+  const DASHBOARD_WIDGETS = ['stats', 'traffic', 'connections', 'load', 'activity', 'system'] as const
+  const order = useOrderPreference('dashboard-widget-order-v1')
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 200, tolerance: 8 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  )
+  const widgetIds = order.applyOrder([...DASHBOARD_WIDGETS])
+  const handleWidgetDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event
+    if (!over || active.id === over.id) return
+    const oldIndex = widgetIds.indexOf(String(active.id))
+    const newIndex = widgetIds.indexOf(String(over.id))
+    if (oldIndex < 0 || newIndex < 0) return
+    order.setCustomOrder(arrayMove(widgetIds, oldIndex, newIndex))
+  }
   // Chart state
   const [trafficPeriod, setTrafficPeriod] = useState('7d')
   const [trendMetric, setTrendMetric] = useState('users')
@@ -1962,8 +1999,33 @@ export default function Dashboard() {
         </Card>
       )}
 
-      {/* ── Stats grid (5 compact cards) ────────────────────────── */}
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
+      {/* ── Reset custom layout (shown only if user reordered) ──── */}
+      {order.isCustomized && (
+        <div className="flex justify-end">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={order.reset}
+            className="h-8 px-2 text-xs text-dark-200 hover:text-white"
+            title={t('dashboard.resetLayout', { defaultValue: 'Сбросить порядок виджетов' })}
+          >
+            <RotateCcw className="w-3.5 h-3.5 mr-1.5" />
+            {t('dashboard.resetLayout', { defaultValue: 'Сбросить порядок виджетов' })}
+          </Button>
+        </div>
+      )}
+
+      {/* ── Sortable widgets ────────────────────────────────────── */}
+      <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleWidgetDragEnd}>
+        <SortableContext items={widgetIds} strategy={verticalListSortingStrategy}>
+          <div className="space-y-6">
+            {widgetIds.map((wid) => {
+              switch (wid) {
+                case 'stats':
+                  return (
+                    <SortableSection key="stats" id="stats">
+                      {/* ── Stats grid (5 compact cards) ────────────────────────── */}
+                      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
         {canViewUsers && (
           <StatCard
             title={t('dashboard.totalUsers')}
@@ -2022,11 +2084,15 @@ export default function Dashboard() {
             index={4}
           />
         )}
-      </div>
-
-      {/* ── Row 2: Traffic Chart + Growth Trends ────────────────── */}
-      {canViewAnalytics && (
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                      </div>
+                    </SortableSection>
+                  )
+                case 'traffic':
+                  if (!canViewAnalytics) return null
+                  return (
+                    <SortableSection key="traffic" id="traffic">
+                      {/* ── Row 2: Traffic Chart + Growth Trends ────────────────── */}
+                      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           <Card className="animate-fade-in-up" style={{ animationDelay: '0.1s', '--card-accent-rgb': '236, 72, 153' } as React.CSSProperties}>
             <CardHeader className="pb-2">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
@@ -2085,11 +2151,14 @@ export default function Dashboard() {
           </Card>
 
           <GrowthTrendsCard trends={trends} loading={trendsLoading} metric={trendMetric} onMetricChange={setTrendMetric} />
-      </div>
-      )}
-
-      {/* ── Row 3: Connections by Node + Top Users by Traffic ─────── */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                      </div>
+                    </SortableSection>
+                  )
+                case 'connections':
+                  return (
+                    <SortableSection key="connections" id="connections">
+                      {/* ── Row 3: Connections by Node + Top Users by Traffic ─────── */}
+                      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {canViewAnalytics && (
           <Card className="animate-fade-in-up" style={{ animationDelay: '0.15s', '--card-accent-rgb': '139, 92, 246' } as React.CSSProperties}>
             <CardHeader className="pb-2">
@@ -2137,10 +2206,14 @@ export default function Dashboard() {
         {canViewAnalytics && (
           <TopUsersCard topUsers={topUsers} loading={topUsersLoading} />
         )}
-      </div>
-
-      {/* ── Row 4: Node Load + Expiry + Traffic Anomaly ───────── */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                      </div>
+                    </SortableSection>
+                  )
+                case 'load':
+                  return (
+                    <SortableSection key="load" id="load">
+                      {/* ── Row 4: Node Load + Expiry + Traffic Anomaly ───────── */}
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {canViewFleet && (
           <NodeLoadCard nodes={nodeFleet?.nodes || []} loading={nodeFleetLoading} />
         )}
@@ -2150,10 +2223,14 @@ export default function Dashboard() {
         {(canViewFleet && canViewAnalytics) && (
           <TrafficAnomalyCard anomalies={trafficAnomalies} loading={nodeFleetLoading || timeseriesLoading} />
         )}
-      </div>
-
-      {/* ── Row 5: Activity Feed + Violations + Top Violators ── */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                      </div>
+                    </SortableSection>
+                  )
+                case 'activity':
+                  return (
+                    <SortableSection key="activity" id="activity">
+                      {/* ── Row 5: Activity Feed + Violations + Top Violators ── */}
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {canViewAudit && (
           <ActivityFeedCard items={auditFeed?.items || []} loading={auditLoading} />
         )}
@@ -2209,10 +2286,14 @@ export default function Dashboard() {
         {canViewViolations && (
           <TopViolatorsCard topViolators={topViolators} loading={topViolatorsLoading} />
         )}
-      </div>
-
-      {/* ── Row 6: Billing + Collector + System Status + Updates ── */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                      </div>
+                    </SortableSection>
+                  )
+                case 'system':
+                  return (
+                    <SortableSection key="system" id="system">
+                      {/* ── Row 6: Billing + Collector + System Status + Updates ── */}
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {canViewBilling && <BillingSummaryCard loading={false} />}
 
         {canViewAnalytics && (
@@ -2260,7 +2341,16 @@ export default function Dashboard() {
             </CardContent>
           </Card>
         ) : null}
-      </div>
+                      </div>
+                    </SortableSection>
+                  )
+                default:
+                  return null
+              }
+            })}
+          </div>
+        </SortableContext>
+      </DndContext>
     </div>
   )
 }
