@@ -113,6 +113,40 @@ PANEL_USERS_TRAFFIC_LIMIT_REACHED = Gauge(
     "Users who hit their traffic limit (used >= limit, limit > 0).",
 )
 
+PANEL_USERS_HWID_LIMIT_REACHED = Gauge(
+    "panel_users_hwid_limit_reached",
+    "Users with devices count >= hwid_device_limit (limit > 0).",
+)
+
+PANEL_USERS_CREATED = Gauge(
+    "panel_users_created",
+    "Users created within the rolling window.",
+    ["window"],  # 24h, 7d, 30d
+)
+
+PANEL_USERS_EXPIRING = Gauge(
+    "panel_users_expiring",
+    "Users whose subscription expires within the rolling window.",
+    ["window"],  # 1d, 7d, 30d
+)
+
+PANEL_USERS_BY_TRAFFIC_BUCKET = Gauge(
+    "panel_users_by_traffic_bucket",
+    "Users grouped by cumulative used_traffic_bytes bucket.",
+    ["bucket"],  # lt_10gb, 10_100gb, 100gb_1tb, gt_1tb
+)
+
+PANEL_HWID_DEVICES_PER_USER_AVG = Gauge(
+    "panel_hwid_devices_per_user_avg",
+    "Average HWID devices per user (total devices / users with >=1 device).",
+)
+
+PANEL_SUBSCRIPTION_REQUESTS = Gauge(
+    "panel_subscription_requests",
+    "Subscription fetch requests recorded within the window.",
+    ["window"],  # 1h, 24h
+)
+
 PANEL_ACTIVE_CONNECTIONS = Gauge(
     "panel_active_connections",
     "Open rows in user_connections (disconnected_at IS NULL).",
@@ -424,6 +458,56 @@ class GaugeUpdater:
                 "FROM violations WHERE action_taken IS NULL GROUP BY 1"
             )
 
+            growth = await conn.fetchrow(
+                """
+                SELECT
+                    (SELECT COUNT(*) FROM users WHERE created_at >= NOW() - INTERVAL '24 hours') AS created_24h,
+                    (SELECT COUNT(*) FROM users WHERE created_at >= NOW() - INTERVAL '7 days')   AS created_7d,
+                    (SELECT COUNT(*) FROM users WHERE created_at >= NOW() - INTERVAL '30 days')  AS created_30d,
+                    (SELECT COUNT(*) FROM users
+                     WHERE expire_at > NOW() AND expire_at < NOW() + INTERVAL '1 day')   AS expiring_1d,
+                    (SELECT COUNT(*) FROM users
+                     WHERE expire_at > NOW() AND expire_at < NOW() + INTERVAL '30 days') AS expiring_30d,
+                    (SELECT COUNT(*) FROM users WHERE used_traffic_bytes < 10737418240) AS traffic_lt_10gb,
+                    (SELECT COUNT(*) FROM users
+                     WHERE used_traffic_bytes >= 10737418240 AND used_traffic_bytes < 107374182400) AS traffic_10_100gb,
+                    (SELECT COUNT(*) FROM users
+                     WHERE used_traffic_bytes >= 107374182400 AND used_traffic_bytes < 1099511627776) AS traffic_100gb_1tb,
+                    (SELECT COUNT(*) FROM users WHERE used_traffic_bytes >= 1099511627776) AS traffic_gt_1tb
+                """
+            )
+
+            hwid_limit_reached = await conn.fetchval(
+                """
+                SELECT COUNT(DISTINCT u.uuid)
+                FROM users u
+                JOIN (
+                    SELECT user_uuid, COUNT(*) AS n FROM user_hwid_devices GROUP BY user_uuid
+                ) d ON d.user_uuid = u.uuid
+                WHERE u.hwid_device_limit > 0 AND d.n >= u.hwid_device_limit
+                """
+            )
+
+            hwid_avg = await conn.fetchval(
+                "SELECT AVG(n)::float FROM ("
+                "  SELECT COUNT(*) AS n FROM user_hwid_devices GROUP BY user_uuid"
+                ") s"
+            )
+
+            # SRH table может отсутствовать на старых инсталляциях — мягко fallback'имся
+            sub_req = None
+            try:
+                sub_req = await conn.fetchrow(
+                    """
+                    SELECT
+                        COUNT(*) FILTER (WHERE request_at >= NOW() - INTERVAL '1 hour') AS req_1h,
+                        COUNT(*) FILTER (WHERE request_at >= NOW() - INTERVAL '24 hours') AS req_24h
+                    FROM subscription_request_history
+                    """
+                )
+            except Exception:
+                sub_req = None
+
         if row:
             PANEL_ONLINE_USERS.set(int(row["online_users"] or 0))
             PANEL_TOTAL_USERS.set(int(row["total_users"] or 0))
@@ -492,6 +576,25 @@ class GaugeUpdater:
         PANEL_VIOLATIONS_BY_ACTION.clear()
         for r in violations_by_action:
             PANEL_VIOLATIONS_BY_ACTION.labels(action=r["action"]).set(int(r["n"]))
+
+        if growth:
+            PANEL_USERS_CREATED.labels(window="24h").set(int(growth["created_24h"] or 0))
+            PANEL_USERS_CREATED.labels(window="7d").set(int(growth["created_7d"] or 0))
+            PANEL_USERS_CREATED.labels(window="30d").set(int(growth["created_30d"] or 0))
+            PANEL_USERS_EXPIRING.labels(window="1d").set(int(growth["expiring_1d"] or 0))
+            PANEL_USERS_EXPIRING.labels(window="7d").set(int(row["expiring_soon"] or 0))
+            PANEL_USERS_EXPIRING.labels(window="30d").set(int(growth["expiring_30d"] or 0))
+            PANEL_USERS_BY_TRAFFIC_BUCKET.labels(bucket="lt_10gb").set(int(growth["traffic_lt_10gb"] or 0))
+            PANEL_USERS_BY_TRAFFIC_BUCKET.labels(bucket="10_100gb").set(int(growth["traffic_10_100gb"] or 0))
+            PANEL_USERS_BY_TRAFFIC_BUCKET.labels(bucket="100gb_1tb").set(int(growth["traffic_100gb_1tb"] or 0))
+            PANEL_USERS_BY_TRAFFIC_BUCKET.labels(bucket="gt_1tb").set(int(growth["traffic_gt_1tb"] or 0))
+
+        PANEL_USERS_HWID_LIMIT_REACHED.set(int(hwid_limit_reached or 0))
+        PANEL_HWID_DEVICES_PER_USER_AVG.set(float(hwid_avg or 0))
+
+        if sub_req:
+            PANEL_SUBSCRIPTION_REQUESTS.labels(window="1h").set(int(sub_req["req_1h"] or 0))
+            PANEL_SUBSCRIPTION_REQUESTS.labels(window="24h").set(int(sub_req["req_24h"] or 0))
 
         # asyncpg pool stats
         pool = getattr(db_service, "_pool", None) or getattr(db_service, "pool", None)
