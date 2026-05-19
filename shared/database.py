@@ -14,6 +14,7 @@ from asyncpg import Pool, Connection
 
 from shared.config import get_shared_settings as get_settings
 from shared.logger import logger
+from shared.metrics import VIOLATIONS_DETECTED, SYNC_RUNS
 
 
 # SQL schema for creating tables
@@ -1886,7 +1887,7 @@ class DatabaseService:
         """Update sync metadata."""
         if not self.is_connected:
             return
-        
+
         async with self.acquire() as conn:
             await conn.execute(
                 """
@@ -1900,6 +1901,11 @@ class DatabaseService:
                 """,
                 key, status, records_synced, error_message
             )
+
+        SYNC_RUNS.labels(
+            kind=key,
+            result="ok" if status == "success" else "error",
+        ).inc()
     
     # ==================== User Connections (for future device tracking) ====================
     
@@ -3716,6 +3722,10 @@ class DatabaseService:
                         impossible_travel, is_mobile, is_datacenter, is_vpn,
                         raw_breakdown, hwid_matched_users, suspicious_user_agents
                     )
+                    if result is not None:
+                        VIOLATIONS_DETECTED.labels(
+                            action=(recommended_action or "unknown").lower()
+                        ).inc()
                     return result
 
         except Exception as e:

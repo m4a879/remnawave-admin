@@ -1,0 +1,120 @@
+{
+  "annotations": { "list": [
+    { "builtIn": 1, "datasource": { "type": "grafana", "uid": "-- Grafana --" },
+      "enable": true, "hide": true, "iconColor": "rgba(0, 211, 255, 1)",
+      "name": "Annotations & Alerts", "type": "dashboard" }
+  ]},
+  "editable": true,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [
+    { "title": "Overview", "type": "dashboards", "tags": ["remnawave","overview"], "asDropdown": false, "includeVars": true, "keepTime": true, "targetBlank": false }
+  ],
+  "liveNow": false,
+  "panels": [
+    {
+      "id": 1, "title": "Total users", "type": "stat",
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": { "h": 5, "w": 6, "x": 0, "y": 0 },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "value", "graphMode": "area" },
+      "fieldConfig": { "defaults": { "color": { "mode": "thresholds" }, "thresholds": { "mode": "absolute", "steps": [{ "color": "blue", "value": null }] }, "unit": "short" }, "overrides": [] },
+      "targets": [{ "refId": "A", "expr": "panel_total_users{instance=~\"$instance\"}", "legendFormat": "total" }]
+    },
+    {
+      "id": 2, "title": "Active users", "type": "stat",
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": { "h": 5, "w": 6, "x": 6, "y": 0 },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "value", "graphMode": "area" },
+      "fieldConfig": { "defaults": { "color": { "mode": "thresholds" }, "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] }, "unit": "short" }, "overrides": [] },
+      "targets": [{ "refId": "A", "expr": "panel_active_users{instance=~\"$instance\"}", "legendFormat": "active" }]
+    },
+    {
+      "id": 3, "title": "Expiring (7d)", "type": "stat",
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": { "h": 5, "w": 6, "x": 12, "y": 0 },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "background", "graphMode": "area" },
+      "fieldConfig": { "defaults": { "color": { "mode": "thresholds" }, "thresholds": { "mode": "absolute", "steps": [{ "color": "blue", "value": null }, { "color": "orange", "value": 10 }] }, "unit": "short" }, "overrides": [] },
+      "targets": [{ "refId": "A", "expr": "panel_users_expiring_soon{instance=~\"$instance\"}", "legendFormat": "expiring" }]
+    },
+    {
+      "id": 4, "title": "Hit traffic limit", "type": "stat",
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": { "h": 5, "w": 6, "x": 18, "y": 0 },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "background", "graphMode": "area" },
+      "fieldConfig": { "defaults": { "color": { "mode": "thresholds" }, "thresholds": { "mode": "absolute", "steps": [{ "color": "blue", "value": null }, { "color": "orange", "value": 5 }] }, "unit": "short" }, "overrides": [] },
+      "targets": [{ "refId": "A", "expr": "panel_users_traffic_limit_reached{instance=~\"$instance\"}", "legendFormat": "users" }]
+    },
+    {
+      "id": 5, "title": "Users by status", "type": "piechart",
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": { "h": 9, "w": 12, "x": 0, "y": 5 },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "pieType": "donut", "displayLabels": ["name","percent"], "legend": { "showLegend": true, "displayMode": "table", "placement": "right", "values": ["value","percent"] } },
+      "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" }, "unit": "short" }, "overrides": [] },
+      "targets": [{ "refId": "A", "expr": "panel_users_by_status{instance=~\"$instance\"}", "legendFormat": "{{status}}" }]
+    },
+    {
+      "id": 6, "title": "Users by status — trend", "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": { "h": 9, "w": 12, "x": 12, "y": 5 },
+      "options": { "tooltip": { "mode": "multi", "sort": "desc" }, "legend": { "showLegend": true, "placement": "bottom" } },
+      "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" }, "custom": { "drawStyle": "line", "lineWidth": 2, "fillOpacity": 10, "showPoints": "never", "spanNulls": true }, "unit": "short" }, "overrides": [] },
+      "targets": [{ "refId": "A", "expr": "panel_users_by_status{instance=~\"$instance\"}", "legendFormat": "{{status}}" }]
+    },
+    {
+      "id": 7, "title": "HWID devices total", "type": "stat",
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": { "h": 5, "w": 6, "x": 0, "y": 14 },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "value", "graphMode": "area" },
+      "fieldConfig": { "defaults": { "color": { "mode": "thresholds" }, "thresholds": { "mode": "absolute", "steps": [{ "color": "blue", "value": null }] }, "unit": "short" }, "overrides": [] },
+      "targets": [{ "refId": "A", "expr": "panel_hwid_devices_total{instance=~\"$instance\"}", "legendFormat": "devices" }]
+    },
+    {
+      "id": 8, "title": "HWID devices by platform", "type": "piechart",
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": { "h": 9, "w": 9, "x": 6, "y": 14 },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "pieType": "pie", "displayLabels": ["name","percent"], "legend": { "showLegend": true, "displayMode": "list", "placement": "right" } },
+      "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" }, "unit": "short" }, "overrides": [] },
+      "targets": [{ "refId": "A", "expr": "panel_hwid_devices_by_platform{instance=~\"$instance\"}", "legendFormat": "{{platform}}" }]
+    },
+    {
+      "id": 9, "title": "HWID growth (per platform)", "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": { "h": 9, "w": 9, "x": 15, "y": 14 },
+      "options": { "tooltip": { "mode": "multi" }, "legend": { "showLegend": true, "placement": "bottom" } },
+      "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" }, "custom": { "drawStyle": "line", "lineWidth": 2, "fillOpacity": 10, "showPoints": "never", "spanNulls": true }, "unit": "short" }, "overrides": [] },
+      "targets": [{ "refId": "A", "expr": "panel_hwid_devices_by_platform{instance=~\"$instance\"}", "legendFormat": "{{platform}}" }]
+    },
+    {
+      "id": 10, "title": "Active connections", "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 23 },
+      "options": { "tooltip": { "mode": "single" }, "legend": { "showLegend": false } },
+      "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" }, "custom": { "drawStyle": "line", "lineInterpolation": "smooth", "lineWidth": 2, "fillOpacity": 25, "gradientMode": "opacity", "showPoints": "never" }, "unit": "short" }, "overrides": [] },
+      "targets": [{ "refId": "A", "expr": "panel_active_connections{instance=~\"$instance\"}", "legendFormat": "open" }]
+    },
+    {
+      "id": 11, "title": "Online users", "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 23 },
+      "options": { "tooltip": { "mode": "single" }, "legend": { "showLegend": false } },
+      "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" }, "custom": { "drawStyle": "line", "lineInterpolation": "smooth", "lineWidth": 2, "fillOpacity": 25, "gradientMode": "opacity", "showPoints": "never" }, "unit": "short" }, "overrides": [] },
+      "targets": [{ "refId": "A", "expr": "panel_online_users{instance=~\"$instance\"}", "legendFormat": "online" }]
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "tags": ["remnawave", "panel", "users"],
+  "templating": {
+    "list": [
+      { "name": "DS_PROMETHEUS", "type": "datasource", "query": "prometheus", "current": {}, "hide": 0, "includeAll": false, "label": "Datasource", "multi": false, "options": [], "refresh": 1, "skipUrlSync": false },
+      { "name": "instance", "type": "query", "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "query": "label_values(panel_online_users, instance)", "current": { "selected": false, "text": "All", "value": "$__all" }, "hide": 0, "includeAll": true, "label": "Instance", "multi": true, "options": [], "refresh": 2, "regex": "", "skipUrlSync": false, "sort": 1 }
+    ]
+  },
+  "time": { "from": "now-6h", "to": "now" },
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "Remnawave Admin — Users & Subscriptions",
+  "uid": "remnawave-panel-users",
+  "version": 1,
+  "weekStart": ""
+}

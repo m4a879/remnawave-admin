@@ -96,30 +96,108 @@ PANEL_DB_POOL_USED = Gauge(
     "Currently checked-out connections from the PostgreSQL pool.",
 )
 
+# Users breakdown ─ refreshed by updater
+PANEL_USERS_BY_STATUS = Gauge(
+    "panel_users_by_status",
+    "Users grouped by status (ACTIVE, DISABLED, LIMITED, EXPIRED).",
+    ["status"],
+)
+
+PANEL_USERS_EXPIRING_SOON = Gauge(
+    "panel_users_expiring_soon",
+    "Users whose subscription expires in the next 7 days.",
+)
+
+PANEL_USERS_TRAFFIC_LIMIT_REACHED = Gauge(
+    "panel_users_traffic_limit_reached",
+    "Users who hit their traffic limit (used >= limit, limit > 0).",
+)
+
+PANEL_ACTIVE_CONNECTIONS = Gauge(
+    "panel_active_connections",
+    "Open rows in user_connections (disconnected_at IS NULL).",
+)
+
+# HWID
+PANEL_HWID_DEVICES_TOTAL = Gauge(
+    "panel_hwid_devices_total",
+    "Total HWID devices registered across all users.",
+)
+
+PANEL_HWID_BY_PLATFORM = Gauge(
+    "panel_hwid_devices_by_platform",
+    "HWID devices grouped by platform.",
+    ["platform"],
+)
+
+# Per-node — cardinality ~tens of nodes, safe
+PANEL_NODE_CPU_USAGE = Gauge(
+    "panel_node_cpu_usage_percent",
+    "Per-node CPU utilization, 0-100.",
+    ["node"],
+)
+
+PANEL_NODE_MEMORY_USAGE = Gauge(
+    "panel_node_memory_usage_percent",
+    "Per-node memory utilization, 0-100.",
+    ["node"],
+)
+
+PANEL_NODE_DISK_USAGE = Gauge(
+    "panel_node_disk_usage_percent",
+    "Per-node disk utilization, 0-100.",
+    ["node"],
+)
+
+PANEL_NODE_LAST_SEEN_SECONDS = Gauge(
+    "panel_node_last_seen_seconds",
+    "Seconds since the node-agent last reported metrics.",
+    ["node"],
+)
+
+PANEL_NODE_TRAFFIC_USED_BYTES = Gauge(
+    "panel_node_traffic_used_bytes",
+    "Per-node cumulative traffic used (panel-reported).",
+    ["node"],
+)
+
+PANEL_NODE_CONNECTED = Gauge(
+    "panel_node_connected",
+    "1 if node is connected and not disabled, else 0.",
+    ["node"],
+)
+
+# Sync lag
+PANEL_SYNC_LAG_SECONDS = Gauge(
+    "panel_sync_lag_seconds",
+    "Seconds since the last successful sync of each kind.",
+    ["kind"],
+)
+
+# Anti-abuse
+PANEL_VIOLATIONS_BY_ACTION = Gauge(
+    "panel_violations_by_action",
+    "Open violations grouped by recommended_action.",
+    ["action"],
+)
+
+PANEL_TORRENT_EVENTS_24H = Gauge(
+    "panel_torrent_events_24h",
+    "Torrent events detected in the last 24 hours.",
+)
+
 # ── App event counters ───────────────────────────────────────────
-# These are imported and incremented by the relevant subsystems.
-
-COLLECTOR_BATCHES_RECEIVED = Counter(
-    "panel_collector_batches_received_total",
-    "Total node-agent batches accepted by /collector/batch.",
-)
-
-COLLECTOR_BATCHES_REJECTED = Counter(
-    "panel_collector_batches_rejected_total",
-    "Total node-agent batches rejected (rate limit, auth, malformed).",
-    ["reason"],
-)
-
-VIOLATIONS_DETECTED = Counter(
-    "panel_violations_detected_total",
-    "Violations detected by the pipeline.",
-    ["severity"],
-)
-
-NOTIFICATIONS_SENT = Counter(
-    "panel_notifications_sent_total",
-    "Notifications dispatched.",
-    ["channel"],
+# Реальные объявления Counter'ов в shared/metrics.py — здесь только
+# re-export, чтобы внешний код мог импортировать привычно из этого
+# модуля, а shared/-код не зависел от web/backend/.
+from shared.metrics import (  # noqa: F401
+    COLLECTOR_BATCHES_RECEIVED,
+    COLLECTOR_BATCHES_REJECTED,
+    COLLECTOR_CONNECTIONS_PROCESSED,
+    NOTIFICATIONS_FAILED,
+    NOTIFICATIONS_SENT,
+    SYNC_RUNS,
+    VIOLATIONS_DETECTED,
 )
 
 
@@ -226,6 +304,7 @@ class GaugeUpdater:
             return
 
         async with db_service.acquire() as conn:
+            # Aggregates — single round-trip
             row = await conn.fetchrow(
                 """
                 SELECT
@@ -241,8 +320,55 @@ class GaugeUpdater:
                     ) AS online_nodes,
                     (SELECT COUNT(*) FROM violations
                      WHERE action_taken IS NULL
-                    ) AS violations_open
+                    ) AS violations_open,
+                    (SELECT COUNT(*) FROM user_connections
+                     WHERE disconnected_at IS NULL
+                    ) AS active_connections,
+                    (SELECT COUNT(*) FROM users
+                     WHERE expire_at > NOW()
+                       AND expire_at < NOW() + INTERVAL '7 days'
+                    ) AS expiring_soon,
+                    (SELECT COUNT(*) FROM users
+                     WHERE traffic_limit_bytes > 0
+                       AND used_traffic_bytes >= traffic_limit_bytes
+                    ) AS traffic_limit_reached,
+                    (SELECT COUNT(*) FROM user_hwid_devices) AS hwid_total,
+                    (SELECT COUNT(*) FROM torrent_events
+                     WHERE detected_at >= NOW() - INTERVAL '24 hours'
+                    ) AS torrent_24h
                 """
+            )
+
+            users_by_status = await conn.fetch(
+                "SELECT UPPER(status) AS status, COUNT(*) AS n FROM users "
+                "WHERE status IS NOT NULL GROUP BY UPPER(status)"
+            )
+
+            hwid_by_platform = await conn.fetch(
+                "SELECT COALESCE(NULLIF(LOWER(platform), ''), 'unknown') AS platform, "
+                "       COUNT(*) AS n "
+                "FROM user_hwid_devices GROUP BY 1"
+            )
+
+            nodes = await conn.fetch(
+                """
+                SELECT name, cpu_usage, memory_usage, disk_usage,
+                       traffic_used_bytes, is_connected, is_disabled,
+                       EXTRACT(EPOCH FROM (NOW() - metrics_updated_at)) AS age_seconds
+                FROM nodes
+                WHERE name IS NOT NULL
+                """
+            )
+
+            sync_rows = await conn.fetch(
+                "SELECT key, EXTRACT(EPOCH FROM (NOW() - last_sync_at)) AS lag "
+                "FROM sync_metadata WHERE last_sync_at IS NOT NULL"
+            )
+
+            violations_by_action = await conn.fetch(
+                "SELECT COALESCE(LOWER(recommended_action), 'unknown') AS action, "
+                "       COUNT(*) AS n "
+                "FROM violations WHERE action_taken IS NULL GROUP BY 1"
             )
 
         if row:
@@ -252,6 +378,49 @@ class GaugeUpdater:
             PANEL_TOTAL_NODES.set(int(row["total_nodes"] or 0))
             PANEL_ONLINE_NODES.set(int(row["online_nodes"] or 0))
             PANEL_VIOLATIONS_OPEN.set(int(row["violations_open"] or 0))
+            PANEL_ACTIVE_CONNECTIONS.set(int(row["active_connections"] or 0))
+            PANEL_USERS_EXPIRING_SOON.set(int(row["expiring_soon"] or 0))
+            PANEL_USERS_TRAFFIC_LIMIT_REACHED.set(int(row["traffic_limit_reached"] or 0))
+            PANEL_HWID_DEVICES_TOTAL.set(int(row["hwid_total"] or 0))
+            PANEL_TORRENT_EVENTS_24H.set(int(row["torrent_24h"] or 0))
+
+        # Per-label gauges — reset then set to drop stale labels (removed nodes,
+        # statuses that fell to 0, etc.)
+        PANEL_USERS_BY_STATUS.clear()
+        for r in users_by_status:
+            status = (r["status"] or "unknown").lower()
+            PANEL_USERS_BY_STATUS.labels(status=status).set(int(r["n"]))
+
+        PANEL_HWID_BY_PLATFORM.clear()
+        for r in hwid_by_platform:
+            PANEL_HWID_BY_PLATFORM.labels(platform=r["platform"]).set(int(r["n"]))
+
+        PANEL_NODE_CPU_USAGE.clear()
+        PANEL_NODE_MEMORY_USAGE.clear()
+        PANEL_NODE_DISK_USAGE.clear()
+        PANEL_NODE_LAST_SEEN_SECONDS.clear()
+        PANEL_NODE_TRAFFIC_USED_BYTES.clear()
+        PANEL_NODE_CONNECTED.clear()
+        for r in nodes:
+            name = r["name"]
+            PANEL_NODE_CPU_USAGE.labels(node=name).set(float(r["cpu_usage"] or 0))
+            PANEL_NODE_MEMORY_USAGE.labels(node=name).set(float(r["memory_usage"] or 0))
+            PANEL_NODE_DISK_USAGE.labels(node=name).set(float(r["disk_usage"] or 0))
+            PANEL_NODE_TRAFFIC_USED_BYTES.labels(node=name).set(int(r["traffic_used_bytes"] or 0))
+            PANEL_NODE_CONNECTED.labels(node=name).set(
+                1 if (r["is_connected"] and not r["is_disabled"]) else 0
+            )
+            age = r["age_seconds"]
+            if age is not None:
+                PANEL_NODE_LAST_SEEN_SECONDS.labels(node=name).set(float(age))
+
+        PANEL_SYNC_LAG_SECONDS.clear()
+        for r in sync_rows:
+            PANEL_SYNC_LAG_SECONDS.labels(kind=r["key"]).set(float(r["lag"] or 0))
+
+        PANEL_VIOLATIONS_BY_ACTION.clear()
+        for r in violations_by_action:
+            PANEL_VIOLATIONS_BY_ACTION.labels(action=r["action"]).set(int(r["n"]))
 
         # asyncpg pool stats
         pool = getattr(db_service, "_pool", None) or getattr(db_service, "pool", None)

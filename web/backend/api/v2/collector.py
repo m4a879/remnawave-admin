@@ -23,6 +23,11 @@ from shared.connection_monitor import ConnectionMonitor
 from shared.violation_detector import IntelligentViolationDetector, ViolationAction
 from shared.agent_tokens import get_node_by_token
 from shared.config_service import config_service
+from shared.metrics import (
+    COLLECTOR_BATCHES_RECEIVED,
+    COLLECTOR_BATCHES_REJECTED,
+    COLLECTOR_CONNECTIONS_PROCESSED,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -251,11 +256,13 @@ async def verify_agent_token(
 
     if not authorization.startswith("Bearer "):
         logger.warning("Invalid authorization header format from %s", client_ip)
+        COLLECTOR_BATCHES_REJECTED.labels(reason="malformed").inc()
         raise HTTPException(status_code=401, detail="Invalid authorization header format")
 
     token = authorization[7:].strip()
     if not token:
         logger.warning("Token is empty, from %s", client_ip)
+        COLLECTOR_BATCHES_REJECTED.labels(reason="auth").inc()
         raise HTTPException(status_code=401, detail="Token is required")
 
     node_uuid = await get_node_by_token(db_service, token)
@@ -275,6 +282,7 @@ async def verify_agent_token(
             "Invalid agent token attempted: %s from %s%s",
             token[:8] + "...", client_ip, node_name_hint,
         )
+        COLLECTOR_BATCHES_REJECTED.labels(reason="auth").inc()
         raise HTTPException(status_code=403, detail="Invalid or expired token")
 
     logger.debug("Agent token verified for node: %s from %s", node_uuid, client_ip)
@@ -296,9 +304,13 @@ async def receive_connections(
     last_ts = _node_last_batch.get(node_uuid, 0.0)
     if now_ts - last_ts < MIN_BATCH_INTERVAL:
         _stats["total_batches_rejected"] += 1
+        COLLECTOR_BATCHES_REJECTED.labels(reason="rate_limit").inc()
         raise HTTPException(status_code=429, detail="Too many requests: batch interval too short")
     _node_last_batch[node_uuid] = now_ts
     _stats["total_batches_received"] += 1
+    COLLECTOR_BATCHES_RECEIVED.inc()
+    if report.connections:
+        COLLECTOR_CONNECTIONS_PROCESSED.inc(len(report.connections))
 
     node_name = await _get_node_name(node_uuid)
     _conn_count = len(report.connections) if report.connections else 0
@@ -307,6 +319,7 @@ async def receive_connections(
 
     if report.node_uuid != node_uuid:
         logger.warning("Node UUID mismatch: token=%s, report=%s", node_uuid, report.node_uuid)
+        COLLECTOR_BATCHES_REJECTED.labels(reason="mismatch").inc()
         raise HTTPException(status_code=403, detail="Token does not match the reported node UUID")
 
     # System metrics

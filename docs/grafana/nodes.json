@@ -1,0 +1,118 @@
+{
+  "annotations": { "list": [
+    { "builtIn": 1, "datasource": { "type": "grafana", "uid": "-- Grafana --" },
+      "enable": true, "hide": true, "iconColor": "rgba(0, 211, 255, 1)",
+      "name": "Annotations & Alerts", "type": "dashboard" }
+  ]},
+  "editable": true,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [
+    { "title": "Overview", "type": "dashboards", "tags": ["remnawave","overview"], "asDropdown": false, "includeVars": true, "keepTime": true, "targetBlank": false }
+  ],
+  "liveNow": false,
+  "panels": [
+    {
+      "id": 1, "title": "Online nodes / Total", "type": "stat",
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": { "h": 5, "w": 6, "x": 0, "y": 0 },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "value", "graphMode": "none" },
+      "fieldConfig": { "defaults": { "color": { "mode": "thresholds" }, "thresholds": { "mode": "absolute", "steps": [{ "color": "blue", "value": null }] }, "unit": "short" }, "overrides": [] },
+      "targets": [
+        { "refId": "A", "expr": "panel_online_nodes{instance=~\"$instance\"}", "legendFormat": "Online" },
+        { "refId": "B", "expr": "panel_total_nodes{instance=~\"$instance\"}", "legendFormat": "Total" }
+      ]
+    },
+    {
+      "id": 2, "title": "Node connection status", "type": "table",
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": { "h": 9, "w": 18, "x": 6, "y": 0 },
+      "options": { "showHeader": true },
+      "fieldConfig": { "defaults": { "custom": { "align": "auto", "cellOptions": { "type": "auto" } } }, "overrides": [
+        { "matcher": { "id": "byName", "options": "Connected" }, "properties": [
+          { "id": "custom.cellOptions", "value": { "type": "color-background" } },
+          { "id": "mappings", "value": [
+            { "type": "value", "options": { "1": { "text": "yes", "color": "green" }, "0": { "text": "no", "color": "red" } } }
+          ]}
+        ]},
+        { "matcher": { "id": "byName", "options": "Last seen (s)" }, "properties": [
+          { "id": "unit", "value": "s" },
+          { "id": "custom.cellOptions", "value": { "type": "color-text" } },
+          { "id": "thresholds", "value": { "mode": "absolute", "steps": [
+            { "color": "green", "value": null },
+            { "color": "orange", "value": 120 },
+            { "color": "red", "value": 300 }
+          ]}}
+        ]}
+      ]},
+      "targets": [
+        { "refId": "A", "expr": "panel_node_connected{instance=~\"$instance\"}", "legendFormat": "{{node}}", "format": "table", "instant": true },
+        { "refId": "B", "expr": "panel_node_last_seen_seconds{instance=~\"$instance\"}", "legendFormat": "{{node}}", "format": "table", "instant": true }
+      ],
+      "transformations": [
+        { "id": "merge" },
+        { "id": "organize", "options": { "excludeByName": { "Time": true, "__name__": true, "job": true, "service": true, "instance": true, "instance_name": true }, "renameByName": { "node": "Node", "Value #A": "Connected", "Value #B": "Last seen (s)" } } }
+      ]
+    },
+    {
+      "id": 3, "title": "Per-node CPU", "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": { "h": 9, "w": 12, "x": 0, "y": 9 },
+      "options": { "tooltip": { "mode": "multi", "sort": "desc" }, "legend": { "showLegend": true, "displayMode": "table", "placement": "right", "calcs": ["mean","max"] } },
+      "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" }, "custom": { "drawStyle": "line", "lineWidth": 2, "fillOpacity": 5, "spanNulls": true, "showPoints": "never" }, "unit": "percent", "min": 0, "max": 100 }, "overrides": [] },
+      "targets": [{ "refId": "A", "expr": "panel_node_cpu_usage_percent{instance=~\"$instance\"}", "legendFormat": "{{node}}" }]
+    },
+    {
+      "id": 4, "title": "Per-node memory", "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": { "h": 9, "w": 12, "x": 12, "y": 9 },
+      "options": { "tooltip": { "mode": "multi", "sort": "desc" }, "legend": { "showLegend": true, "displayMode": "table", "placement": "right", "calcs": ["mean","max"] } },
+      "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" }, "custom": { "drawStyle": "line", "lineWidth": 2, "fillOpacity": 5, "spanNulls": true, "showPoints": "never" }, "unit": "percent", "min": 0, "max": 100 }, "overrides": [] },
+      "targets": [{ "refId": "A", "expr": "panel_node_memory_usage_percent{instance=~\"$instance\"}", "legendFormat": "{{node}}" }]
+    },
+    {
+      "id": 5, "title": "Per-node disk", "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": { "h": 9, "w": 12, "x": 0, "y": 18 },
+      "options": { "tooltip": { "mode": "multi", "sort": "desc" }, "legend": { "showLegend": true, "displayMode": "table", "placement": "right", "calcs": ["last","max"] } },
+      "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" }, "custom": { "drawStyle": "line", "lineWidth": 2, "fillOpacity": 5, "spanNulls": true, "showPoints": "never" }, "unit": "percent", "min": 0, "max": 100 }, "overrides": [] },
+      "targets": [{ "refId": "A", "expr": "panel_node_disk_usage_percent{instance=~\"$instance\"}", "legendFormat": "{{node}}" }]
+    },
+    {
+      "id": 6, "title": "Per-node last seen (s)", "type": "bargauge",
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": { "h": 9, "w": 12, "x": 12, "y": 18 },
+      "options": { "orientation": "horizontal", "displayMode": "gradient", "showUnfilled": true, "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "fieldConfig": { "defaults": { "color": { "mode": "thresholds" }, "thresholds": { "mode": "absolute", "steps": [
+        { "color": "green", "value": null },
+        { "color": "orange", "value": 120 },
+        { "color": "red", "value": 300 }
+      ]}, "unit": "s" }, "overrides": [] },
+      "targets": [{ "refId": "A", "expr": "panel_node_last_seen_seconds{instance=~\"$instance\"}", "legendFormat": "{{node}}" }]
+    },
+    {
+      "id": 7, "title": "Per-node cumulative traffic", "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": { "h": 9, "w": 24, "x": 0, "y": 27 },
+      "options": { "tooltip": { "mode": "multi", "sort": "desc" }, "legend": { "showLegend": true, "displayMode": "table", "placement": "right", "calcs": ["last"] } },
+      "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" }, "custom": { "drawStyle": "line", "lineWidth": 2, "fillOpacity": 5, "spanNulls": true, "showPoints": "never" }, "unit": "bytes" }, "overrides": [] },
+      "targets": [{ "refId": "A", "expr": "panel_node_traffic_used_bytes{instance=~\"$instance\"}", "legendFormat": "{{node}}" }]
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "tags": ["remnawave", "panel", "nodes"],
+  "templating": {
+    "list": [
+      { "name": "DS_PROMETHEUS", "type": "datasource", "query": "prometheus", "current": {}, "hide": 0, "includeAll": false, "label": "Datasource", "multi": false, "options": [], "refresh": 1, "skipUrlSync": false },
+      { "name": "instance", "type": "query", "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "query": "label_values(panel_online_users, instance)", "current": { "selected": false, "text": "All", "value": "$__all" }, "hide": 0, "includeAll": true, "label": "Instance", "multi": true, "options": [], "refresh": 2, "regex": "", "skipUrlSync": false, "sort": 1 }
+    ]
+  },
+  "time": { "from": "now-3h", "to": "now" },
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "Remnawave Admin — Nodes",
+  "uid": "remnawave-panel-nodes",
+  "version": 1,
+  "weekStart": ""
+}

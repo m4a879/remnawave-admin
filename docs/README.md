@@ -18,7 +18,7 @@ User-facing docs for integrators and operators.
 ## Monitoring
 
 - **Prometheus / VictoriaMetrics** — см. раздел ниже
-- **Grafana dashboard** — [`grafana-dashboard.json`](./grafana-dashboard.json) (импорт в Grafana → Dashboards → New → Import)
+- **Grafana dashboards** — [`grafana/`](./grafana/) (5 дашбордов: Overview, HTTP & Performance, Users & Subscriptions, Nodes, Anti-abuse & Sync)
 
 ## Other docs
 
@@ -31,8 +31,10 @@ User-facing docs for integrators and operators.
 
 Панель отдаёт метрики в стандартном Prometheus text-формате на эндпоинте
 `GET /metrics`. Внешний сборщик (Prometheus / VictoriaMetrics / vmagent) скрейпит
-их по расписанию и пишет в TSDB; визуализация — в Grafana по готовому дашборду
-[`grafana-dashboard.json`](./grafana-dashboard.json).
+их по расписанию и пишет в TSDB; визуализация — в Grafana по готовым дашбордам
+из [`grafana/`](./grafana/) (5 шт.: Overview, HTTP & Performance, Users &
+Subscriptions, Nodes, Anti-abuse & Sync — они кросс-линкованы через Dashboard
+links).
 
 ## Что внутри
 
@@ -65,13 +67,18 @@ docker compose --profile monitoring up -d
 | URL (Grafana снаружи) | `http://server_ip:9090` |
 | Auth | без авторизации (Prometheus на внутренней сети) |
 
-После Save & Test → импорт дашборда:
+После Save & Test → импорт дашбордов:
 
 1. Grafana → **Dashboards → New → Import**
-2. **Upload JSON file** → выбрать [`grafana-dashboard.json`](./grafana-dashboard.json)
-3. Выбрать только что добавленный datasource → **Import**
+2. **Upload JSON file** → выбрать поочерёдно файлы из [`grafana/`](./grafana/)
+   (рекомендуемый порядок: `overview.json` → `http-performance.json` →
+   `users-subscriptions.json` → `nodes.json` → `anti-abuse-sync.json`)
+3. На каждом импорте выбрать datasource → **Import**
 
-Готово. Дашборд начнёт заполняться через 15-30 секунд (первый scrape interval).
+Дашборды кросс-линкованы — на каждом сверху есть строка перехода в соседние.
+Overview достаточно открыть в первую очередь — оттуда видно все ключевые KPI.
+
+Дашборды начнут заполняться через 15-30 секунд (первый scrape interval).
 
 Если хочется защитить `/metrics` Bearer-токеном — см. ниже «Защитить токеном».
 
@@ -188,30 +195,22 @@ scrape_configs:
       - targets: ['100.79.x.y:8081']
 ```
 
-## 3. Импортировать дашборд в Grafana
+## 3. Импортировать дашборды в Grafana
 
-1. Открыть Grafana → **Dashboards → New → Import**
-2. **Upload JSON file** → выбрать [`grafana-dashboard.json`](./grafana-dashboard.json)
-3. В диалоге выбрать datasource (Prometheus / VictoriaMetrics)
-4. **Import**
+В [`grafana/`](./grafana/) лежит 5 связанных дашбордов. Импортируй их
+все через **Dashboards → New → Import → Upload JSON file** — datasource
+выбирается на каждом импорте.
 
-Дашборд содержит 10 панелей:
-
-| Панель | Что показывает |
+| Файл | Назначение |
 |---|---|
-| Online users | Уникальные подключённые юзеры за последние 2 мин |
-| Users & nodes — current | Total/active users, online/total nodes, open violations |
-| HTTP RPS by status | Запросы в секунду со stacked-разбивкой по status (200/4xx/5xx) |
-| HTTP latency (p50/p95/p99) | Перцентили из histogram-бакетов |
-| 5xx error rate | Отдельная панель под алертинг |
-| Requests in flight | Сколько запросов прямо сейчас в обработке |
-| DB pool usage | Used vs size asyncpg-пула |
-| Top endpoints by RPS | bargauge top-10 |
-| Top endpoints by p95 latency | bargauge top-10 |
-| Collector / violations / notifications | Counter-метрики событий (появятся после первого `.inc()`) |
+| `overview.json` | KPI-витрина: online users, открытые violations, expiring, traffic-limit, HWID, DB pool |
+| `http-performance.json` | HTTP RPS/latency/in-flight, 5xx/4xx, top-endpoints, DB pool saturation |
+| `users-subscriptions.json` | Users by status, HWID by platform, expiring soon, traffic-limit-reached |
+| `nodes.json` | Per-node CPU/Memory/Disk/last-seen + cumulative traffic + connection status |
+| `anti-abuse-sync.json` | Violations by action, torrent events, collector reject reasons, notifications, sync lag |
 
-Переменная `$instance` — фильтр по конкретной панели (если их несколько за одним
-скрейпером). Datasource выбирается в Grafana при импорте.
+Все дашборды кросс-линкованы (Dashboard links сверху), переменная `$instance`
+общая — фильтр по конкретной панели если их несколько за одним Prometheus.
 
 ## 4. Каталог метрик
 
