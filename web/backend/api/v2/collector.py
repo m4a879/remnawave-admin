@@ -876,7 +876,7 @@ async def _check_single_user(user_uuid: str, min_score: float, sem: asyncio.Sema
 
 
 async def _run_violation_detection(affected_user_uuids: set):
-    """Background task: check affected users for violations."""
+    """Background task: check affected users for violations using batch queries."""
     try:
         violations_enabled = config_service.get("violations_enabled", True)
         if not violations_enabled:
@@ -894,29 +894,145 @@ async def _run_violation_detection(affected_user_uuids: set):
             logger.debug("Cooldown cleanup: removed %d expired entries, %d remaining",
                          len(expired_keys), len(_violation_check_cooldown))
 
-        # Adaptive concurrency and cooldown based on total tracked users
+        # Adaptive cooldown based on total tracked users
         total_tracked = len(_violation_check_cooldown) + len(affected_user_uuids)
         if total_tracked > 50000:
-            max_concurrent = 20
-            adaptive_cooldown = 60  # 1h cooldown at 50k+ scale
+            adaptive_cooldown = 60
         elif total_tracked > 10000:
-            max_concurrent = 15
             adaptive_cooldown = 30
         elif total_tracked > 5000:
-            max_concurrent = 12
             adaptive_cooldown = 20
         elif total_tracked > 1000:
-            max_concurrent = 10
             adaptive_cooldown = 15
         else:
-            max_concurrent = 10
-            adaptive_cooldown = None  # use config default
+            adaptive_cooldown = None
 
-        user_sem = asyncio.Semaphore(max_concurrent)
-        await asyncio.gather(
-            *(_check_single_user(uuid, min_score, user_sem, adaptive_cooldown) for uuid in affected_user_uuids),
-            return_exceptions=True,
+        cooldown_minutes = adaptive_cooldown if adaptive_cooldown is not None else config_service.get("violation_check_cooldown_minutes", VIOLATION_CHECK_COOLDOWN_MINUTES)
+
+        # Filter out users on cooldown
+        to_check: list[str] = []
+        for uuid in affected_user_uuids:
+            last_check = _violation_check_cooldown.get(uuid)
+            if last_check and (now_cleanup - last_check).total_seconds() < cooldown_minutes * 60:
+                _stats["total_skipped_cooldown"] += 1
+                continue
+            to_check.append(uuid)
+
+        if not to_check:
+            return
+
+        # Batch whitelist check
+        whitelist_map = await db_service.batch_get_whitelist_status(to_check)
+        excluded_map: dict[str, list[str] | None] = {}
+        remaining: list[str] = []
+        for uuid in to_check:
+            whitelisted, excluded = whitelist_map.get(uuid, (False, None))
+            if whitelisted and excluded is None:
+                continue
+            if excluded:
+                excluded_map[uuid] = excluded
+            remaining.append(uuid)
+
+        if not remaining:
+            return
+
+        # Batch violation detection (all DB queries batched inside)
+        scores = await violation_detector.check_users_batch(
+            remaining,
+            window_minutes=60,
+            excluded_analyzers_map=excluded_map,
         )
+
+        # Post-processing: handle violations and update cooldowns
+        violators: list[str] = []
+        for uuid in remaining:
+            violation_score = scores.get(uuid)
+            had_violation = bool(violation_score and violation_score.total >= min_score)
+            _violation_check_cooldown[uuid] = datetime.utcnow() if not had_violation else (
+                datetime.utcnow() - timedelta(minutes=max(0, cooldown_minutes - 5))
+            )
+            if had_violation:
+                violators.append(uuid)
+
+        # Load HWID devices once for all remaining (used by violators + blacklist check)
+        all_devices = await db_service.batch_get_user_hwid_devices(remaining)
+
+        # Process violators (small subset, per-user is fine)
+        if violators:
+            users_info = await db_service.batch_get_users_info(violators)
+
+            for uuid in violators:
+                try:
+                    violation_score = scores[uuid]
+                    _stats["total_violations_found"] += 1
+                    logger.warning(
+                        "Violation detected: user=%s score=%.1f action=%s reasons=%s",
+                        uuid, violation_score.total,
+                        violation_score.recommended_action.value,
+                        violation_score.reasons[:3],
+                    )
+                    await _handle_violation(
+                        uuid, violation_score,
+                        users_info.get(uuid),
+                        all_devices.get(uuid, []),
+                        whitelist_map.get(uuid, (False, None))[0],
+                    )
+                except Exception as e:
+                    logger.warning("Error handling violation for %s: %s", uuid, e)
+
+        # HWID blacklist check for all remaining users
+        try:
+            all_hwids: set[str] = set()
+            hwid_to_users: dict[str, list[str]] = {}
+            for uid, devices in all_devices.items():
+                for d in devices:
+                    hwid = d.get("hwid")
+                    if hwid:
+                        all_hwids.add(hwid)
+                        hwid_to_users.setdefault(hwid, []).append(uid)
+
+            if all_hwids:
+                bl_matches = await db_service.check_hwids_against_blacklist(list(all_hwids))
+                if bl_matches:
+                    from web.backend.api.v2.violations import _handle_blacklisted_hwid_users
+                    for match in bl_matches:
+                        affected_uids = hwid_to_users.get(match["hwid"], [])
+                        for uid in affected_uids:
+                            user_entry = [{"user_uuid": uid, "username": None}]
+                            await _handle_blacklisted_hwid_users(
+                                match["hwid"], match["action"],
+                                match.get("reason"), user_entry,
+                            )
+        except Exception as e:
+            logger.debug("Batch HWID blacklist check failed: %s", e)
+
+        # User blacklist check (telegram ID)
+        if config_service.get("user_blacklist_enabled", False):
+            try:
+                if violators and set(remaining) == set(violators):
+                    users_info_bl = users_info
+                else:
+                    users_info_bl = await db_service.batch_get_users_info(remaining)
+                for uid, uinfo in users_info_bl.items():
+                    tg_id = uinfo.get("telegram_id") or uinfo.get("telegramId")
+                    if tg_id:
+                        bl_entry = await db_service.is_telegram_id_blacklisted(int(tg_id))
+                        if bl_entry and config_service.get("user_blacklist_auto_block", False):
+                            try:
+                                from shared.api_client import api_client
+                                await api_client.disable_user(uid)
+                                logger.info("Auto-blocked blacklisted user: %s (tg_id=%d)", uid, tg_id)
+                            except Exception:
+                                pass
+            except Exception as e:
+                logger.debug("Batch user blacklist check failed: %s", e)
+
+        # Evict oldest cooldown entries if too large
+        if len(_violation_check_cooldown) > MAX_COOLDOWN_SIZE:
+            sorted_keys = sorted(_violation_check_cooldown, key=_violation_check_cooldown.get)
+            evict_count = len(sorted_keys) // 5
+            for k in sorted_keys[:evict_count]:
+                _violation_check_cooldown.pop(k, None)
 
         # Periodic cleanup of old violations
         global _last_violation_cleanup
@@ -928,7 +1044,123 @@ async def _run_violation_detection(affected_user_uuids: set):
             _last_violation_cleanup = datetime.utcnow()
 
     except Exception as e:
-        logger.error("Background violation detection failed: %s", e)
+        logger.error("Background violation detection failed: %s", e, exc_info=True)
+
+
+async def _handle_violation(
+    user_uuid: str,
+    violation_score,
+    user_info: dict | None,
+    hwid_devices: list,
+    is_whitelisted: bool,
+):
+    """Post-process a single detected violation: notify, save, auto-block."""
+    active_conns = await connection_monitor.get_user_active_connections(user_uuid, max_age_minutes=5)
+
+    ip_metadata = {}
+    if active_conns:
+        try:
+            from shared.geoip import get_geoip_service
+            geoip = get_geoip_service()
+            unique_ips = list(set(str(c.ip_address) for c in active_conns))
+            ip_metadata = await geoip.lookup_batch(unique_ips)
+        except Exception as geo_error:
+            logger.warning("GeoIP lookup failed for user %s: %s", user_uuid, geo_error)
+
+    if not is_whitelisted:
+        try:
+            from web.backend.core.violation_notifier import send_violation_notification
+            await send_violation_notification(
+                user_uuid=user_uuid,
+                violation_score={
+                    "total": violation_score.total,
+                    "recommended_action": violation_score.recommended_action,
+                    "reasons": violation_score.reasons,
+                    "breakdown": violation_score.breakdown,
+                    "confidence": violation_score.confidence,
+                },
+                user_info=user_info,
+                active_connections=active_conns,
+                ip_metadata=ip_metadata,
+            )
+        except Exception as notify_error:
+            logger.warning("Failed to send violation notification for user %s: %s", user_uuid, notify_error)
+
+    try:
+        breakdown = violation_score.breakdown
+        temporal = breakdown.get("temporal")
+        geo = breakdown.get("geo")
+        asn = breakdown.get("asn")
+        profile = breakdown.get("profile")
+        device = breakdown.get("device")
+        hwid = breakdown.get("hwid")
+        ua = breakdown.get("user_agent")
+
+        ip_addresses = list(set(str(c.ip_address) for c in active_conns)) if active_conns else None
+        username = user_info.get("username") if user_info else None
+        email = user_info.get("email") if user_info else None
+        telegram_id = user_info.get("telegram_id") if user_info else None
+        device_limit = user_info.get("hwidDeviceLimit", 1) if user_info else 1
+
+        await db_service.save_violation(
+            user_uuid=user_uuid,
+            score=violation_score.total,
+            recommended_action=violation_score.recommended_action.value,
+            username=username, email=email, telegram_id=telegram_id,
+            confidence=violation_score.confidence,
+            temporal_score=temporal.score if temporal else None,
+            geo_score=geo.score if geo else None,
+            asn_score=asn.score if asn else None,
+            profile_score=profile.score if profile else None,
+            device_score=device.score if device else None,
+            ip_addresses=ip_addresses,
+            countries=list(geo.countries) if geo and geo.countries else None,
+            cities=list(geo.cities) if geo and geo.cities else None,
+            asn_types=list(asn.asn_types) if asn and asn.asn_types else None,
+            os_list=device.os_list if device else None,
+            client_list=device.client_list if device else None,
+            reasons=violation_score.reasons[:10] if violation_score.reasons else None,
+            simultaneous_connections=temporal.simultaneous_connections_count if temporal else None,
+            unique_ips_count=len(ip_addresses) if ip_addresses else None,
+            device_limit=device_limit,
+            impossible_travel=geo.impossible_travel_detected if geo else False,
+            is_mobile=asn.is_mobile_carrier if asn else False,
+            is_datacenter=asn.is_datacenter if asn else False,
+            is_vpn=asn.is_vpn if asn else False,
+            hwid_score=hwid.score if hwid else None,
+            hwid_matched_users=json.dumps(hwid.matched_details) if hwid and hwid.matched_details else None,
+            user_agent_score=ua.score if ua else None,
+            suspicious_user_agents=json.dumps([
+                {"request_id": s.request_id, "user_agent": s.user_agent,
+                 "request_ip": s.request_ip, "request_at": s.request_at,
+                 "classification": s.classification}
+                for s in ua.suspicious_agents
+            ]) if ua and ua.suspicious_agents else None,
+        )
+
+        from shared.violation_detector import ViolationAction
+        if violation_score.recommended_action == ViolationAction.HARD_BLOCK:
+            try:
+                from shared.api_client import api_client
+                await api_client.disable_user(user_uuid)
+                logger.warning("Auto-blocked user %s score=%.1f", user_uuid[:8], violation_score.total)
+            except Exception as block_error:
+                logger.warning("Failed to auto-block user %s: %s", user_uuid, block_error)
+
+        try:
+            from web.backend.api.v2.websocket import broadcast_violation
+            await broadcast_violation({
+                "user_uuid": user_uuid,
+                "username": username,
+                "score": violation_score.total,
+                "recommended_action": violation_score.recommended_action.value,
+                "reasons": violation_score.reasons[:5],
+            })
+        except Exception:
+            pass
+
+    except Exception as save_error:
+        logger.warning("Failed to save violation for user %s: %s", user_uuid, save_error)
 
 
 @router.get("/health")

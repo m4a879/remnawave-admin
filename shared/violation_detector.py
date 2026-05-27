@@ -1704,10 +1704,10 @@ class HwidCrossAccountAnalyzer:
     def __init__(self, db_service: DatabaseService):
         self.db = db_service
 
-    async def analyze(self, user_uuid: str) -> HwidScore:
+    async def analyze(self, user_uuid: str, prefetched_shared: Optional[List[Dict[str, Any]]] = None) -> HwidScore:
         """Проверить, используются ли HWID пользователя на других аккаунтах."""
         try:
-            shared = await self.db.get_shared_hwids_for_user(user_uuid)
+            shared = prefetched_shared if prefetched_shared is not None else await self.db.get_shared_hwids_for_user(user_uuid)
         except Exception as e:
             logger.warning("HWID cross-account check failed for %s: %s", user_uuid, e)
             return HwidScore(score=0.0, reasons=[])
@@ -2145,7 +2145,19 @@ class IntelligentViolationDetector:
         self._srh_cache: Dict[str, tuple] = {}
         self._srh_cache_ttl_seconds = 300  # 5 минут
     
-    async def check_user(self, user_uuid: str, window_minutes: int = 60, excluded_analyzers: Optional[List[str]] = None) -> Optional[ViolationScore]:
+    async def check_user(
+        self,
+        user_uuid: str,
+        window_minutes: int = 60,
+        excluded_analyzers: Optional[List[str]] = None,
+        *,
+        prefetched_device_count: Optional[int] = None,
+        prefetched_active_connections: Optional[List['ActiveConnection']] = None,
+        prefetched_history_30d: Optional[List[Dict[str, Any]]] = None,
+        prefetched_baseline: Optional[Dict[str, Any]] = None,
+        prefetched_shared_hwids: Optional[List[Dict[str, Any]]] = None,
+        prefetched_srh_records: Optional[List[Dict[str, Any]]] = None,
+    ) -> Optional[ViolationScore]:
         """
         Проверить пользователя на нарушения.
 
@@ -2153,6 +2165,7 @@ class IntelligentViolationDetector:
             user_uuid: UUID пользователя
             window_minutes: Временное окно для анализа (по умолчанию 60 минут)
             excluded_analyzers: Список анализаторов для пропуска (per-user exclusions)
+            prefetched_*: Предзагруженные данные из batch-запросов (bypass per-user DB queries)
 
         Returns:
             ViolationScore или None при ошибке
@@ -2168,15 +2181,14 @@ class IntelligentViolationDetector:
             return None
 
         try:
-            # Получаем количество устройств пользователя из локальной БД
-            user_device_count = await self.db.get_user_devices_count(user_uuid)
-            
-            # Получаем активные подключения (только за последние 5 минут)
-            # Это учитывает роутинг в приложении - старые подключения не считаются активными
-            active_connections = await self.connection_monitor.get_user_active_connections(user_uuid, max_age_minutes=5)
+            user_device_count = prefetched_device_count if prefetched_device_count is not None else await self.db.get_user_devices_count(user_uuid)
 
-            # Получаем историю подключений за 30 дней (один запрос для всех анализаторов)
-            connection_history_30d = await self.db.get_connection_history(user_uuid, days=30)
+            if prefetched_active_connections is not None:
+                active_connections = prefetched_active_connections
+            else:
+                active_connections = await self.connection_monitor.get_user_active_connections(user_uuid, max_age_minutes=5)
+
+            connection_history_30d = prefetched_history_30d if prefetched_history_30d is not None else await self.db.get_connection_history(user_uuid, days=30)
 
             # Нарезаем 7-дневную историю для анализаторов temporal/geo/asn/device
             history_days = max(1, min(7, window_minutes // 60 + 1))
@@ -2240,19 +2252,23 @@ class IntelligentViolationDetector:
             # Анализируем отклонения от профиля (async)
             current_ips = {str(conn.ip_address) for conn in active_connections}
             current_countries = geo_score.countries
-            profile_score = await self.profile_analyzer.analyze(user_uuid, current_ips, current_countries, connection_history_30d=connection_history_30d)
-            
+            profile_score = await self.profile_analyzer.analyze(
+                user_uuid, current_ips, current_countries,
+                baseline=prefetched_baseline,
+                connection_history_30d=connection_history_30d,
+            )
+
             # Анализируем fingerprint устройств (с учётом лимита устройств)
             device_score = self.device_analyzer.analyze(active_connections, connection_history, user_device_count)
 
             # Анализируем кросс-аккаунт HWID
-            hwid_score = await self.hwid_analyzer.analyze(user_uuid)
+            hwid_score = await self.hwid_analyzer.analyze(user_uuid, prefetched_shared=prefetched_shared_hwids)
 
             # Анализируем User-Agent подписочных запросов через Panel SRH (детекция двойных туннелей и скриптов)
             ua_score = UserAgentScore(score=0.0, reasons=[])
             if config_service.get("violations_analyzer_user_agent", True) and "user_agent" not in (excluded_analyzers or []):
                 try:
-                    srh_records = await self._fetch_srh_records(user_uuid)
+                    srh_records = prefetched_srh_records if prefetched_srh_records is not None else await self._fetch_srh_records(user_uuid)
                     if srh_records is not None:
                         ua_whitelist_extra = config_service.get("violation_ua_whitelist_extra", []) or []
                         ua_blacklist_extra = config_service.get("violation_ua_blacklist_extra", []) or []
@@ -2849,6 +2865,80 @@ class IntelligentViolationDetector:
         except Exception as e:
             logger.debug("Error checking known IP pairs: %s", e)
             return 1.0
+
+    async def check_users_batch(
+        self,
+        user_uuids: List[str],
+        window_minutes: int = 60,
+        excluded_analyzers_map: Optional[Dict[str, Optional[List[str]]]] = None,
+    ) -> Dict[str, Optional['ViolationScore']]:
+        """Batch violation check: prefetch all data, then analyze per-user in memory."""
+        if not self.db.is_connected or not user_uuids:
+            return {}
+
+        from shared.config_service import config_service
+        if not config_service.get("violations_enabled", True):
+            return {}
+
+        device_counts, active_conns_map, histories_30d, baselines, shared_hwids_map = await asyncio.gather(
+            self.db.batch_get_user_devices_counts(user_uuids),
+            self.db.batch_get_active_connections(user_uuids, max_age_minutes=5),
+            self.db.batch_get_connection_histories(user_uuids, days=30, limit_per_user=200),
+            self.db.batch_get_user_baselines(user_uuids),
+            self.db.batch_get_shared_hwids(user_uuids),
+        )
+
+        ua_enabled = config_service.get("violations_analyzer_user_agent", True)
+        srh_map: Dict[str, List[Dict[str, Any]]] = {}
+        if ua_enabled:
+            srh_map = await self.db.batch_get_srh_records(user_uuids, limit_per_user=100)
+
+        # Convert raw active_conns rows to ActiveConnection dataclasses
+        active_connections_map: Dict[str, List[ActiveConnection]] = {}
+        for uid, rows in active_conns_map.items():
+            active_connections_map[uid] = [
+                ActiveConnection(
+                    connection_id=r.get("id"),
+                    user_uuid=r.get("user_uuid"),
+                    ip_address=str(r.get("ip_address", "")),
+                    node_uuid=r.get("node_uuid"),
+                    connected_at=r.get("connected_at"),
+                    device_info=r.get("device_info"),
+                )
+                for r in rows
+            ]
+
+        # Normalize SRH records
+        srh_normalized: Dict[str, List[Dict[str, Any]]] = {}
+        for uid, rows in srh_map.items():
+            srh_normalized[uid] = [
+                {"request_id": r.get("id"), "user_agent": r.get("user_agent"),
+                 "request_ip": r.get("request_ip"), "request_at": r.get("request_at")}
+                for r in rows
+            ]
+
+        results: Dict[str, Optional[ViolationScore]] = {}
+        excluded_map = excluded_analyzers_map or {}
+
+        for uid in user_uuids:
+            try:
+                result = await self.check_user(
+                    uid,
+                    window_minutes=window_minutes,
+                    excluded_analyzers=excluded_map.get(uid),
+                    prefetched_device_count=device_counts.get(uid, 1),
+                    prefetched_active_connections=active_connections_map.get(uid, []),
+                    prefetched_history_30d=histories_30d.get(uid, []),
+                    prefetched_baseline=baselines.get(uid),
+                    prefetched_shared_hwids=shared_hwids_map.get(uid, []),
+                    prefetched_srh_records=srh_normalized.get(uid),
+                )
+                results[uid] = result
+            except Exception as e:
+                logger.warning("Batch check_user failed for %s: %s", uid, e)
+                results[uid] = None
+
+        return results
 
     def _get_action(self, score: float) -> ViolationAction:
         """Определить рекомендуемое действие на основе скора."""

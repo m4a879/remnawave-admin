@@ -6410,6 +6410,361 @@ class DatabaseService:
             )
             return int(result.split()[-1]) if result else 0
 
+    # ==================== Batch methods for violation detection ====================
+
+    async def batch_get_whitelist_status(
+        self, user_uuids: List[str]
+    ) -> Dict[str, tuple]:
+        """Batch whitelist check. Returns {uuid: (is_whitelisted, excluded_analyzers)}."""
+        if not self.is_connected or not user_uuids:
+            return {}
+
+        if self._whitelist_table_available is False:
+            return {}
+
+        now = time.time()
+        result: Dict[str, tuple] = {}
+        to_fetch: List[str] = []
+
+        for uid in user_uuids:
+            cached = self._whitelist_cache.get(uid)
+            if cached and (now - cached[1]) < self._WHITELIST_CACHE_TTL:
+                result[uid] = cached[0]
+            else:
+                to_fetch.append(uid)
+
+        if len(self._whitelist_cache) > self._WHITELIST_CACHE_MAX_SIZE:
+            expired = [k for k, (_, ts) in self._whitelist_cache.items()
+                       if (now - ts) >= self._WHITELIST_CACHE_TTL]
+            for k in expired:
+                self._whitelist_cache.pop(k, None)
+
+        if not to_fetch:
+            return result
+
+        try:
+            async with self.acquire() as conn:
+                rows = await conn.fetch(
+                    """
+                    SELECT user_uuid::text, excluded_analyzers
+                    FROM violation_whitelist
+                    WHERE user_uuid = ANY($1::text[])
+                      AND (expires_at IS NULL OR expires_at > NOW())
+                    """,
+                    to_fetch,
+                )
+            found = set()
+            for r in rows:
+                uid = r["user_uuid"]
+                found.add(uid)
+                excluded = r.get("excluded_analyzers")
+                val = (True, list(excluded) if excluded else None)
+                result[uid] = val
+                self._whitelist_cache[uid] = (val, now)
+
+            for uid in to_fetch:
+                if uid not in found:
+                    val = (False, None)
+                    result[uid] = val
+                    self._whitelist_cache[uid] = (val, now)
+
+            self._whitelist_table_available = True
+        except Exception as e:
+            if "does not exist" in str(e).lower():
+                self._whitelist_table_available = False
+            else:
+                logger.warning("batch_get_whitelist_status failed: %s", e)
+
+        return result
+
+    async def batch_get_user_devices_counts(
+        self, user_uuids: List[str]
+    ) -> Dict[str, int]:
+        """Batch get device counts from users.raw_data. Returns {uuid: count}."""
+        if not self.is_connected or not user_uuids:
+            return {}
+
+        try:
+            async with self.acquire() as conn:
+                rows = await conn.fetch(
+                    "SELECT uuid::text, raw_data FROM users WHERE uuid = ANY($1::text[])",
+                    user_uuids,
+                )
+
+            result: Dict[str, int] = {}
+            for row in rows:
+                uid = row["uuid"]
+                count = 1
+                raw_data = row.get("raw_data")
+                if raw_data:
+                    if isinstance(raw_data, str):
+                        try:
+                            raw_data = json.loads(raw_data)
+                        except json.JSONDecodeError:
+                            raw_data = None
+                    if isinstance(raw_data, dict):
+                        response = raw_data.get("response", raw_data)
+                        hwid_limit = response.get("hwidDeviceLimit")
+                        if hwid_limit is not None:
+                            limit = int(hwid_limit)
+                            count = 1 if limit == 0 else max(1, limit)
+                        else:
+                            dc = response.get("devicesCount")
+                            if dc is not None:
+                                count = max(1, int(dc))
+                result[uid] = count
+
+            for uid in user_uuids:
+                if uid not in result:
+                    result[uid] = 1
+            return result
+        except Exception as e:
+            logger.warning("batch_get_user_devices_counts failed: %s", e)
+            return {uid: 1 for uid in user_uuids}
+
+    async def batch_get_active_connections(
+        self, user_uuids: List[str], max_age_minutes: int = 5
+    ) -> Dict[str, List[Dict[str, Any]]]:
+        """Batch get active connections for multiple users."""
+        if not self.is_connected or not user_uuids:
+            return {}
+
+        try:
+            async with self.acquire() as conn:
+                rows = await conn.fetch(
+                    """
+                    SELECT id, user_uuid, ip_address, node_uuid, connected_at, device_info
+                    FROM user_connections
+                    WHERE user_uuid = ANY($1::text[])
+                      AND disconnected_at IS NULL
+                      AND connected_at > NOW() - make_interval(mins => $2)
+                    ORDER BY user_uuid, connected_at DESC
+                    """,
+                    user_uuids, max_age_minutes,
+                )
+
+            result: Dict[str, List[Dict[str, Any]]] = {}
+            for row in rows:
+                uid = str(row["user_uuid"])
+                result.setdefault(uid, []).append(dict(row))
+            return result
+        except Exception as e:
+            logger.warning("batch_get_active_connections failed: %s", e)
+            return {}
+
+    async def batch_get_connection_histories(
+        self, user_uuids: List[str], days: int = 30, limit_per_user: int = 200
+    ) -> Dict[str, List[Dict[str, Any]]]:
+        """Batch get connection history using LATERAL JOIN for per-user LIMIT."""
+        if not self.is_connected or not user_uuids:
+            return {}
+
+        try:
+            async with self.acquire() as conn:
+                rows = await conn.fetch(
+                    """
+                    SELECT sub.* FROM unnest($1::text[]) AS t(uid)
+                    CROSS JOIN LATERAL (
+                        SELECT id, user_uuid, ip_address, node_uuid,
+                               connected_at, disconnected_at, device_info
+                        FROM user_connections
+                        WHERE user_uuid = t.uid::uuid
+                          AND connected_at > NOW() - make_interval(days => $2)
+                        ORDER BY connected_at DESC
+                        LIMIT $3
+                    ) sub
+                    """,
+                    user_uuids, days, limit_per_user,
+                )
+
+            result: Dict[str, List[Dict[str, Any]]] = {}
+            for row in rows:
+                uid = str(row["user_uuid"])
+                result.setdefault(uid, []).append(dict(row))
+            return result
+        except Exception as e:
+            logger.warning("batch_get_connection_histories failed: %s", e)
+            return {}
+
+    async def batch_get_user_baselines(
+        self, user_uuids: List[str], max_age_seconds: int = 3600
+    ) -> Dict[str, Dict[str, Any]]:
+        """Batch get cached baselines for multiple users."""
+        if not self.is_connected or not user_uuids:
+            return {}
+
+        try:
+            async with self.acquire() as conn:
+                rows = await conn.fetch(
+                    """
+                    SELECT user_uuid::text, typical_countries, typical_cities,
+                           typical_regions, typical_asns, known_ips,
+                           avg_daily_unique_ips, max_daily_unique_ips,
+                           typical_hours, avg_session_duration_min, data_points
+                    FROM user_baselines
+                    WHERE user_uuid = ANY($1::text[])
+                      AND computed_at > NOW() - make_interval(secs => $2)
+                    """,
+                    user_uuids, max_age_seconds,
+                )
+
+            result: Dict[str, Dict[str, Any]] = {}
+            for row in rows:
+                uid = row["user_uuid"]
+                result[uid] = {
+                    'typical_countries': list(row['typical_countries'] or []),
+                    'typical_cities': list(row['typical_cities'] or []),
+                    'typical_regions': list(row['typical_regions'] or []),
+                    'typical_asns': list(row['typical_asns'] or []),
+                    'known_ips': list(row['known_ips'] or [])[:500],
+                    'avg_daily_unique_ips': row['avg_daily_unique_ips'] or 0.0,
+                    'max_daily_unique_ips': row['max_daily_unique_ips'] or 0,
+                    'typical_hours': list(row['typical_hours'] or []),
+                    'avg_session_duration_minutes': row['avg_session_duration_min'] or 0,
+                    'data_points': row['data_points'] or 0,
+                }
+            return result
+        except Exception as e:
+            logger.warning("batch_get_user_baselines failed: %s", e)
+            return {}
+
+    async def batch_get_shared_hwids(
+        self, user_uuids: List[str]
+    ) -> Dict[str, List[Dict[str, Any]]]:
+        """Batch get shared HWIDs for multiple users."""
+        if not self.is_connected or not user_uuids:
+            return {}
+
+        try:
+            async with self.acquire() as conn:
+                rows = await conn.fetch(
+                    """
+                    SELECT h1.user_uuid::text AS source_uuid,
+                           h2.hwid,
+                           u.uuid::text AS user_uuid,
+                           u.username, u.status, u.telegram_id,
+                           me.telegram_id AS self_telegram_id
+                    FROM user_hwid_devices h1
+                    JOIN users me ON me.uuid = h1.user_uuid
+                    JOIN user_hwid_devices h2
+                      ON h1.hwid = h2.hwid AND h2.user_uuid != h1.user_uuid
+                    JOIN users u ON h2.user_uuid = u.uuid
+                    WHERE h1.user_uuid = ANY($1::text[])
+                    ORDER BY h1.user_uuid, h2.hwid, u.username
+                    """,
+                    user_uuids,
+                )
+
+            result: Dict[str, List[Dict[str, Any]]] = {}
+            temp: Dict[str, Dict[str, Dict[str, Any]]] = {}
+            for r in rows:
+                src = r["source_uuid"]
+                hwid = r["hwid"]
+                if src not in temp:
+                    temp[src] = {}
+                if hwid not in temp[src]:
+                    temp[src][hwid] = {
+                        "hwid": hwid,
+                        "self_telegram_id": r["self_telegram_id"],
+                        "other_users": [],
+                    }
+                temp[src][hwid]["other_users"].append({
+                    "uuid": r["user_uuid"],
+                    "username": r["username"],
+                    "status": r["status"],
+                    "telegram_id": r["telegram_id"],
+                })
+
+            for src, hwid_groups in temp.items():
+                result[src] = list(hwid_groups.values())
+            return result
+        except Exception as e:
+            logger.warning("batch_get_shared_hwids failed: %s", e)
+            return {}
+
+    async def batch_get_user_hwid_devices(
+        self, user_uuids: List[str]
+    ) -> Dict[str, List[Dict[str, Any]]]:
+        """Batch get HWID devices for multiple users."""
+        if not self.is_connected or not user_uuids:
+            return {}
+
+        try:
+            async with self.acquire() as conn:
+                rows = await conn.fetch(
+                    """
+                    SELECT user_uuid::text, hwid, platform, os_version,
+                           device_model, app_version, user_agent,
+                           created_at, updated_at
+                    FROM user_hwid_devices
+                    WHERE user_uuid = ANY($1::text[])
+                    ORDER BY user_uuid, created_at DESC
+                    """,
+                    user_uuids,
+                )
+
+            result: Dict[str, List[Dict[str, Any]]] = {}
+            for row in rows:
+                uid = row["user_uuid"]
+                result.setdefault(uid, []).append(dict(row))
+            return result
+        except Exception as e:
+            logger.warning("batch_get_user_hwid_devices failed: %s", e)
+            return {}
+
+    async def batch_get_users_info(
+        self, user_uuids: List[str]
+    ) -> Dict[str, Dict[str, Any]]:
+        """Batch get user info for multiple users."""
+        if not self.is_connected or not user_uuids:
+            return {}
+
+        try:
+            async with self.acquire() as conn:
+                rows = await conn.fetch(
+                    "SELECT * FROM users WHERE uuid = ANY($1::text[])",
+                    user_uuids,
+                )
+            return {
+                str(row["uuid"]): _db_row_to_api_format(row)
+                for row in rows
+            }
+        except Exception as e:
+            logger.warning("batch_get_users_info failed: %s", e)
+            return {}
+
+    async def batch_get_srh_records(
+        self, user_uuids: List[str], limit_per_user: int = 100
+    ) -> Dict[str, List[Dict[str, Any]]]:
+        """Batch get SRH records using LATERAL JOIN."""
+        if not self.is_connected or not user_uuids:
+            return {}
+
+        try:
+            async with self.acquire() as conn:
+                rows = await conn.fetch(
+                    """
+                    SELECT sub.* FROM unnest($1::text[]) AS t(uid)
+                    CROSS JOIN LATERAL (
+                        SELECT id, user_uuid::text, request_ip, user_agent, request_at
+                        FROM subscription_request_history
+                        WHERE user_uuid = t.uid::uuid
+                        ORDER BY request_at DESC
+                        LIMIT $2
+                    ) sub
+                    """,
+                    user_uuids, limit_per_user,
+                )
+
+            result: Dict[str, List[Dict[str, Any]]] = {}
+            for row in rows:
+                uid = row["user_uuid"]
+                result.setdefault(uid, []).append(dict(row))
+            return result
+        except Exception as e:
+            logger.warning("batch_get_srh_records failed: %s", e)
+            return {}
+
 
 def _db_row_to_api_format(row) -> Dict[str, Any]:
     """
