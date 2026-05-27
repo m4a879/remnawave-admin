@@ -233,18 +233,7 @@ async def main() -> None:
         db_connected = await db_service.connect()
         if db_connected:
             logger.info("✅ Database connected")
-
-            # Start periodic table maintenance (VACUUM ANALYZE heavy tables every 6h)
-            async def _maintenance_loop():
-                while True:
-                    await asyncio.sleep(6 * 3600)
-                    try:
-                        await db_service.run_table_maintenance()
-                        logger.info("Periodic table maintenance completed")
-                    except Exception as exc:
-                        logger.warning("Table maintenance failed: %s", exc)
-
-            _bg_maintenance_task = asyncio.create_task(_maintenance_loop())
+            # VACUUM ANALYZE runs in web-backend only (avoid double maintenance)
         else:
             logger.warning("⚠️ Database connection failed, running without cache")
     else:
@@ -279,16 +268,7 @@ async def main() -> None:
     health_checker_task = asyncio.create_task(health_checker.start())
     dp["health_checker"] = health_checker
 
-    # Инициализируем MaxMind updater (если настроен лицензионный ключ)
-    maxmind_updater = None
-    if settings.maxmind_license_key:
-        from shared.maxmind_updater import MaxMindUpdater
-        maxmind_updater = MaxMindUpdater(
-            license_key=settings.maxmind_license_key,
-            city_path=settings.maxmind_city_db,
-            asn_path=settings.maxmind_asn_db,
-        )
-        await maxmind_updater.start()
+    # MaxMind GeoIP databases are downloaded by web-backend/collector (shared geoip volume)
 
     # Инициализируем сервисы (если БД подключена)
     if db_connected:

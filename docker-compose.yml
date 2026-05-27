@@ -13,6 +13,8 @@ services:
       PYTHONPATH: /app
       MAXMIND_CITY_DB: /app/geoip/GeoLite2-City.mmdb
       MAXMIND_ASN_DB: /app/geoip/GeoLite2-ASN.mmdb
+      DB_POOL_MIN_SIZE: '2'
+      DB_POOL_MAX_SIZE: '5'
     volumes:
       - ./logs:/app/logs
       - geoip_data:/app/geoip
