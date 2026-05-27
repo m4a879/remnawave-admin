@@ -79,6 +79,14 @@ services:
   # Веб-панель
   # ===========================================
 
+  # APP_MODE (через .env):
+  #   full (default) — всё в одном контейнере, ничего не меняется
+  #   api            — только UI API, плагины, автоматизация (используй с профилем collector)
+  #
+  # Для разделения: в .env добавь APP_MODE=api и запусти:
+  #   docker compose --profile collector up -d
+  # Агенты остаются на 8081 (collector), админка на WEB_BACKEND_PORT (default 8081 в full, 8082 в api)
+
   web-backend:
     image: ghcr.io/case211/remnawave-admin-web-backend:latest
     container_name: remnawave-web-backend
@@ -88,23 +96,21 @@ services:
       - .env
     environment:
       WEB_HOST: '0.0.0.0'
-      WEB_PORT: '8081'
+      WEB_PORT: '${WEB_BACKEND_PORT:-8081}'
+      APP_MODE: '${APP_MODE:-full}'
       MAXMIND_CITY_DB: /app/geoip/GeoLite2-City.mmdb
       MAXMIND_ASN_DB: /app/geoip/GeoLite2-ASN.mmdb
       BACKUP_DIR: /app/backups
       # Redis (опционально, нужен при >1 инстансе для общего кеша и rate limiting)
       # REDIS_URL: redis://redis:6379/0
+    command: ["python", "-m", "uvicorn", "web.backend.main:app", "--host", "0.0.0.0", "--port", "${WEB_BACKEND_PORT:-8081}", "--no-access-log", "--log-level", "warning", "--ws", "websockets", "--ws-per-message-deflate", "true"]
     volumes:
       - ./logs:/app/logs
       - geoip_data:/app/geoip
       - ./backups:/app/backups
-      # Paid-plugin wheels are uploaded through the admin UI and live in
-      # this volume. Mounting it persists installed plugins across
-      # container recreation and lets operators drop wheels in via FTP
-      # too (see ./plugins/ next to docker-compose.yml).
       - ./plugins:/app/plugins
     ports:
-      - "${WEB_BACKEND_PORT:-8081}:8081"
+      - "${WEB_BACKEND_PORT:-8081}:${WEB_BACKEND_PORT:-8081}"
       - "${MAIL_INBOUND_PORT:-2525}:${MAIL_INBOUND_PORT:-2525}"
       - "${MAIL_SUBMISSION_PORT:-587}:${MAIL_SUBMISSION_PORT:-587}"
     networks:
@@ -113,7 +119,7 @@ services:
       remnawave-admin-db:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8081/api/v2/health')"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:${WEB_BACKEND_PORT:-8081}/api/v2/health')"]
       interval: 10s
       timeout: 10s
       retries: 5
@@ -135,23 +141,23 @@ services:
       - .env
     environment:
       WEB_HOST: '0.0.0.0'
-      WEB_PORT: '8082'
+      WEB_PORT: '8081'
       APP_MODE: 'collector'
       MAXMIND_CITY_DB: /app/geoip/GeoLite2-City.mmdb
       MAXMIND_ASN_DB: /app/geoip/GeoLite2-ASN.mmdb
-    command: ["python", "-m", "uvicorn", "web.backend.main:app", "--host", "0.0.0.0", "--port", "8082", "--no-access-log", "--log-level", "warning"]
+    command: ["python", "-m", "uvicorn", "web.backend.main:app", "--host", "0.0.0.0", "--port", "8081", "--no-access-log", "--log-level", "warning"]
     volumes:
       - ./logs:/app/logs
       - geoip_data:/app/geoip
     ports:
-      - "${COLLECTOR_PORT:-8082}:8082"
+      - "8081:8081"
     networks:
       - remnawave-network
     depends_on:
       remnawave-admin-db:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8082/api/v2/health')"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8081/api/v2/health')"]
       interval: 10s
       timeout: 10s
       retries: 5
