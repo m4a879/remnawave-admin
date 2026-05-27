@@ -215,9 +215,8 @@ class TestActionNotify:
         engine = AutomationEngine()
         config = {"channel": "telegram", "message": "User {username} blocked"}
 
-        with patch("web.backend.core.notifier._send_telegram_message",
-                    new_callable=AsyncMock, return_value=True) as mock_send, \
-             patch("web.backend.core.notifier._esc", side_effect=lambda x: x):
+        with patch("web.backend.core.notification_service.create_notification",
+                    new_callable=AsyncMock, return_value=1) as mock_send:
             result = await engine._action_notify(
                 config, "user", "u1", {"username": "alice"},
             )

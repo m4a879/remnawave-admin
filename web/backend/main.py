@@ -860,7 +860,7 @@ def create_app() -> FastAPI:
             if not is_ip_allowed(client_ip, allowed):
                 logger.warning("IP %s rejected by whitelist (path: %s)", client_ip, request.url.path)
                 # Async notification (fire-and-forget)
-                from web.backend.core.notifier import notify_ip_rejected
+                from web.backend.core.notification_service import notify_ip_rejected
                 import asyncio
                 asyncio.create_task(notify_ip_rejected(client_ip, str(request.url.path)))
                 return Response(

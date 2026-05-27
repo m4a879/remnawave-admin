@@ -624,3 +624,63 @@ async def _dispatch_external(
 
     except Exception as e:
         logger.error("External dispatch failed for admin %s: %s", admin_id, e, exc_info=True)
+
+
+# ── Security notifications (consolidated from notifier.py) ────────
+
+
+def _esc_html(text: str) -> str:
+    return str(text).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
+def _now_str() -> str:
+    return datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
+
+
+async def notify_login_failed(
+    ip: str, username: str, auth_method: str,
+    reason: str = "", failures_count: int = 0, password: str = "",
+) -> None:
+    lines = [
+        "<b>Failed login attempt</b>", "",
+        f"<b>IP:</b> <code>{_esc_html(ip)}</code>",
+        f"<b>Username:</b> <code>{_esc_html(username)}</code>",
+        f"<b>Method:</b> {_esc_html(auth_method)}",
+    ]
+    if password:
+        lines.append(f"<b>Password:</b> <tg-spoiler>{_esc_html(password)}</tg-spoiler>")
+    if reason:
+        lines.append(f"<b>Reason:</b> {_esc_html(reason)}")
+    if failures_count > 0:
+        lines.append(f"<b>Consecutive failures:</b> {failures_count}")
+    lines.append(f"<b>Time:</b> {_now_str()}")
+    asyncio.create_task(_send_to_global_telegram("Login failed", "\n".join(lines), "warning", "service"))
+
+
+async def notify_login_success(ip: str, username: str, auth_method: str) -> None:
+    lines = [
+        f"<b>IP:</b> <code>{_esc_html(ip)}</code>",
+        f"<b>Username:</b> <code>{_esc_html(username)}</code>",
+        f"<b>Method:</b> {_esc_html(auth_method)}",
+        f"<b>Time:</b> {_now_str()}",
+    ]
+    asyncio.create_task(_send_to_global_telegram("Admin login", "\n".join(lines), "info", "service"))
+
+
+async def notify_ip_blocked(ip: str, lockout_seconds: int, failures: int) -> None:
+    lines = [
+        f"<b>IP:</b> <code>{_esc_html(ip)}</code>",
+        f"<b>Failed attempts:</b> {failures}",
+        f"<b>Lockout:</b> {lockout_seconds // 60} min",
+        f"<b>Time:</b> {_now_str()}",
+    ]
+    asyncio.create_task(_send_to_global_telegram("IP locked out (brute-force)", "\n".join(lines), "critical", "service"))
+
+
+async def notify_ip_rejected(ip: str, path: str) -> None:
+    lines = [
+        f"<b>IP:</b> <code>{_esc_html(ip)}</code>",
+        f"<b>Path:</b> <code>{_esc_html(path[:100])}</code>",
+        f"<b>Time:</b> {_now_str()}",
+    ]
+    asyncio.create_task(_send_to_global_telegram("Access denied (IP whitelist)", "\n".join(lines), "warning", "service"))

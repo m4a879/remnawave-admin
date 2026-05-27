@@ -8,7 +8,7 @@ from web.backend.core.errors import api_error, E
 from web.backend.core.config import get_web_settings
 from web.backend.core.login_guard import login_guard
 from web.backend.core.fail2ban_logger import log_auth_failure
-from web.backend.core.notifier import (
+from web.backend.core.notification_service import (
     notify_login_failed,
     notify_login_success,
     notify_ip_blocked,
