@@ -222,6 +222,28 @@ async def send_user_notification(
             else:
                 lines.append("<i>Изменения не определены</i>")
 
+            # Краткая карточка с основными полями (контекст)
+            lines.append("")
+            card_parts = []
+            status = info.get("status")
+            if status:
+                card_parts.append(f"Статус: <code>{status}</code>")
+            traffic_limit = info.get("trafficLimitBytes")
+            card_parts.append(f"Лимит: <code>{format_bytes(traffic_limit) if traffic_limit else 'Безлимит'}</code>")
+            expire_at = info.get("expireAt")
+            if expire_at:
+                card_parts.append(f"Истекает: <code>{format_datetime(expire_at)}</code>")
+            telegram_id = info.get("telegramId")
+            if telegram_id is not None:
+                card_parts.append(f"TG: <code>{telegram_id}</code>")
+            email = info.get("email")
+            if email:
+                card_parts.append(f"Email: <code>{_esc(email)}</code>")
+            description = info.get("description")
+            if description:
+                card_parts.append(f"Описание: <code>{_esc(description[:50])}</code>")
+            lines.append("ℹ️ " + " · ".join(card_parts))
+
         else:
             # Для created/deleted/other: полная информация
             lines.append("📊 <b>Трафик и лимиты</b>")
