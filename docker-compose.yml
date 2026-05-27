@@ -119,6 +119,44 @@ services:
       retries: 5
       start_period: 120s
 
+  # ===========================================
+  # Collector (опционально — отдельный контейнер для violation detection)
+  # Включить: docker compose --profile collector up -d
+  # При включении web-backend автоматически переключается в API-only режим
+  # ===========================================
+
+  web-collector:
+    image: ghcr.io/case211/remnawave-admin-web-backend:latest
+    container_name: remnawave-web-collector
+    restart: unless-stopped
+    init: true
+    profiles: [collector]
+    env_file:
+      - .env
+    environment:
+      WEB_HOST: '0.0.0.0'
+      WEB_PORT: '8082'
+      APP_MODE: 'collector'
+      MAXMIND_CITY_DB: /app/geoip/GeoLite2-City.mmdb
+      MAXMIND_ASN_DB: /app/geoip/GeoLite2-ASN.mmdb
+    command: ["python", "-m", "uvicorn", "web.backend.main:app", "--host", "0.0.0.0", "--port", "8082", "--no-access-log", "--log-level", "warning"]
+    volumes:
+      - ./logs:/app/logs
+      - geoip_data:/app/geoip
+    ports:
+      - "${COLLECTOR_PORT:-8082}:8082"
+    networks:
+      - remnawave-network
+    depends_on:
+      remnawave-admin-db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8082/api/v2/health')"]
+      interval: 10s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
   web-frontend:
     image: ghcr.io/case211/remnawave-admin-web-frontend:latest
     container_name: remnawave-web-frontend

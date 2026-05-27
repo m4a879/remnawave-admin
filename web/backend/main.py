@@ -451,11 +451,18 @@ async def _run_migrations(database_url: str) -> bool:
 
 _bg_tasks: list[asyncio.Task] = []  # Background tasks to cancel on shutdown
 
+def _get_app_mode() -> str:
+    """Get application mode: 'api', 'collector', or 'full' (default)."""
+    return os.environ.get("APP_MODE", "full").lower()
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan handler."""
     settings = get_web_settings()
-    logger.info("🚀 Web API starting on %s:%s", settings.host, settings.port)
+    app_mode = _get_app_mode()
+    mode_label = {"api": "API-only", "collector": "Collector-only", "full": "Full"}.get(app_mode, "Full")
+    logger.info("🚀 Web API starting on %s:%s (mode: %s)", settings.host, settings.port, mode_label)
 
     # Connect to database if configured
     database_url = os.environ.get("DATABASE_URL") or getattr(settings, "database_url", None)
@@ -484,165 +491,138 @@ async def lifespan(app: FastAPI):
                 from shared.config_service import config_service
                 await config_service.initialize()
 
-                # Start automation engine
-                from web.backend.core.automation_engine import engine as automation_engine
-                await automation_engine.start()
+                # ── Services for API and full mode ──
+                if app_mode in ("api", "full"):
+                    from web.backend.core.automation_engine import engine as automation_engine
+                    await automation_engine.start()
 
-                # Start alert engine
-                from web.backend.core.alert_engine import alert_engine
-                await alert_engine.start()
+                    from web.backend.core.alert_engine import alert_engine
+                    await alert_engine.start()
 
-                # Start mail service
-                try:
-                    from web.backend.core.mail.mail_service import mail_service
-                    await mail_service.start()
-                except Exception as e:
-                    logger.warning("Mail service start failed: %s", e)
+                    try:
+                        from web.backend.core.mail.mail_service import mail_service
+                        await mail_service.start()
+                    except Exception as e:
+                        logger.warning("Mail service start failed: %s", e)
 
-                # Start periodic table maintenance (VACUUM ANALYZE heavy tables)
+                    from web.backend.api.v2.websocket import dashboard_publisher_loop
+                    _bg_tasks.append(asyncio.create_task(dashboard_publisher_loop()))
+
+                    from web.backend.core.task_scheduler import task_scheduler_loop
+                    _bg_tasks.append(asyncio.create_task(task_scheduler_loop()))
+
+                # ── Services for collector and full mode ──
+                if app_mode in ("collector", "full"):
+                    async def _baseline_refresh_loop():
+                        await asyncio.sleep(300)
+                        while True:
+                            try:
+                                stale_users = await db_service.get_stale_baseline_users(max_age_seconds=3600, limit=50)
+                                if stale_users:
+                                    from shared.violation_detector import UserProfileAnalyzer
+                                    analyzer = UserProfileAnalyzer(db_service)
+                                    for user_uuid in stale_users:
+                                        try:
+                                            await analyzer.build_baseline(user_uuid, days=30)
+                                        except Exception:
+                                            pass
+                                    logger.debug("Refreshed %d user baselines", len(stale_users))
+                            except Exception as exc:
+                                logger.warning("Baseline refresh failed: %s", exc)
+                            await asyncio.sleep(1800)
+                    _bg_tasks.append(asyncio.create_task(_baseline_refresh_loop()))
+
+                # ── Services for all modes ──
                 async def _maintenance_loop():
                     while True:
-                        await asyncio.sleep(6 * 3600)  # every 6 hours
+                        await asyncio.sleep(6 * 3600)
                         try:
                             await db_service.run_table_maintenance()
                             logger.info("Periodic table maintenance completed")
                         except Exception as exc:
                             logger.warning("Table maintenance failed: %s", exc)
-
-                # Start periodic baseline refresh (precompute stale baselines)
-                async def _baseline_refresh_loop():
-                    await asyncio.sleep(300)  # initial delay 5 min
-                    while True:
-                        try:
-                            stale_users = await db_service.get_stale_baseline_users(max_age_seconds=3600, limit=50)
-                            if stale_users:
-                                from shared.violation_detector import UserProfileAnalyzer
-                                analyzer = UserProfileAnalyzer(db_service)
-                                for user_uuid in stale_users:
-                                    try:
-                                        # build_baseline already saves to DB internally
-                                        await analyzer.build_baseline(user_uuid, days=30)
-                                    except Exception:
-                                        pass
-                                logger.debug("Refreshed %d user baselines", len(stale_users))
-                        except Exception as exc:
-                            logger.warning("Baseline refresh failed: %s", exc)
-                        await asyncio.sleep(1800)  # every 30 min
-
                 _bg_tasks.append(asyncio.create_task(_maintenance_loop()))
-                _bg_tasks.append(asyncio.create_task(_baseline_refresh_loop()))
 
-                # Dashboard WS publisher — pushes stats to subscribed clients
-                from web.backend.api.v2.websocket import dashboard_publisher_loop
-                _bg_tasks.append(asyncio.create_task(dashboard_publisher_loop()))
+                # ── Plugins (api and full only) ──
+                if app_mode in ("api", "full"):
+                    try:
+                        from web.backend.core.plugin_installer import scan_and_install_wheels
+                        installed = scan_and_install_wheels()
+                        if installed:
+                            logger.info("Plugin wheels installed: %s", installed)
+                    except Exception:
+                        logger.exception("Plugin wheel scan failed")
 
-                # Scheduled tasks (cron) — executes scripts on nodes by schedule
-                from web.backend.core.task_scheduler import task_scheduler_loop
-                _bg_tasks.append(asyncio.create_task(task_scheduler_loop()))
+                    try:
+                        import importlib
+                        importlib.invalidate_caches()
+                        await _run_migrations(database_url)
+                    except Exception:
+                        logger.exception("Plugin migrations replay failed")
 
-                # Plugin lifecycle: install wheels → re-run migrations
-                # (so any plugin-contributed alembic branches catch up)
-                # → prime license cache → register manifests → start
-                # their scheduled tasks. Each step is wrapped because a
-                # broken plugin must not knock the panel out.
-                #
-                # Why migrations run twice: the first pass at the very
-                # top of lifespan applies panel-only revisions before
-                # the DB pool is used. A plugin's own ``alembic`` branch
-                # is only visible *after* its wheel has been pip-
-                # installed (because env.py reads the
-                # ``rwa.plugin.migrations`` entry-point from
-                # site-packages). So we re-run alembic once the wheels
-                # are in.
-                try:
-                    from web.backend.core.plugin_installer import scan_and_install_wheels
-                    installed = scan_and_install_wheels()
-                    if installed:
-                        logger.info("Plugin wheels installed: %s", installed)
-                except Exception:
-                    logger.exception("Plugin wheel scan failed")
+                    try:
+                        from web.backend.core import plugin_licenses
+                        await plugin_licenses.prime_cache()
+                    except Exception:
+                        logger.exception("Plugin license cache priming failed")
 
-                # Always re-run alembic after plugin scan: the first pass
-                # at the top of lifespan ran before any plugin had been
-                # pip-installed in this Python, so plugin alembic branches
-                # weren't visible. We invalidate importlib's metadata
-                # cache to make sure entry_points() reflects the live
-                # state. ``alembic upgrade head`` is idempotent so this
-                # is a no-op when nothing changed.
-                try:
-                    import importlib
-                    importlib.invalidate_caches()
-                    await _run_migrations(database_url)
-                except Exception:
-                    logger.exception("Plugin migrations replay failed")
+                    try:
+                        plugin_loader.register(app)
+                    except Exception:
+                        logger.exception("Plugin loader failed during startup")
 
-                try:
-                    from web.backend.core import plugin_licenses
-                    await plugin_licenses.prime_cache()
-                except Exception:
-                    logger.exception("Plugin license cache priming failed")
+                    try:
+                        plugin_tasks = plugin_loader.start_scheduled_tasks()
+                        if plugin_tasks:
+                            _bg_tasks.extend(plugin_tasks)
+                            logger.info("Plugin scheduled tasks started: %d", len(plugin_tasks))
+                    except Exception:
+                        logger.exception("Plugin scheduled tasks failed to start")
 
-                try:
-                    plugin_loader.register(app)
-                except Exception:
-                    logger.exception("Plugin loader failed during startup")
+                # ── Sync service (collector and full only) ──
+                if app_mode in ("collector", "full"):
+                    try:
+                        from shared.sync import sync_service
+                        await sync_service.start(background=True)
+                    except Exception as e:
+                        logger.warning("Sync service start failed: %s", e)
 
-                try:
-                    plugin_tasks = plugin_loader.start_scheduled_tasks()
-                    if plugin_tasks:
-                        _bg_tasks.extend(plugin_tasks)
-                        logger.info("Plugin scheduled tasks started: %d", len(plugin_tasks))
-                except Exception:
-                    logger.exception("Plugin scheduled tasks failed to start")
+                    try:
+                        from web.backend.core.traffic_rate_monitor import traffic_rate_monitor
+                        await traffic_rate_monitor.start()
+                    except Exception as e:
+                        logger.warning("Traffic rate monitor start failed: %s", e)
 
-                # Start sync service (Panel API → local DB cache)
-                # Sync service — единственный источник синхронизации Panel API → БД
-                # background=True: initial sync runs in background so HTTP server
-                # can accept requests (healthcheck, login) during lengthy first sync
-                try:
-                    from shared.sync import sync_service
-                    await sync_service.start(background=True)
-                except Exception as e:
-                    logger.warning("Sync service start failed: %s", e)
+                # ── Online snapshot, metrics, blacklist (api and full) ──
+                if app_mode in ("api", "full"):
+                    try:
+                        from web.backend.core.online_snapshot_recorder import online_snapshot_recorder
+                        await online_snapshot_recorder.start()
+                    except Exception as e:
+                        logger.warning("Online snapshot recorder start failed: %s", e)
 
-                # Traffic rate monitor — alerts on high traffic consumption
-                try:
-                    from web.backend.core.traffic_rate_monitor import traffic_rate_monitor
-                    await traffic_rate_monitor.start()
-                except Exception as e:
-                    logger.warning("Traffic rate monitor start failed: %s", e)
+                    async def _blacklist_sync_loop():
+                        await asyncio.sleep(60)
+                        while True:
+                            try:
+                                if config_service.get("user_blacklist_enabled", False):
+                                    from web.backend.api.v2.user_blacklist import sync_external_blacklists
+                                    result = await sync_external_blacklists()
+                                    if result.get("synced", 0) > 0:
+                                        logger.info("Blacklist sync: %d entries from %d sources",
+                                                    result["synced"], len(result["sources"]))
+                            except Exception as exc:
+                                logger.warning("Blacklist sync failed: %s", exc)
+                            interval_hours = config_service.get("user_blacklist_sync_hours", 6)
+                            await asyncio.sleep(int(interval_hours) * 3600)
+                    _bg_tasks.append(asyncio.create_task(_blacklist_sync_loop()))
 
-                # Online users snapshot recorder — feeds the Trends > Online chart
-                try:
-                    from web.backend.core.online_snapshot_recorder import online_snapshot_recorder
-                    await online_snapshot_recorder.start()
-                except Exception as e:
-                    logger.warning("Online snapshot recorder start failed: %s", e)
-
-                # Prometheus gauge updater — refreshes panel_* metrics every 15s
+                # ── Prometheus gauge updater (all modes) ──
                 try:
                     from web.backend.core.metrics import gauge_updater
                     await gauge_updater.start()
                 except Exception as e:
                     logger.warning("Prometheus gauge updater start failed: %s", e)
-
-                # User blacklist sync — periodically fetch external blacklists
-                async def _blacklist_sync_loop():
-                    await asyncio.sleep(60)  # initial delay 1 min
-                    while True:
-                        try:
-                            if config_service.get("user_blacklist_enabled", False):
-                                from web.backend.api.v2.user_blacklist import sync_external_blacklists
-                                result = await sync_external_blacklists()
-                                if result.get("synced", 0) > 0:
-                                    logger.info("Blacklist sync: %d entries from %d sources",
-                                                result["synced"], len(result["sources"]))
-                        except Exception as exc:
-                            logger.warning("Blacklist sync failed: %s", exc)
-                        interval_hours = config_service.get("user_blacklist_sync_hours", 6)
-                        await asyncio.sleep(int(interval_hours) * 3600)
-
-                _bg_tasks.append(asyncio.create_task(_blacklist_sync_loop()))
             else:
                 logger.warning("Database connection failed")
         except Exception as e:
@@ -916,59 +896,62 @@ def create_app() -> FastAPI:
         body, content_type = render_metrics()
         return Response(content=body, media_type=content_type)
 
-    # Include routers
-    app.include_router(auth.router, prefix="/api/v2/auth", tags=["auth"])
-    app.include_router(users.router, prefix="/api/v2/users", tags=["users"])
-    app.include_router(nodes.router, prefix="/api/v2/nodes", tags=["nodes"])
-    app.include_router(analytics.router, prefix="/api/v2/analytics", tags=["analytics"])
-    app.include_router(violations.router, prefix="/api/v2/violations", tags=["violations"])
-    app.include_router(hosts.router, prefix="/api/v2/hosts", tags=["hosts"])
-    app.include_router(settings_api.router, prefix="/api/v2/settings", tags=["settings"])
-    app.include_router(admins_api.router, prefix="/api/v2/admins", tags=["admins"])
-    app.include_router(roles_api.router, prefix="/api/v2/roles", tags=["roles"])
-    app.include_router(access_policies_api.router, prefix="/api/v2/access-policies", tags=["access-policies"])
-    app.include_router(audit_api.router, prefix="/api/v2/audit", tags=["audit"])
-    app.include_router(logs_api.router, prefix="/api/v2/logs", tags=["logs"])
-    app.include_router(advanced_analytics.router, prefix="/api/v2/analytics/advanced", tags=["advanced-analytics"])
-    app.include_router(automations_api.router, prefix="/api/v2/automations", tags=["automations"])
-    app.include_router(notifications_api.router, prefix="/api/v2", tags=["notifications"])
-    app.include_router(me_devices_api.router, prefix="/api/v2", tags=["me-devices"])
-    app.include_router(mailserver_api.router, prefix="/api/v2", tags=["mailserver"])
-    app.include_router(websocket.router, prefix="/api/v2", tags=["websocket"])
-    app.include_router(agent_ws_api.router, prefix="/api/v2", tags=["agent-ws"])
-    app.include_router(fleet_api.router, prefix="/api/v2/fleet", tags=["fleet"])
-    app.include_router(terminal_api.router, prefix="/api/v2", tags=["terminal"])
-    app.include_router(scripts_api.router, prefix="/api/v2/fleet", tags=["scripts"])
-    app.include_router(tokens_api.router, prefix="/api/v2/tokens", tags=["tokens"])
-    app.include_router(templates_api.router, prefix="/api/v2/templates", tags=["templates"])
-    app.include_router(snippets_api.router, prefix="/api/v2/snippets", tags=["snippets"])
-    app.include_router(config_profiles_api.router, prefix="/api/v2/config-profiles", tags=["config-profiles"])
-    app.include_router(billing_api.router, prefix="/api/v2/billing", tags=["billing"])
-    app.include_router(reports_api.router, prefix="/api/v2/reports", tags=["reports"])
-    app.include_router(asn_api.router, prefix="/api/v2/asn", tags=["asn"])
-    app.include_router(collector_api.router, prefix="/api/v2/collector", tags=["collector"])
-    app.include_router(backup_api.router, prefix="/api/v2/backups", tags=["backups"])
-    app.include_router(api_keys_api.router, prefix="/api/v2/api-keys", tags=["api-keys"])
-    app.include_router(blocked_ips_api.router, prefix="/api/v2/blocked-ips", tags=["blocked-ips"])
+    # Include routers based on APP_MODE
+    app_mode = _get_app_mode()
 
-    from web.backend.api.v2 import user_blacklist as user_blacklist_api
-    app.include_router(user_blacklist_api.router, prefix="/api/v2/user-blacklist", tags=["user-blacklist"])
-    app.include_router(webhooks_api.router, prefix="/api/v2/webhooks", tags=["webhooks"])
-    app.include_router(squads_api.router, prefix="/api/v2/squads", tags=["squads"])
-    app.include_router(bedolaga_router, prefix="/api/v2/bedolaga", tags=["bedolaga"])
+    # Collector router — available in collector and full modes
+    if app_mode in ("collector", "full"):
+        app.include_router(collector_api.router, prefix="/api/v2/collector", tags=["collector"])
 
-    # Plugin metadata endpoint (must be registered before plugin_loader.register
-    # so that the meta route is reachable even if no plugins are installed).
-    app.include_router(plugins_api.router, prefix="/api/v2/plugins", tags=["plugins"])
+    # UI routers — available in api and full modes
+    if app_mode in ("api", "full"):
+        app.include_router(auth.router, prefix="/api/v2/auth", tags=["auth"])
+        app.include_router(users.router, prefix="/api/v2/users", tags=["users"])
+        app.include_router(nodes.router, prefix="/api/v2/nodes", tags=["nodes"])
+        app.include_router(analytics.router, prefix="/api/v2/analytics", tags=["analytics"])
+        app.include_router(violations.router, prefix="/api/v2/violations", tags=["violations"])
+        app.include_router(hosts.router, prefix="/api/v2/hosts", tags=["hosts"])
+        app.include_router(settings_api.router, prefix="/api/v2/settings", tags=["settings"])
+        app.include_router(admins_api.router, prefix="/api/v2/admins", tags=["admins"])
+        app.include_router(roles_api.router, prefix="/api/v2/roles", tags=["roles"])
+        app.include_router(access_policies_api.router, prefix="/api/v2/access-policies", tags=["access-policies"])
+        app.include_router(audit_api.router, prefix="/api/v2/audit", tags=["audit"])
+        app.include_router(logs_api.router, prefix="/api/v2/logs", tags=["logs"])
+        app.include_router(advanced_analytics.router, prefix="/api/v2/analytics/advanced", tags=["advanced-analytics"])
+        app.include_router(automations_api.router, prefix="/api/v2/automations", tags=["automations"])
+        app.include_router(notifications_api.router, prefix="/api/v2", tags=["notifications"])
+        app.include_router(me_devices_api.router, prefix="/api/v2", tags=["me-devices"])
+        app.include_router(mailserver_api.router, prefix="/api/v2", tags=["mailserver"])
+        app.include_router(websocket.router, prefix="/api/v2", tags=["websocket"])
+        app.include_router(agent_ws_api.router, prefix="/api/v2", tags=["agent-ws"])
+        app.include_router(fleet_api.router, prefix="/api/v2/fleet", tags=["fleet"])
+        app.include_router(terminal_api.router, prefix="/api/v2", tags=["terminal"])
+        app.include_router(scripts_api.router, prefix="/api/v2/fleet", tags=["scripts"])
+        app.include_router(tokens_api.router, prefix="/api/v2/tokens", tags=["tokens"])
+        app.include_router(templates_api.router, prefix="/api/v2/templates", tags=["templates"])
+        app.include_router(snippets_api.router, prefix="/api/v2/snippets", tags=["snippets"])
+        app.include_router(config_profiles_api.router, prefix="/api/v2/config-profiles", tags=["config-profiles"])
+        app.include_router(billing_api.router, prefix="/api/v2/billing", tags=["billing"])
+        app.include_router(reports_api.router, prefix="/api/v2/reports", tags=["reports"])
+        app.include_router(asn_api.router, prefix="/api/v2/asn", tags=["asn"])
+        app.include_router(backup_api.router, prefix="/api/v2/backups", tags=["backups"])
+        app.include_router(api_keys_api.router, prefix="/api/v2/api-keys", tags=["api-keys"])
+        app.include_router(blocked_ips_api.router, prefix="/api/v2/blocked-ips", tags=["blocked-ips"])
 
-    # Admin endpoints for the in-panel plugin manager (upload wheels, manage
-    # licenses, restart backend). Mounted under the same /plugins prefix.
-    from web.backend.api.v2 import admin_plugins as admin_plugins_api
-    app.include_router(
-        admin_plugins_api.router,
-        prefix="/api/v2/admin/plugins",
-        tags=["admin-plugins"],
-    )
+        from web.backend.api.v2 import user_blacklist as user_blacklist_api
+        app.include_router(user_blacklist_api.router, prefix="/api/v2/user-blacklist", tags=["user-blacklist"])
+        app.include_router(webhooks_api.router, prefix="/api/v2/webhooks", tags=["webhooks"])
+        app.include_router(squads_api.router, prefix="/api/v2/squads", tags=["squads"])
+        app.include_router(bedolaga_router, prefix="/api/v2/bedolaga", tags=["bedolaga"])
+
+        app.include_router(plugins_api.router, prefix="/api/v2/plugins", tags=["plugins"])
+
+        from web.backend.api.v2 import admin_plugins as admin_plugins_api
+        app.include_router(
+            admin_plugins_api.router,
+            prefix="/api/v2/admin/plugins",
+            tags=["admin-plugins"],
+        )
 
     # Pip-install + register run inside lifespan instead of create_app
     # because they need both the event loop (for license cache priming
