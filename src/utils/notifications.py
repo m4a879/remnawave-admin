@@ -499,13 +499,9 @@ async def send_node_notification(
         country = node_info.get("countryCode", "—")
         status = node_info.get("status", "—")
         
-        lines.append(f"🖥 <b>Название:</b> <code>{_esc(node_name)}</code>")
-        lines.append(f"🆔 <b>UUID:</b> <code>{node_uuid[:8]}...</code>")
-        lines.append(f"🌐 <b>Адрес:</b> <code>{_esc(str(address))}</code>")
-        if port != "—":
-            lines.append(f"🔌 <b>Порт:</b> <code>{port}</code>")
-        if country != "—":
-            lines.append(f"🌍 <b>Страна:</b> <code>{country}</code>")
+        lines.append(f"🖥 <b>{_esc(node_name)}</b>  <code>{node_uuid[:8]}</code>")
+        addr_str = f"{_esc(str(address))}:{port}" if port != "—" else _esc(str(address))
+        lines.append(f"   Адрес: <code>{addr_str}</code>  {country if country != '—' else ''}")
         if status != "—":
             lines.append(f"📊 <b>Статус:</b> <code>{status}</code>")
         

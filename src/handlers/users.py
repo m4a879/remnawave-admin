@@ -356,13 +356,21 @@ async def _delete_ctx_message(ctx: dict, bot) -> None:
         )
 
 
+_CREATE_STAGES = ["username", "description", "expire", "traffic", "hwid", "telegram", "squad", "confirm"]
+
 async def _send_user_create_prompt(
     target: Message | CallbackQuery,
     text: str,
     reply_markup: InlineKeyboardMarkup | None = None,
     ctx: dict | None = None,
 ) -> None:
-    """Отправляет промпт для создания пользователя."""
+    """Отправляет промпт для создания пользователя с прогресс-индикатором."""
+    if ctx and ctx.get("stage") in _CREATE_STAGES:
+        idx = _CREATE_STAGES.index(ctx["stage"])
+        total = len(_CREATE_STAGES)
+        dots = "●" * (idx + 1) + "○" * (total - idx - 1)
+        text = f"<b>Шаг {idx + 1}/{total}</b>  {dots}\n\n{text}"
+
     bot = target.bot if isinstance(target, Message) else target.message.bot
     chat_id = target.chat.id if isinstance(target, Message) else target.message.chat.id
     message_id = ctx.get("bot_message_id") if ctx else None

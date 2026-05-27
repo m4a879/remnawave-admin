@@ -53,6 +53,8 @@ def user_create_hwid_keyboard() -> InlineKeyboardMarkup:
             [
                 InlineKeyboardButton(text=_("user.hwid_5"), callback_data="user_create:hwid:5"),
                 InlineKeyboardButton(text=_("user.hwid_10"), callback_data="user_create:hwid:10"),
+            ],
+            [
                 InlineKeyboardButton(text=_("user.hwid_unlimited"), callback_data="user_create:hwid:0"),
             ],
         ]
