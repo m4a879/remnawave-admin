@@ -423,6 +423,9 @@ const StatCard = memo(function StatCard({
         "animate-fade-in-up group relative overflow-hidden rounded-xl transition-all duration-300",
         onClick && "cursor-pointer hover:-translate-y-1 hover:shadow-lg"
       )}
+      role={onClick ? "button" : undefined}
+      tabIndex={onClick ? 0 : undefined}
+      onKeyDown={onClick ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick() } } : undefined}
       onClick={onClick}
       style={{
         animationDelay: `${index * 0.06}s`,

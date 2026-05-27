@@ -659,8 +659,8 @@ function AgentTokenModal({
                 onClick={() => installMutation.mutate()}
                 disabled={installMutation.isPending}
               >
-                <Terminal className="w-4 h-4 mr-2" />
-                {installMutation.isPending ? '...' : t('nodes.agentToken.installAgent')}
+                {installMutation.isPending ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Terminal className="w-4 h-4 mr-2" />}
+                {t('nodes.agentToken.installAgent')}
               </Button>
 
               <Button
