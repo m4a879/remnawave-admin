@@ -274,7 +274,8 @@ async def send_user_notification(
         
         subscription_url = info.get("subscriptionUrl")
         if subscription_url:
-            lines.append(f"   Ссылка на подписку: {_esc(subscription_url)}")
+            url_display = _esc(subscription_url[:80]) + "..." if len(subscription_url) > 80 else _esc(subscription_url)
+            lines.append(f"   Ссылка: <code>{url_display}</code>")
         else:
             lines.append(f"   Ссылка на подписку: —")
         
@@ -1241,15 +1242,4 @@ async def send_violation_notification(
         )
 
 
-def _esc(text: str) -> str:
-    """Экранирует HTML символы."""
-    if not text:
-        return ""
-    return (
-        str(text)
-        .replace("&", "&amp;")
-        .replace("<", "&lt;")
-        .replace(">", "&gt;")
-        .replace('"', "&quot;")
-        .replace("'", "&#39;")
-    )
+from src.utils.formatters import _esc  # noqa: E402 — reuse single implementation

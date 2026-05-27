@@ -51,8 +51,6 @@ def user_edit_keyboard(user_uuid: str, back_to: str = NavTarget.USERS_MENU) -> I
             ],
             [
                 InlineKeyboardButton(text=_("user.traffic_by_nodes"), callback_data=f"user_traffic_nodes:{user_uuid}"),
-            ],
-            [
                 InlineKeyboardButton(text=_("user.hwid_management"), callback_data=f"user_hwid_menu:{user_uuid}"),
             ],
             nav_row(back_to),

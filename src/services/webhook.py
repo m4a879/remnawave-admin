@@ -393,18 +393,7 @@ async def _handle_crm_event(bot: Bot, event: str, event_data: dict) -> None:
     )
 
 
-def _esc(text: str) -> str:
-    """Экранирует HTML символы."""
-    if not text:
-        return ""
-    return (
-        str(text)
-        .replace("&", "&amp;")
-        .replace("<", "&lt;")
-        .replace(">", "&gt;")
-        .replace('"', "&quot;")
-        .replace("'", "&#39;")
-    )
+from src.utils.formatters import _esc  # noqa: E402
 
 
 @app.get("/webhook/health")

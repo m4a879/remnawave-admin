@@ -7,12 +7,18 @@ from src.keyboards.navigation import NavTarget, nav_row
 def main_menu_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text=_("actions.menu_users"), callback_data="menu:section:users")],
-            [InlineKeyboardButton(text=_("actions.menu_nodes"), callback_data="menu:section:nodes")],
-            [InlineKeyboardButton(text=_("actions.menu_resources"), callback_data="menu:section:resources")],
-            [InlineKeyboardButton(text=_("actions.menu_billing"), callback_data="menu:section:billing")],
-            [InlineKeyboardButton(text=_("actions.menu_bulk"), callback_data="menu:section:bulk")],
-            [InlineKeyboardButton(text=_("actions.menu_system"), callback_data="menu:section:system")],
+            [
+                InlineKeyboardButton(text=_("actions.menu_users"), callback_data="menu:section:users"),
+                InlineKeyboardButton(text=_("actions.menu_nodes"), callback_data="menu:section:nodes"),
+            ],
+            [
+                InlineKeyboardButton(text=_("actions.menu_resources"), callback_data="menu:section:resources"),
+                InlineKeyboardButton(text=_("actions.menu_billing"), callback_data="menu:section:billing"),
+            ],
+            [
+                InlineKeyboardButton(text=_("actions.menu_bulk"), callback_data="menu:section:bulk"),
+                InlineKeyboardButton(text=_("actions.menu_system"), callback_data="menu:section:system"),
+            ],
             [InlineKeyboardButton(text=_("actions.refresh"), callback_data="menu:refresh")],
         ]
     )

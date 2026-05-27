@@ -15,10 +15,7 @@ logger = logging.getLogger(__name__)
 router = Router()
 
 
-def _esc(text: str) -> str:
-    if not text:
-        return ""
-    return str(text).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+from src.utils.formatters import _esc
 
 
 @router.callback_query(F.data.startswith("vact:"))
@@ -78,8 +75,7 @@ async def _show_user_info(callback: CallbackQuery, user_uuid: str) -> None:
             f"Трафик: <code>{traffic_str}</code>\n"
             f"UUID: <code>{user_uuid[:16]}...</code>"
         )
-        await callback.message.reply(text, parse_mode="HTML")
-        await callback.answer()
+        await callback.answer(text[:200], show_alert=True)
     except Exception as e:
         await callback.answer(f"❌ Не удалось получить инфо: {e}", show_alert=True)
 
