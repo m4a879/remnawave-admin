@@ -518,6 +518,10 @@ class GeoIPService:
         Returns:
             IPMetadata или None при ошибке
         """
+        # Strip CIDR suffix (e.g. "1.2.3.4/32" → "1.2.3.4")
+        if '/' in ip_address:
+            ip_address = ip_address.split('/')[0]
+
         # Пропускаем приватные IP
         if ip_address.startswith(('127.', '192.168.', '10.', '172.16.')):
             return IPMetadata(ip=ip_address, country_code='PRIVATE', country_name='Private Network')

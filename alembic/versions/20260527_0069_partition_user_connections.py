@@ -93,10 +93,13 @@ def upgrade() -> None:
     """)
 
     # 4. Copy data from old table (only recent — last 60 days)
+    # host() strips CIDR suffix from INET columns (e.g. "1.2.3.4/32" → "1.2.3.4")
     op.execute("""
         INSERT INTO user_connections_partitioned
             (user_uuid, ip_address, node_uuid, connected_at, disconnected_at, device_info)
-        SELECT user_uuid, ip_address, node_uuid,
+        SELECT user_uuid,
+               CASE WHEN ip_address IS NOT NULL THEN host(ip_address::inet) ELSE NULL END,
+               node_uuid,
                COALESCE(connected_at, NOW()), disconnected_at, device_info::jsonb
         FROM user_connections
         WHERE connected_at > NOW() - INTERVAL '60 days'

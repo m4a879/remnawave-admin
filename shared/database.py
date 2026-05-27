@@ -2060,7 +2060,10 @@ class DatabaseService:
 
         for c in connections:
             user_uuids.append(str(c["user_uuid"]))
-            ip_addresses.append(str(c["ip_address"]))
+            ip = str(c["ip_address"])
+            if '/' in ip:
+                ip = ip.split('/')[0]
+            ip_addresses.append(ip)
             node_uuids.append(str(c["node_uuid"]) if c.get("node_uuid") else None)
             device_infos.append(json.dumps(c["device_info"]) if c.get("device_info") else None)
             ca = c.get("connected_at")
@@ -2474,6 +2477,14 @@ class DatabaseService:
                 )
                 if not is_partitioned:
                     return 0
+
+                # One-time fix: strip CIDR suffixes from ip_address after INET→VARCHAR migration
+                fixed = await conn.execute(
+                    "UPDATE user_connections SET ip_address = split_part(ip_address, '/', 1) WHERE ip_address LIKE '%/%'"
+                )
+                fixed_count = int(fixed.split()[-1]) if fixed else 0
+                if fixed_count > 0:
+                    logger.info("Stripped CIDR suffix from %d ip_address values", fixed_count)
 
                 from datetime import datetime, timezone
                 now = datetime.now(timezone.utc)
