@@ -175,7 +175,6 @@ CREATE TABLE IF NOT EXISTS user_connections (
 CREATE INDEX IF NOT EXISTS idx_user_connections_user ON user_connections(user_uuid, connected_at DESC);
 CREATE INDEX IF NOT EXISTS idx_user_connections_ip ON user_connections(ip_address);
 CREATE INDEX IF NOT EXISTS idx_user_connections_node ON user_connections(node_uuid);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_user_connections_active_uq ON user_connections(user_uuid, ip_address) WHERE disconnected_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_user_connections_user_active ON user_connections(user_uuid, disconnected_at, connected_at DESC);
 
 -- HWID устройства пользователей
