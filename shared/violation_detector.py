@@ -1220,8 +1220,8 @@ class UserProfileAnalyzer:
     Строит baseline на основе истории подключений и сравнивает текущее поведение.
     """
     
-    _BASELINE_CACHE_TTL = 3600  # 1 hour
-    _BASELINE_CACHE_MAX_SIZE = 2000
+    _BASELINE_CACHE_TTL = 21600  # 6 hours
+    _BASELINE_CACHE_MAX_SIZE = 25000
 
     def __init__(self, db_service: DatabaseService):
         """
@@ -1409,7 +1409,6 @@ class UserProfileAnalyzer:
         deviation = 0.0
         
         if baseline is None:
-            # Check cache first
             cached = self._baseline_cache.get(user_uuid)
             if cached:
                 cached_baseline, cached_ts = cached
@@ -1417,13 +1416,16 @@ class UserProfileAnalyzer:
                     baseline = cached_baseline
 
             if baseline is None:
-                async with self._baseline_lock:
-                    # Double-check after acquiring lock
-                    cached = self._baseline_cache.get(user_uuid)
-                    if cached and (time.time() - cached[1]) < self._BASELINE_CACHE_TTL:
-                        baseline = cached[0]
-                    else:
-                        baseline = await self.build_baseline(user_uuid, days=30, connection_history=connection_history_30d)
+                db_baseline = await self.db.get_user_baseline(user_uuid, max_age_seconds=self._BASELINE_CACHE_TTL)
+                if db_baseline and db_baseline.get('data_points', 0) > 0:
+                    baseline = db_baseline
+                    self._baseline_cache[user_uuid] = (baseline, time.time())
+
+            if baseline is None and connection_history_30d:
+                baseline = await self.build_baseline(user_uuid, days=30, connection_history=connection_history_30d)
+
+            if baseline is None:
+                return ProfileScore(score=0.0, reasons=[], deviation_from_baseline=0.0)
         
         # Проверяем, сколько текущих IP уже известны пользователю
         known_ips = set(baseline.get('known_ips', []))
@@ -2884,7 +2886,7 @@ class IntelligentViolationDetector:
             self.db.batch_get_user_devices_counts(user_uuids),
             self.db.batch_get_active_connections(user_uuids, max_age_minutes=5),
             self.db.batch_get_connection_histories(user_uuids, days=30, limit_per_user=200),
-            self.db.batch_get_user_baselines(user_uuids),
+            self.db.batch_get_user_baselines(user_uuids, max_age_seconds=self.profile_analyzer._BASELINE_CACHE_TTL),
             self.db.batch_get_shared_hwids(user_uuids),
         )
 
@@ -2919,6 +2921,7 @@ class IntelligentViolationDetector:
 
         results: Dict[str, Optional[ViolationScore]] = {}
         excluded_map = excluded_analyzers_map or {}
+        needs_baseline_build: List[str] = []
 
         for uid in user_uuids:
             try:
@@ -2934,9 +2937,23 @@ class IntelligentViolationDetector:
                     prefetched_srh_records=srh_normalized.get(uid),
                 )
                 results[uid] = result
+                if uid not in baselines and histories_30d.get(uid):
+                    needs_baseline_build.append(uid)
             except Exception as e:
                 logger.warning("Batch check_user failed for %s: %s", uid, e)
                 results[uid] = None
+
+        # Fire-and-forget: build baselines for users without one (non-blocking)
+        if needs_baseline_build:
+            async def _build_baselines_bg():
+                for uid in needs_baseline_build[:50]:
+                    try:
+                        await self.profile_analyzer.build_baseline(
+                            uid, days=30, connection_history=histories_30d.get(uid)
+                        )
+                    except Exception:
+                        pass
+            asyncio.create_task(_build_baselines_bg())
 
         return results
 
