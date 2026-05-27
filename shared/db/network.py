@@ -2,10 +2,12 @@
 Network mixin — user devices (HWID), IP metadata, ASN, HWID devices, blocked IPs.
 """
 import json
+import time
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 from shared.logger import logger
+from shared.db._base import _parse_timestamp
 
 
 class NetworkMixin:

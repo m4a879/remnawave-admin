@@ -1,6 +1,8 @@
 """
 Users mixin — user baselines, CRUD, search, bulk operations.
 """
+import json
+import time
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Set
 

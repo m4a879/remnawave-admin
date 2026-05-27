@@ -2,6 +2,8 @@
 Connections mixin — user connections, partitioning, torrent events.
 """
 import asyncio
+import json
+import re
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
