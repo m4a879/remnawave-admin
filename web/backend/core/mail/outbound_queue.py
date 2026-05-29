@@ -10,6 +10,29 @@ from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
+# Notice appended to auto-generated mail sent from a noreply mailbox.
+_NOREPLY_NOTICE_TEXT = (
+    "\n\n—\n"
+    "Это автоматическое письмо, отвечать на него не нужно — ответы не доходят.\n"
+    "This is an automated message; please do not reply — replies are not received."
+)
+_NOREPLY_NOTICE_HTML = (
+    '<hr style="border:none;border-top:1px solid #e0e0e0;margin:24px 0 12px">'
+    '<p style="color:#888;font-size:12px;line-height:1.5;margin:0">'
+    'Это автоматическое письмо, отвечать на него не нужно — ответы не доходят.<br>'
+    'This is an automated message; please do not reply — replies are not received.'
+    '</p>'
+)
+
+
+def _append_noreply_notice_html(body_html: str) -> str:
+    """Insert the noreply notice before the closing </body> tag, or append it."""
+    lower = body_html.lower()
+    idx = lower.rfind("</body>")
+    if idx != -1:
+        return body_html[:idx] + _NOREPLY_NOTICE_HTML + body_html[idx:]
+    return body_html + _NOREPLY_NOTICE_HTML
+
 
 class OutboundMailQueue:
     """Background queue processor for outgoing emails.
@@ -229,6 +252,16 @@ class OutboundMailQueue:
 
         body_text = row.get("body_text") or ""
         body_html = row.get("body_html")
+
+        # Mark auto-generated mail sent from a noreply mailbox so clients suppress
+        # auto-replies and discourage replies (the noreply mailbox does not accept mail).
+        # Relayed user mail (submission server) keeps its own From and is left untouched.
+        if from_email.lower().startswith("noreply@"):
+            msg["Auto-Submitted"] = "auto-generated"
+            msg["X-Auto-Response-Suppress"] = "All"
+            body_text = f"{body_text}{_NOREPLY_NOTICE_TEXT}"
+            if body_html:
+                body_html = _append_noreply_notice_html(body_html)
 
         if body_html:
             msg.set_content(body_text, subtype="plain", charset="utf-8")
