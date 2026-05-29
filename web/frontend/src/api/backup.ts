@@ -40,8 +40,18 @@ export const backupApi = {
     return Array.isArray(data) ? data : []
   },
 
-  getLog: async (limit = 50): Promise<BackupLogItem[]> => {
-    const { data } = await client.get('/backups/log', { params: { limit } })
+  getLog: async (
+    limit = 50,
+    search?: string,
+    backupType?: string,
+  ): Promise<BackupLogItem[]> => {
+    const { data } = await client.get('/backups/log', {
+      params: {
+        limit,
+        ...(search ? { search } : {}),
+        ...(backupType ? { backup_type: backupType } : {}),
+      },
+    })
     return Array.isArray(data) ? data : []
   },
 

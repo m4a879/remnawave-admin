@@ -83,19 +83,33 @@ async def list_backups(
 @router.get("/log", response_model=List[BackupLogItem])
 async def get_backup_log(
     limit: int = 50,
+    search: Optional[str] = None,
+    backup_type: Optional[str] = None,
     admin: AdminUser = Depends(require_permission("backups", "view")),
 ):
-    """Get backup operation history."""
+    """Get backup operation history with optional search and type filter."""
     try:
         from shared.database import db_service
         if not db_service.is_connected:
             return []
+
+        conditions = []
+        params: list = []
+        if search:
+            params.append(f"%{search.strip()}%")
+            conditions.append(f"filename ILIKE ${len(params)}")
+        if backup_type:
+            params.append(backup_type)
+            conditions.append(f"backup_type = ${len(params)}")
+        where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+
+        params.append(limit)
         async with db_service.acquire() as conn:
             rows = await conn.fetch(
                 "SELECT id, filename, backup_type, size_bytes, status, "
                 "created_by_username, notes, created_at "
-                "FROM backup_log ORDER BY created_at DESC LIMIT $1",
-                limit,
+                f"FROM backup_log {where} ORDER BY created_at DESC LIMIT ${len(params)}",
+                *params,
             )
         result = []
         for r in rows:
@@ -626,11 +640,21 @@ async def send_backup_telegram(
     if not chat_id:
         raise api_error(400, "NO_CHAT_ID", "Specify chat_id or configure NOTIFICATIONS_CHAT_ID")
 
+    # Default to the "Services" topic from settings unless explicitly overridden
+    topic_id = data.topic_id
+    if topic_id is None:
+        topic_raw = settings.get_topic_for("service")
+        if topic_raw:
+            try:
+                topic_id = int(topic_raw)
+            except (TypeError, ValueError):
+                topic_id = None
+
     try:
         result = await send_backup_to_telegram(
             filename=data.filename,
             chat_id=chat_id,
-            topic_id=data.topic_id,
+            topic_id=topic_id,
         )
         return result
     except FileNotFoundError:

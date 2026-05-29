@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
@@ -67,7 +67,7 @@ function BackupsTab() {
   const queryClient = useQueryClient()
   const token = useAuthStore((s) => s.accessToken)
 
-  const [telegramDialog, setTelegramDialog] = useState<{ filename: string; chatId: string; topicId: string } | null>(null)
+  const [telegramDialog, setTelegramDialog] = useState<{ filename: string; chatId: string } | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
   const [importStrategy, setImportStrategy] = useState<'skip' | 'overwrite'>('skip')
 
@@ -148,8 +148,8 @@ function BackupsTab() {
   })
 
   const telegramMutation = useMutation({
-    mutationFn: ({ filename, chatId, topicId }: { filename: string; chatId?: string; topicId?: number }) =>
-      backupApi.sendToTelegram(filename, chatId, topicId),
+    mutationFn: ({ filename, chatId }: { filename: string; chatId?: string }) =>
+      backupApi.sendToTelegram(filename, chatId),
     onSuccess: (data) => {
       toast.success(t('backup.sentToTelegram', { defaultValue: `Sent ${data.parts_sent} part(s) to Telegram` }))
       setTelegramDialog(null)
@@ -392,7 +392,7 @@ function BackupsTab() {
                       variant="ghost"
                       size="icon"
                       className="h-8 w-8 text-dark-200 hover:text-blue-400"
-                      onClick={() => setTelegramDialog({ filename: file.filename, chatId: '', topicId: '' })}
+                      onClick={() => setTelegramDialog({ filename: file.filename, chatId: '' })}
                       aria-label={t('backup.sendTelegram', { defaultValue: 'Send to Telegram' })}
                     >
                       <Send className="w-4 h-4" />
@@ -471,14 +471,9 @@ function BackupsTab() {
                 onChange={(e) => setTelegramDialog((p) => p ? { ...p, chatId: e.target.value } : null)}
               />
             </div>
-            <div>
-              <label className="text-xs text-dark-200 mb-1 block">Topic ID <span className="text-dark-400">({t('common.optional', { defaultValue: 'optional' })})</span></label>
-              <Input
-                placeholder="42"
-                value={telegramDialog?.topicId || ''}
-                onChange={(e) => setTelegramDialog((p) => p ? { ...p, topicId: e.target.value } : null)}
-              />
-            </div>
+            <p className="text-xs text-dark-400">
+              {t('backup.servicesTopicHint', { defaultValue: 'Sent to the "Services" topic from notification settings.' })}
+            </p>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setTelegramDialog(null)}>{t('common.cancel')}</Button>
@@ -488,7 +483,6 @@ function BackupsTab() {
                 telegramMutation.mutate({
                   filename: telegramDialog.filename,
                   chatId: telegramDialog.chatId || undefined,
-                  topicId: telegramDialog.topicId ? parseInt(telegramDialog.topicId) : undefined,
                 })
               }}
               disabled={telegramMutation.isPending}
@@ -635,9 +629,19 @@ function HistoryTab() {
   const { t } = useTranslation()
   const { formatDate } = useFormatters()
 
+  const [searchInput, setSearchInput] = useState('')
+  const [search, setSearch] = useState('')
+  const [typeFilter, setTypeFilter] = useState('')
+
+  // Debounce search input to avoid a request per keystroke
+  useEffect(() => {
+    const id = setTimeout(() => setSearch(searchInput.trim()), 300)
+    return () => clearTimeout(id)
+  }, [searchInput])
+
   const { data: log = [], isLoading } = useQuery({
-    queryKey: ['backup-log'],
-    queryFn: () => backupApi.getLog(),
+    queryKey: ['backup-log', search, typeFilter],
+    queryFn: () => backupApi.getLog(50, search || undefined, typeFilter || undefined),
   })
 
   const typeColor: Record<string, string> = {
@@ -646,7 +650,18 @@ function HistoryTab() {
     restore: 'text-amber-400',
     config_import: 'text-primary-400',
     user_import: 'text-amber-400',
+    upload: 'text-blue-400',
   }
+
+  const typeFilters: { value: string; label: string }[] = [
+    { value: '', label: t('backup.filterAll', { defaultValue: 'All' }) },
+    { value: 'database', label: t('backup.filterDatabase', { defaultValue: 'Database' }) },
+    { value: 'config', label: t('backup.filterConfig', { defaultValue: 'Config' }) },
+    { value: 'restore', label: t('backup.filterRestore', { defaultValue: 'Restore' }) },
+    { value: 'config_import', label: t('backup.filterConfigImport', { defaultValue: 'Config import' }) },
+    { value: 'user_import', label: t('backup.filterUserImport', { defaultValue: 'User import' }) },
+    { value: 'upload', label: t('backup.filterUpload', { defaultValue: 'Upload' }) },
+  ]
 
   return (
     <Card>
@@ -658,12 +673,43 @@ function HistoryTab() {
         </CardTitle>
       </CardHeader>
       <CardContent>
+        {/* Search + type filter */}
+        <div className="flex flex-wrap items-center gap-2 mb-4">
+          <div className="relative flex-1 min-w-[160px]">
+            <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-dark-400" />
+            <Input
+              placeholder={t('backup.searchHistory', { defaultValue: 'Search filename...' })}
+              value={searchInput}
+              onChange={(e) => setSearchInput(e.target.value)}
+              className="pl-8 h-8 text-xs bg-[var(--glass-bg)]"
+            />
+          </div>
+          <div className="flex flex-wrap items-center gap-1">
+            {typeFilters.map((f) => (
+              <button
+                key={f.value || 'all'}
+                onClick={() => setTypeFilter(f.value)}
+                className={`px-2.5 py-1 rounded-lg text-xs transition-colors ${
+                  typeFilter === f.value
+                    ? 'bg-primary/15 text-primary-300 border border-primary/30'
+                    : 'bg-[var(--glass-bg)] text-dark-300 border border-transparent hover:text-dark-100'
+                }`}
+              >
+                {f.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
         {isLoading ? (
           <div className="space-y-2">
             {[1, 2, 3].map((i) => <Skeleton key={i} className="h-14 w-full rounded-lg" />)}
           </div>
         ) : log.length === 0 ? (
-          <EmptyState icon={Clock} title={t('backup.noHistory')} />
+          <EmptyState
+            icon={search || typeFilter ? Search : Clock}
+            title={search || typeFilter ? t('backup.noHistoryMatch', { defaultValue: 'Nothing found' }) : t('backup.noHistory')}
+          />
         ) : (
           <div className="space-y-1.5">
             {log.map((entry, i) => (
