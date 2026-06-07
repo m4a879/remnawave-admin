@@ -29,6 +29,7 @@ from shared.metrics import (
     COLLECTOR_BATCHES_REJECTED,
     COLLECTOR_CONNECTIONS_PROCESSED,
 )
+from web.backend.core.webhook_security import fire_event
 
 logger = logging.getLogger(__name__)
 
@@ -601,6 +602,17 @@ async def _process_torrent_violations(
                     unique_ips_count=len(ips),
                 )
 
+                fire_event("violation.created", {
+                    "violation_id": violation_id,
+                    "user_uuid": user_uuid,
+                    "username": username,
+                    "score": 100.0,
+                    "recommended_action": "hard_block",
+                    "reasons": [f"Torrent traffic detected ({len(user_events)} events)"],
+                    "ip_addresses": ips,
+                    "source": "torrent",
+                })
+
                 # Notification
                 try:
                     from web.backend.core.violation_notifier import send_torrent_notification
@@ -651,6 +663,13 @@ async def _process_torrent_violations(
                         from shared.api_client import api_client
                         await api_client.disable_user(user_uuid)
                         logger.info("Auto-blocked user %s for torrent usage", user_uuid)
+                        fire_event("user.blocked", {
+                            "uuid": user_uuid,
+                            "username": username,
+                            "reason": "torrent",
+                            "details": f"Torrent traffic detected ({len(user_events)} events)",
+                            "blocked_by": "auto",
+                        })
                     except Exception as e:
                         logger.warning("Failed to auto-block user %s: %s", user_uuid, e)
 
@@ -731,6 +750,13 @@ async def _check_single_user(user_uuid: str, min_score: float, sem: asyncio.Sema
                                     from shared.api_client import api_client
                                     await api_client.disable_user(user_uuid)
                                     logger.info("Auto-blocked blacklisted user: %s (tg_id=%d)", user_uuid, tg_id)
+                                    fire_event("user.blocked", {
+                                        "uuid": user_uuid,
+                                        "username": user_info_bl.get("username") if user_info_bl else None,
+                                        "reason": "blacklist",
+                                        "details": bl_entry.get("reason", ""),
+                                        "blocked_by": "auto",
+                                    })
                                 except Exception:
                                     pass
                 except Exception as e:
@@ -808,7 +834,7 @@ async def _check_single_user(user_uuid: str, min_score: float, sem: asyncio.Sema
                     telegram_id = user_info.get("telegram_id") if user_info else None
                     device_limit = user_info.get("hwidDeviceLimit", 1) if user_info else 1
 
-                    await db_service.save_violation(
+                    violation_id = await db_service.save_violation(
                         user_uuid=user_uuid,
                         score=violation_score.total,
                         recommended_action=violation_score.recommended_action.value,
@@ -851,12 +877,32 @@ async def _check_single_user(user_uuid: str, min_score: float, sem: asyncio.Sema
                     )
                     logger.info("Violation saved      user=%-10s  score=%.1f", user_uuid[:8], violation_score.total)
 
+                    fire_event("violation.created", {
+                        "violation_id": violation_id,
+                        "user_uuid": user_uuid,
+                        "username": username,
+                        "score": violation_score.total,
+                        "confidence": violation_score.confidence,
+                        "recommended_action": violation_score.recommended_action.value,
+                        "reasons": violation_score.reasons[:10] if violation_score.reasons else [],
+                        "ip_addresses": ip_addresses,
+                        "source": "detector",
+                    })
+
                     # Auto-block in Remnawave Panel when hard_block is recommended
                     if violation_score.recommended_action == ViolationAction.HARD_BLOCK:
                         try:
                             from shared.api_client import api_client
                             await api_client.disable_user(user_uuid)
                             logger.warning("Auto-blocked user   user=%-10s  score=%.1f  action=hard_block", user_uuid[:8], violation_score.total)
+                            fire_event("user.blocked", {
+                                "uuid": user_uuid,
+                                "username": username,
+                                "reason": "violation",
+                                "details": f"hard_block recommended (score={violation_score.total:.1f})",
+                                "violation_id": violation_id,
+                                "blocked_by": "auto",
+                            })
                         except Exception as block_error:
                             logger.warning("Failed to auto-block user %s: %s", user_uuid, block_error)
 
@@ -1029,6 +1075,13 @@ async def _run_violation_detection(affected_user_uuids: set):
                                 from shared.api_client import api_client
                                 await api_client.disable_user(uid)
                                 logger.info("Auto-blocked blacklisted user: %s (tg_id=%d)", uid, tg_id)
+                                fire_event("user.blocked", {
+                                    "uuid": uid,
+                                    "username": uinfo.get("username"),
+                                    "reason": "blacklist",
+                                    "details": bl_entry.get("reason", ""),
+                                    "blocked_by": "auto",
+                                })
                             except Exception:
                                 pass
             except Exception as e:
@@ -1109,7 +1162,7 @@ async def _handle_violation(
         telegram_id = user_info.get("telegram_id") if user_info else None
         device_limit = user_info.get("hwidDeviceLimit", 1) if user_info else 1
 
-        await db_service.save_violation(
+        violation_id = await db_service.save_violation(
             user_uuid=user_uuid,
             score=violation_score.total,
             recommended_action=violation_score.recommended_action.value,
@@ -1145,12 +1198,32 @@ async def _handle_violation(
             ]) if ua and ua.suspicious_agents else None,
         )
 
+        fire_event("violation.created", {
+            "violation_id": violation_id,
+            "user_uuid": user_uuid,
+            "username": username,
+            "score": violation_score.total,
+            "confidence": violation_score.confidence,
+            "recommended_action": violation_score.recommended_action.value,
+            "reasons": violation_score.reasons[:10] if violation_score.reasons else [],
+            "ip_addresses": ip_addresses,
+            "source": "detector",
+        })
+
         from shared.violation_detector import ViolationAction
         if violation_score.recommended_action == ViolationAction.HARD_BLOCK:
             try:
                 from shared.api_client import api_client
                 await api_client.disable_user(user_uuid)
                 logger.warning("Auto-blocked user %s score=%.1f", user_uuid[:8], violation_score.total)
+                fire_event("user.blocked", {
+                    "uuid": user_uuid,
+                    "username": username,
+                    "reason": "violation",
+                    "details": f"hard_block recommended (score={violation_score.total:.1f})",
+                    "violation_id": violation_id,
+                    "blocked_by": "auto",
+                })
             except Exception as block_error:
                 logger.warning("Failed to auto-block user %s: %s", user_uuid, block_error)
 

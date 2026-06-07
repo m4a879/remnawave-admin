@@ -16,6 +16,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent.parent))
 from web.backend.api.deps import get_current_admin, require_permission, require_quota, AdminUser, get_client_ip
 from web.backend.core.api_helper import fetch_users_from_api
 from web.backend.core.rbac import write_audit_log, get_visible_user_uuids
+from web.backend.core.webhook_security import fire_event
 from web.backend.schemas.user import UserListItem, UserDetail, UserCreate, UserUpdate, HwidDevice
 from web.backend.schemas.common import PaginatedResponse, SuccessResponse
 from web.backend.schemas.bulk import BulkUserRequest, BulkOperationResult, BulkOperationError
@@ -648,6 +649,15 @@ async def create_user(
             ip_address=get_client_ip(request),
         )
 
+        fire_event("user.created", {
+            "uuid": str(user_uuid),
+            "username": data.username,
+            "email": data.email,
+            "telegram_id": data.telegram_id,
+            "expire_at": expire_at_str,
+            "created_by": admin.username,
+        })
+
         return UserDetail(**_ensure_snake_case(user))
 
     except ImportError:
@@ -705,6 +715,13 @@ async def update_user(
             ip_address=get_client_ip(request),
         )
 
+        fire_event("user.updated", {
+            "uuid": user_uuid,
+            "username": user.get("username") if isinstance(user, dict) else None,
+            "changed_fields": sorted(update_data.keys()),
+            "updated_by": admin.username,
+        })
+
         return UserDetail(**_ensure_snake_case(user))
 
     except ImportError:
@@ -750,6 +767,11 @@ async def delete_user(
             ip_address=get_client_ip(request),
         )
 
+        fire_event("user.deleted", {
+            "uuid": user_uuid,
+            "deleted_by": admin.username,
+        })
+
         return SuccessResponse(message="User deleted")
 
     except ImportError:
@@ -777,6 +799,12 @@ async def enable_user(
             details=json.dumps({"user_uuid": user_uuid}),
             ip_address=get_client_ip(request),
         )
+        fire_event("user.updated", {
+            "uuid": user_uuid,
+            "changed_fields": ["status"],
+            "status": "active",
+            "updated_by": admin.username,
+        })
         return SuccessResponse(message="User enabled")
 
     except ImportError:
@@ -804,6 +832,12 @@ async def disable_user(
             details=json.dumps({"user_uuid": user_uuid}),
             ip_address=get_client_ip(request),
         )
+        fire_event("user.updated", {
+            "uuid": user_uuid,
+            "changed_fields": ["status"],
+            "status": "disabled",
+            "updated_by": admin.username,
+        })
         return SuccessResponse(message="User disabled")
 
     except ImportError:
@@ -1255,6 +1289,11 @@ async def bulk_delete_users(
             except Exception as e:
                 logger.debug("Non-critical: failed to delete user from local DB: %s", e)
             success += 1
+            fire_event("user.deleted", {
+                "uuid": uuid,
+                "deleted_by": admin.username,
+                "bulk": True,
+            })
         except Exception as e:
             failed += 1
             errors.append(BulkOperationError(uuid=uuid, error=str(e)))
