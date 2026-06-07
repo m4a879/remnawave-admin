@@ -263,8 +263,9 @@ export default function SystemLogs() {
       base = `${proto}//${host}/api/v2`
     }
 
-    const wsUrl = `${base}/logs/stream?token=${encodeURIComponent(accessToken)}&file=${activeTab}`
-    const ws = new WebSocket(wsUrl)
+    const wsUrl = `${base}/logs/stream?file=${activeTab}`
+    // JWT через subprotocol — не попадает в access-логи
+    const ws = new WebSocket(wsUrl, ['access-token', accessToken])
     wsRef.current = ws
 
     ws.onopen = () => {

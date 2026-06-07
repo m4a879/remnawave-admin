@@ -1,8 +1,11 @@
 /**
  * WebSocket hook for real-time updates from Remnawave backend.
  *
- * Connects to ws://host/api/v2/ws?token=JWT and listens for events:
+ * Connects to ws://host/api/v2/ws and listens for events:
  *   node_status, user_update, violation, connection, activity
+ *
+ * Auth: JWT передаётся через Sec-WebSocket-Protocol ("access-token, <jwt>"),
+ * а не в query string — чтобы токен не попадал в access-логи.
  *
  * Automatically invalidates React Query caches when relevant events arrive.
  * Handles token expiry by refreshing before reconnect.
@@ -20,7 +23,7 @@ interface WsMessage {
   timestamp?: string
 }
 
-function getWsUrl(token: string): string {
+function getWsUrl(): string {
   const envUrl = window.__ENV?.API_URL || import.meta.env.VITE_API_URL || ''
 
   let base: string
@@ -39,7 +42,7 @@ function getWsUrl(token: string): string {
     base = `${proto}//${host}/api/v2`
   }
 
-  return `${base}/ws?token=${encodeURIComponent(token)}`
+  return `${base}/ws`
 }
 
 function formatAuditAction(action: string, resource: string, t: (key: string) => string): string {
@@ -246,8 +249,9 @@ export function useRealtimeUpdates() {
       wsRef.current.close()
     }
 
-    const url = getWsUrl(currentToken)
-    const ws = new WebSocket(url)
+    const url = getWsUrl()
+    // JWT через subprotocol — сервер подтверждает 'access-token'
+    const ws = new WebSocket(url, ['access-token', currentToken])
     wsRef.current = ws
 
     ws.onopen = () => {

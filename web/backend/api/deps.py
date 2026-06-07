@@ -244,11 +244,47 @@ async def get_2fa_temp_admin(
     return await _validate_token_payload(payload)
 
 
+# Маркер-подпротокол для передачи JWT в WebSocket-handshake:
+# клиент шлёт Sec-WebSocket-Protocol: "access-token, <jwt>".
+WS_AUTH_SUBPROTOCOL = "access-token"
+
+
+def extract_ws_token(websocket: WebSocket) -> Tuple[Optional[str], Optional[str]]:
+    """Extract JWT from a WebSocket handshake.
+
+    Preferred: Sec-WebSocket-Protocol header ("access-token, <jwt>") —
+    токен не попадает в access-логи прокси/сервера в отличие от query string.
+    Fallback: ?token= query param (deprecated, для старых клиентов —
+    мобильное приложение и агенты обновляются отдельно).
+
+    Returns (token, subprotocol): subprotocol нужно передать в
+    websocket.accept(subprotocol=...) — браузер разрывает соединение,
+    если сервер не подтвердил запрошенный подпротокол.
+    """
+    proto_header = websocket.headers.get("sec-websocket-protocol", "")
+    if proto_header:
+        parts = [p.strip() for p in proto_header.split(",")]
+        if len(parts) >= 2 and parts[0] == WS_AUTH_SUBPROTOCOL and parts[1]:
+            return parts[1], WS_AUTH_SUBPROTOCOL
+    return websocket.query_params.get("token"), None
+
+
 async def get_current_admin_ws(
     websocket: WebSocket,
-    token: Optional[str] = Query(None),
+    token: Optional[str] = None,
 ) -> AdminUser:
-    """Dependency for verifying admin authentication in WebSocket."""
+    """Dependency for verifying admin authentication in WebSocket.
+
+    Если token не передан явно, извлекается из handshake (см. extract_ws_token).
+    Сохраняет websocket.state.auth_subprotocol — эндпоинт ОБЯЗАН передать его
+    в websocket.accept(subprotocol=...).
+    """
+    if token is None:
+        token, subprotocol = extract_ws_token(websocket)
+        websocket.state.auth_subprotocol = subprotocol
+    else:
+        websocket.state.auth_subprotocol = None
+
     if not token:
         await websocket.close(code=4001, reason="Missing token")
         raise HTTPException(status_code=401, detail="Missing token")
