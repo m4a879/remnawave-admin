@@ -1,13 +1,18 @@
 import gettext
 import json
 from pathlib import Path
-from typing import Dict, Iterable, Tuple
+from typing import Any, Dict, Iterable, Tuple
 
 from aiogram.utils.i18n import I18n, I18nMiddleware
 
 from src.config import get_settings
 
 BASE_LOCALES_PATH = Path(__file__).resolve().parent.parent.parent / "locales"
+
+# Cache for `tr()` lookup: locale -> {flat_key: value}. Invalidated when the
+# bot's language changes (admin flips bot_language in DB / .env).
+_locale_translations: Dict[str, Dict[str, str]] = {}
+_locale_cache_lang: str | None = None
 
 
 def _flatten_translations(data: dict, prefix: str = "") -> Iterable[Tuple[str, str]]:
@@ -116,3 +121,58 @@ def get_i18n_middleware() -> I18nMiddleware:
                 I18n.reset_current(base_token)
 
     return SimpleI18nMiddleware(i18n=i18n)
+
+
+def _load_translations_for(lang: str) -> Dict[str, str]:
+    """Load and flatten locales/<lang>/messages.json. Cached per-process."""
+    if lang in _locale_translations:
+        return _locale_translations[lang]
+    path = BASE_LOCALES_PATH / lang / "messages.json"
+    try:
+        raw = path.read_text(encoding="utf-8-sig")
+        data = json.loads(raw)
+        flat = dict(_flatten_translations(data))
+    except (FileNotFoundError, json.JSONDecodeError):
+        flat = {}
+    _locale_translations[lang] = flat
+    return flat
+
+
+def invalidate_locale_cache() -> None:
+    """Drop the per-process translation cache (call when the bot's
+    language is changed at runtime via config_service)."""
+    _locale_translations.clear()
+    _locale_cache_lang = None  # noqa: F841 — keep reference shape consistent
+
+
+def tr(key: str, /, **kwargs: Any) -> str:
+    """Translate a key using the current bot language.
+
+    Intended for non-handler contexts (background tasks, health checks,
+    webhook notifications) where there is no per-user `i18n.use_locale`
+    context. Handler code should keep using `from aiogram.utils.i18n
+    import gettext as _` so per-user locales still apply.
+
+    Looks up the key in the locale currently configured for the bot
+    (config_service → .env → default). Falls back to the key itself if
+    missing. Format placeholders in `**kwargs` are applied via str.format.
+    """
+    try:
+        lang = _get_bot_language()
+        flat = _load_translations_for(lang)
+        template = flat.get(key)
+        if template is None and lang != get_settings().default_locale:
+            # Fall back to default locale if the active one is missing the key
+            flat = _load_translations_for(get_settings().default_locale)
+            template = flat.get(key)
+        if template is None:
+            template = key
+    except Exception:
+        template = key
+
+    if kwargs:
+        try:
+            return template.format(**kwargs)
+        except (KeyError, IndexError, ValueError):
+            return template
+    return template

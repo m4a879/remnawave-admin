@@ -1016,5 +1016,233 @@
     "traffic_reset": "🔄 Трафик {username} сброшен",
     "traffic_reset_suffix": "\n\n🔄 <i>Трафик сброшен ({name})</i>",
     "reset_error": "❌ Ошибка сброса: {e}"
+  },
+  "notify": {
+    "fallback": "ℹ️ <b>Уведомление:</b> {event}",
+
+    "user": {
+      "fallback": "✏️ <b>Пользователь изменён</b>",
+      "title": {
+        "created": "✅ <b>Пользователь создан</b>",
+        "updated": "✏️ <b>Пользователь изменён</b>",
+        "deleted": "🗑 <b>Пользователь удалён</b>",
+        "expired": "⏱️ <b>Подписка истекла</b>",
+        "expires_in_72h": "⏰ <b>Подписка истекает через 72 часа</b>",
+        "expires_in_48h": "⏰ <b>Подписка истекает через 48 часов</b>",
+        "expires_in_24h": "⏰ <b>Подписка истекает через 24 часа</b>",
+        "expired_24h_ago": "⏱️ <b>Подписка истекла 24 часа назад</b>",
+        "revoked": "🚫 <b>Подписка отозвана</b>",
+        "disabled": "❌ <b>Пользователь отключён</b>",
+        "enabled": "✅ <b>Пользователь включён</b>",
+        "limited": "⚠️ <b>Достигнут лимит трафика</b>",
+        "traffic_reset": "🔄 <b>Трафик сброшен</b>",
+        "first_connected": "🟢 <b>Первый вход пользователя</b>",
+        "bandwidth_threshold": "📊 <b>Достигнут порог использования трафика</b>",
+        "not_connected": "🔴 <b>Пользователь не подключался</b>"
+      },
+      "field": {
+        "traffic_limit": "Лимит трафика",
+        "expire": "Дата истечения",
+        "strategy": "Период сброса",
+        "hwid_limit": "HWID лимит",
+        "status": "Статус",
+        "description": "Описание",
+        "telegram_id": "Telegram ID",
+        "email": "Email",
+        "tag": "Тег",
+        "squad": "Сквад"
+      },
+      "label": {
+        "unlimited": "Безлимит",
+        "limit": "Лимит",
+        "expires": "Истекает",
+        "reset": "Сброс",
+        "hwid": "HWID",
+        "subscription": "Ссылка",
+        "squad": "Сквад",
+        "telegram": "Telegram",
+        "email": "Email",
+        "card_separator": " · "
+      },
+      "section": {
+        "changes": "📋 <b>Изменения</b>",
+        "no_changes": "<i>Изменения не определены</i>",
+        "traffic_limits": "📊 <b>Трафик и лимиты</b>"
+      },
+      "subscription_link": "🔗 Ссылка: <code>{url}</code>",
+      "external_squad": "External: {uuid}..."
+    },
+
+    "node": {
+      "fallback": "ℹ️ <b>Событие ноды: {event}</b>",
+      "title": {
+        "node.created": "🆕 <b>Нода создана</b>",
+        "node.modified": "✏️ <b>Нода изменена</b>",
+        "node.disabled": "❌ <b>Нода отключена</b>",
+        "node.enabled": "✅ <b>Нода включена</b>",
+        "node.deleted": "🗑 <b>Нода удалена</b>",
+        "node.connection_lost": "🔴 <b>Потеряно соединение с нодой</b>",
+        "node.connection_restored": "🟢 <b>Соединение с нодой восстановлено</b>",
+        "node.traffic_notify": "📊 <b>Уведомление о трафике ноды</b>"
+      },
+      "label": {
+        "address": "Адрес",
+        "status": "Статус",
+        "traffic_limit": "Лимит трафика",
+        "changes": "📋 <b>Изменения</b>"
+      }
+    },
+
+    "service": {
+      "fallback": "ℹ️ <b>Событие сервиса: {event}</b>",
+      "title": {
+        "service.panel_started": "🚀 <b>Панель запущена</b>",
+        "service.login_attempt_failed": "⚠️ <b>Неудачная попытка входа</b>",
+        "service.login_attempt_success": "✅ <b>Успешный вход</b>",
+        "panel.unavailable": "❌ <b>Панель недоступна</b>"
+      },
+      "login": {
+        "username": "👤 <b>Username:</b> <code>{username}</code>",
+        "ip": "🌐 <b>IP:</b> <code>{ip}</code>",
+        "user_agent": "🔍 <b>User Agent:</b> <code>{user_agent}</code>"
+      },
+      "panel_unavailable": {
+        "error_type": "⚠️ <b>Ошибка:</b> <code>{error_type}</code>",
+        "error_message": "📝 <b>Сообщение:</b> <code>{error_message}</code>",
+        "failures": "🔄 <b>Неудачных попыток подряд:</b> {count}",
+        "last_check": "🕒 <b>Последняя проверка:</b> {last_check}"
+      }
+    },
+
+    "hwid": {
+      "fallback": "💻 <b>Событие HWID: {event}</b>",
+      "title": {
+        "user_hwid_devices.added": "➕ <b>HWID устройство добавлено</b>",
+        "user_hwid_devices.deleted": "➖ <b>HWID устройство удалено</b>"
+      },
+      "label": {
+        "user": "👤 <b>Пользователь:</b> <code>{username}</code>",
+        "uuid": "🆔 <b>UUID:</b> <code>{uuid}</code>",
+        "tg_id": "📱 <b>TG ID:</b> <code>{telegram_id}</code>",
+        "status": "📊 <b>Статус:</b> <code>{status}</code>",
+        "description": "📝 <b>Описание:</b> <code>{description}</code>",
+        "device_limit": "📲 <b>Лимит устройств:</b> <code>{limit}</code>"
+      },
+      "device_header": "💻 <b>Информация об устройстве</b>",
+      "device": {
+        "hwid": "   HWID: <code>{hwid}</code>",
+        "platform": "   Платформа: <code>{platform}</code>",
+        "os_version": "   Версия ОС: <code>{os_version}</code>",
+        "model": "   Модель: <code>{model}</code>",
+        "user_agent": "   User-Agent: <code>{user_agent}</code>",
+        "added": "   Добавлено: <code>{created_at}</code>"
+      },
+      "action": {
+        "added": "Добавлено устройство",
+        "deleted": "Удалено устройство",
+        "fallback": "HWID: {event}"
+      }
+    },
+
+    "error": {
+      "title": "⚠️ <b>Ошибка системы</b>",
+      "type": "<b>Тип:</b> <code>{event}</code>",
+      "message": "<b>Сообщение:</b> <code>{message}</code>"
+    },
+
+    "crm": {
+      "fallback": "💰 <b>Событие CRM: {event}</b>",
+      "title": {
+        "crm.infra_billing_node_payment_in_7_days": "📅 <b>Оплата ноды через 7 дней</b>",
+        "crm.infra_billing_node_payment_in_48hrs": "⏰ <b>Оплата ноды через 48 часов</b>",
+        "crm.infra_billing_node_payment_in_24hrs": "⏰ <b>Оплата ноды через 24 часа</b>",
+        "crm.infra_billing_node_payment_due_today": "🔴 <b>Оплата ноды сегодня</b>",
+        "crm.infra_billing_node_payment_overdue_24hrs": "⚠️ <b>Оплата ноды просрочена на 24 часа</b>",
+        "crm.infra_billing_node_payment_overdue_48hrs": "⚠️ <b>Оплата ноды просрочена на 48 часов</b>",
+        "crm.infra_billing_node_payment_overdue_7_days": "🚨 <b>Оплата ноды просрочена на 7 дней</b>"
+      },
+      "section": {
+        "node": "🖥 <b>Информация о ноде</b>",
+        "provider": "🏢 <b>Провайдер</b>",
+        "billing": "💰 <b>Информация об оплате</b>"
+      },
+      "label": {
+        "name": "Название",
+        "uuid": "UUID",
+        "address": "Адрес",
+        "port": "Порт",
+        "country": "Страна",
+        "login_url": "Личный кабинет: {url}",
+        "next_billing": "Следующая оплата: <code>{date}</code>",
+        "last_billing": "Последняя оплата: <code>{date}</code>",
+        "interval": "Интервал",
+        "amount": "Сумма"
+      }
+    },
+
+    "violation": {
+      "title": "🚨 <b>НАРУШИТЕЛЬ ЛИМИТА</b>",
+      "email": "📧 Email: <code>{email}</code>",
+      "username": "📧 Username: <code>{username}</code>",
+      "tg_id": "📱 TG ID: <code>{telegram_id}</code>",
+      "description": "📝 Описание: <code>{description}</code>",
+      "ip_count": "🌐 IP адресов: <b>{count}/{limit}</b>",
+      "ips_providers": "📍 IP (провайдеры):",
+      "ip_with_meta": "   <code>{ip}</code> - {provider} ({country})",
+      "ip_with_country": "   <code>{ip}</code> ({country})",
+      "ip_bare": "   <code>{ip}</code>",
+      "nodes": "🖥 Ноды: <code>{nodes}</code>",
+      "devices": "📲 Устройства ({count}/{limit}):",
+      "devices_ua": "📲 Устройства (по UA): {details}",
+      "devices_empty": "📲 Устройства: —",
+      "os_list": "ОС: {list}",
+      "client_list": "Клиенты: {list}",
+      "more_devices": "... и ещё {count}",
+      "duration": "⏱ В нарушении: <code>{seconds} сек</code>",
+      "score": "📊 Скор: <code>{score}/100</code>",
+      "time_msk": "🕐 Время (МСК): <code>{time}</code>",
+      "btn": {
+        "info": "👤 Подробнее",
+        "block": "🔒 Заблокировать",
+        "kill": "⛔ Откл + разорвать",
+        "reset": "🔄 Сбросить трафик",
+        "annul": "🚫 Аннулировать"
+      },
+      "platform": {
+        "android": "Android",
+        "ios": "iOS",
+        "windows": "Windows",
+        "macos": "macOS",
+        "linux": "Linux",
+        "unknown": "Unknown"
+      }
+    },
+
+    "push": {
+      "node_fallback": "Событие ноды",
+      "service_title": "Сервис: {event}",
+      "service_body": "Событие {event}",
+      "error_title": "Ошибка: {event}",
+      "error_body": "Событие {event}",
+      "user": {
+        "created": "Новый пользователь",
+        "updated": "Изменён пользователь",
+        "deleted": "Удалён пользователь",
+        "disabled": "Пользователь отключён",
+        "enabled": "Пользователь включён",
+        "limited": "Лимит трафика исчерпан",
+        "expired": "Подписка истекла",
+        "traffic_reset": "Трафик сброшен",
+        "revoked": "Подписка отозвана",
+        "first_connected": "Первое подключение",
+        "expires_in_72h": "Подписка истекает через 72ч",
+        "expires_in_48h": "Подписка истекает через 48ч",
+        "expires_in_24h": "Подписка истекает через 24ч",
+        "expired_24h_ago": "Подписка истекла 24ч назад",
+        "bandwidth_threshold": "Порог трафика превышен",
+        "not_connected": "Нет подключения",
+        "fallback": "Юзер: {action}"
+      }
+    }
   }
 }

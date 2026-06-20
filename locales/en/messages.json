@@ -1016,5 +1016,233 @@
     "traffic_reset": "🔄 Traffic {username} reset",
     "traffic_reset_suffix": "\n\n🔄 <i>Traffic reset ({name})</i>",
     "reset_error": "❌ Reset error: {e}"
+  },
+  "notify": {
+    "fallback": "ℹ️ <b>Notification:</b> {event}",
+
+    "user": {
+      "fallback": "✏️ <b>User updated</b>",
+      "title": {
+        "created": "✅ <b>User created</b>",
+        "updated": "✏️ <b>User updated</b>",
+        "deleted": "🗑 <b>User deleted</b>",
+        "expired": "⏱️ <b>Subscription expired</b>",
+        "expires_in_72h": "⏰ <b>Subscription expires in 72 hours</b>",
+        "expires_in_48h": "⏰ <b>Subscription expires in 48 hours</b>",
+        "expires_in_24h": "⏰ <b>Subscription expires in 24 hours</b>",
+        "expired_24h_ago": "⏱️ <b>Subscription expired 24 hours ago</b>",
+        "revoked": "🚫 <b>Subscription revoked</b>",
+        "disabled": "❌ <b>User disabled</b>",
+        "enabled": "✅ <b>User enabled</b>",
+        "limited": "⚠️ <b>Traffic limit reached</b>",
+        "traffic_reset": "🔄 <b>Traffic reset</b>",
+        "first_connected": "🟢 <b>User first connection</b>",
+        "bandwidth_threshold": "📊 <b>Bandwidth usage threshold reached</b>",
+        "not_connected": "🔴 <b>User has not connected</b>"
+      },
+      "field": {
+        "traffic_limit": "Traffic limit",
+        "expire": "Expiration date",
+        "strategy": "Reset period",
+        "hwid_limit": "HWID limit",
+        "status": "Status",
+        "description": "Description",
+        "telegram_id": "Telegram ID",
+        "email": "Email",
+        "tag": "Tag",
+        "squad": "Squad"
+      },
+      "label": {
+        "unlimited": "Unlimited",
+        "limit": "Limit",
+        "expires": "Expires",
+        "reset": "Reset",
+        "hwid": "HWID",
+        "subscription": "Subscription",
+        "squad": "Squad",
+        "telegram": "Telegram",
+        "email": "Email",
+        "card_separator": " · "
+      },
+      "section": {
+        "changes": "📋 <b>Changes</b>",
+        "no_changes": "<i>Changes undefined</i>",
+        "traffic_limits": "📊 <b>Traffic and limits</b>"
+      },
+      "subscription_link": "🔗 Link: <code>{url}</code>",
+      "external_squad": "External: {uuid}..."
+    },
+
+    "node": {
+      "fallback": "ℹ️ <b>Node event: {event}</b>",
+      "title": {
+        "node.created": "🆕 <b>Node created</b>",
+        "node.modified": "✏️ <b>Node modified</b>",
+        "node.disabled": "❌ <b>Node disabled</b>",
+        "node.enabled": "✅ <b>Node enabled</b>",
+        "node.deleted": "🗑 <b>Node deleted</b>",
+        "node.connection_lost": "🔴 <b>Node connection lost</b>",
+        "node.connection_restored": "🟢 <b>Node connection restored</b>",
+        "node.traffic_notify": "📊 <b>Node traffic notification</b>"
+      },
+      "label": {
+        "address": "Address",
+        "status": "Status",
+        "traffic_limit": "Traffic limit",
+        "changes": "📋 <b>Changes</b>"
+      }
+    },
+
+    "service": {
+      "fallback": "ℹ️ <b>Service event: {event}</b>",
+      "title": {
+        "service.panel_started": "🚀 <b>Panel started</b>",
+        "service.login_attempt_failed": "⚠️ <b>Failed login attempt</b>",
+        "service.login_attempt_success": "✅ <b>Successful login</b>",
+        "panel.unavailable": "❌ <b>Panel unavailable</b>"
+      },
+      "login": {
+        "username": "👤 <b>Username:</b> <code>{username}</code>",
+        "ip": "🌐 <b>IP:</b> <code>{ip}</code>",
+        "user_agent": "🔍 <b>User Agent:</b> <code>{user_agent}</code>"
+      },
+      "panel_unavailable": {
+        "error_type": "⚠️ <b>Error:</b> <code>{error_type}</code>",
+        "error_message": "📝 <b>Message:</b> <code>{error_message}</code>",
+        "failures": "🔄 <b>Consecutive failures:</b> {count}",
+        "last_check": "🕒 <b>Last check:</b> {last_check}"
+      }
+    },
+
+    "hwid": {
+      "fallback": "💻 <b>HWID event: {event}</b>",
+      "title": {
+        "user_hwid_devices.added": "➕ <b>HWID device added</b>",
+        "user_hwid_devices.deleted": "➖ <b>HWID device deleted</b>"
+      },
+      "label": {
+        "user": "👤 <b>User:</b> <code>{username}</code>",
+        "uuid": "🆔 <b>UUID:</b> <code>{uuid}</code>",
+        "tg_id": "📱 <b>TG ID:</b> <code>{telegram_id}</code>",
+        "status": "📊 <b>Status:</b> <code>{status}</code>",
+        "description": "📝 <b>Description:</b> <code>{description}</code>",
+        "device_limit": "📲 <b>Device limit:</b> <code>{limit}</code>"
+      },
+      "device_header": "💻 <b>Device info</b>",
+      "device": {
+        "hwid": "   HWID: <code>{hwid}</code>",
+        "platform": "   Platform: <code>{platform}</code>",
+        "os_version": "   OS version: <code>{os_version}</code>",
+        "model": "   Model: <code>{model}</code>",
+        "user_agent": "   User-Agent: <code>{user_agent}</code>",
+        "added": "   Added: <code>{created_at}</code>"
+      },
+      "action": {
+        "added": "Device added",
+        "deleted": "Device removed",
+        "fallback": "HWID: {event}"
+      }
+    },
+
+    "error": {
+      "title": "⚠️ <b>System error</b>",
+      "type": "<b>Type:</b> <code>{event}</code>",
+      "message": "<b>Message:</b> <code>{message}</code>"
+    },
+
+    "crm": {
+      "fallback": "💰 <b>CRM event: {event}</b>",
+      "title": {
+        "crm.infra_billing_node_payment_in_7_days": "📅 <b>Node payment in 7 days</b>",
+        "crm.infra_billing_node_payment_in_48hrs": "⏰ <b>Node payment in 48 hours</b>",
+        "crm.infra_billing_node_payment_in_24hrs": "⏰ <b>Node payment in 24 hours</b>",
+        "crm.infra_billing_node_payment_due_today": "🔴 <b>Node payment due today</b>",
+        "crm.infra_billing_node_payment_overdue_24hrs": "⚠️ <b>Node payment overdue 24 hours</b>",
+        "crm.infra_billing_node_payment_overdue_48hrs": "⚠️ <b>Node payment overdue 48 hours</b>",
+        "crm.infra_billing_node_payment_overdue_7_days": "🚨 <b>Node payment overdue 7 days</b>"
+      },
+      "section": {
+        "node": "🖥 <b>Node information</b>",
+        "provider": "🏢 <b>Provider</b>",
+        "billing": "💰 <b>Billing information</b>"
+      },
+      "label": {
+        "name": "Name",
+        "uuid": "UUID",
+        "address": "Address",
+        "port": "Port",
+        "country": "Country",
+        "login_url": "Dashboard: {url}",
+        "next_billing": "Next payment: <code>{date}</code>",
+        "last_billing": "Last payment: <code>{date}</code>",
+        "interval": "Interval",
+        "amount": "Amount"
+      }
+    },
+
+    "violation": {
+      "title": "🚨 <b>LIMIT VIOLATOR</b>",
+      "email": "📧 Email: <code>{email}</code>",
+      "username": "📧 Username: <code>{username}</code>",
+      "tg_id": "📱 TG ID: <code>{telegram_id}</code>",
+      "description": "📝 Description: <code>{description}</code>",
+      "ip_count": "🌐 IPs: <b>{count}/{limit}</b>",
+      "ips_providers": "📍 IPs (providers):",
+      "ip_with_meta": "   <code>{ip}</code> - {provider} ({country})",
+      "ip_with_country": "   <code>{ip}</code> ({country})",
+      "ip_bare": "   <code>{ip}</code>",
+      "nodes": "🖥 Nodes: <code>{nodes}</code>",
+      "devices": "📲 Devices ({count}/{limit}):",
+      "devices_ua": "📲 Devices (by UA): {details}",
+      "devices_empty": "📲 Devices: —",
+      "os_list": "OS: {list}",
+      "client_list": "Clients: {list}",
+      "more_devices": "... and {count} more",
+      "duration": "⏱ In violation: <code>{seconds} sec</code>",
+      "score": "📊 Score: <code>{score}/100</code>",
+      "time_msk": "🕐 Time (MSK): <code>{time}</code>",
+      "btn": {
+        "info": "👤 Details",
+        "block": "🔒 Block",
+        "kill": "⛔ Reject + drop",
+        "reset": "🔄 Reset traffic",
+        "annul": "🚫 Annul"
+      },
+      "platform": {
+        "android": "Android",
+        "ios": "iOS",
+        "windows": "Windows",
+        "macos": "macOS",
+        "linux": "Linux",
+        "unknown": "Unknown"
+      }
+    },
+
+    "push": {
+      "node_fallback": "Node event",
+      "service_title": "Service: {event}",
+      "service_body": "Event {event}",
+      "error_title": "Error: {event}",
+      "error_body": "Event {event}",
+      "user": {
+        "created": "New user",
+        "updated": "User updated",
+        "deleted": "User deleted",
+        "disabled": "User disabled",
+        "enabled": "User enabled",
+        "limited": "Traffic limit reached",
+        "expired": "Subscription expired",
+        "traffic_reset": "Traffic reset",
+        "revoked": "Subscription revoked",
+        "first_connected": "First connection",
+        "expires_in_72h": "Subscription expires in 72h",
+        "expires_in_48h": "Subscription expires in 48h",
+        "expires_in_24h": "Subscription expires in 24h",
+        "expired_24h_ago": "Subscription expired 24h ago",
+        "bandwidth_threshold": "Bandwidth threshold exceeded",
+        "not_connected": "No connection",
+        "fallback": "User: {action}"
+      }
+    }
   }
 }
