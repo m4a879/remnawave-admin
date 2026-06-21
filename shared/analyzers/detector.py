@@ -342,6 +342,19 @@ class IntelligentViolationDetector:
                     known_pairs_modifier, score_before_pairs, raw_score
                 )
 
+            # Strong-signal bypass: один мощный одиночный сигнал (>=85) не должен полностью
+            # гаситься consistency/dampening на ПЕРВОМ срабатывании. Иначе явный шаринг
+            # (impossible-travel гео, кросс-аккаунт HWID, ссылка-в-UA) не доходит до порога
+            # нарушения — это и есть причина, по которой детектор почти не создаёт нарушений
+            # через взвешенный путь (consistency ×0.3 на первом срабатывании съедает всё, а
+            # чтобы consistency стал 1.0, нужны уже записанные нарушения, которых неоткуда взять).
+            _strongest_signal = max(
+                geo_score.score, hwid_score.score, ua_score.score,
+                temporal_score.score, profile_score.score, asn_score.score, device_score.score,
+            )
+            if _strongest_signal >= 85.0:
+                raw_score = max(raw_score, 50.0)
+
             # Если есть серьёзные одновременные подключения (высокий скор), устанавливаем минимум
             # Применяем только для очевидных нарушений (temporal >= 80), чтобы не создавать
             # ложных срабатываний при обычном переключении сетей
@@ -362,8 +375,10 @@ class IntelligentViolationDetector:
             # ИЛИ абузом мультитарифа (один telegram_id с N подписками на одном HWID — там
             # other_accounts_count=0, поэтому отдельный флаг, иначе мультитариф не детектится).
             _hwid_qualifies = hwid_score.other_accounts_count >= 1 or getattr(hwid_score, "per_account_abuse", False)
-            # Кросс-аккаунт / мультитариф — стопроцентное нарушение, минимум 80 (soft_block)
-            if hwid_score.score >= 100.0 and _hwid_qualifies:
+            # Кросс-аккаунт / мультитариф — сильное нарушение, минимум 80 (soft_block).
+            # Порог 85 (а не 100): hwid_score=100 требует overflow>=3 = 6+ аккаунтов на HWID,
+            # а классические «3-5 аккаунтов на телефоне» дают 85 и раньше проваливались в floor 50.
+            if hwid_score.score >= 85.0 and _hwid_qualifies:
                 raw_score = max(raw_score, 80.0)
             # Промежуточные HWID скоры (65+) — минимум 50 (monitor)
             elif hwid_score.score >= 65.0 and _hwid_qualifies:
