@@ -347,7 +347,7 @@ async def _run_migrations(database_url: str) -> bool:
         from alembic import command
         from alembic.runtime.migration import MigrationContext
         from alembic.script import ScriptDirectory
-        from sqlalchemy import create_engine
+        from sqlalchemy import create_engine, text
 
         # Normalise URL to sync psycopg2 driver
         raw_url = str(database_url)
@@ -415,7 +415,28 @@ async def _run_migrations(database_url: str) -> bool:
                 connection = engine.connect()
                 try:
                     alembic_cfg.attributes["connection"] = connection
+                    # ``stale`` heads are plugin branches whose wheel isn't
+                    # loaded this run; they're unresolvable in the script
+                    # graph, and ``alembic upgrade`` must resolve *every*
+                    # current head to plan the path — so it would crash and
+                    # block the panel's own pending migrations. Detach them
+                    # for the upgrade and restore them after, in one
+                    # transaction; the plugin's later pip install re-grafts
+                    # its branch, so its migration record survives.
+                    if stale:
+                        connection.execute(
+                            text("DELETE FROM alembic_version WHERE version_num = ANY(:s)"),
+                            {"s": list(stale)},
+                        )
                     command.upgrade(alembic_cfg, "heads")
+                    if stale:
+                        connection.execute(
+                            text(
+                                "INSERT INTO alembic_version (version_num) VALUES (:v) "
+                                "ON CONFLICT DO NOTHING"
+                            ),
+                            [{"v": s} for s in stale],
+                        )
                     connection.commit()
                 except Exception:
                     connection.rollback()

@@ -34,7 +34,7 @@ async def run_migrations() -> bool:
         from alembic import command
         from alembic.runtime.migration import MigrationContext
         from alembic.script import ScriptDirectory
-        from sqlalchemy import create_engine
+        from sqlalchemy import create_engine, text
         import asyncio
 
         settings = get_settings()
@@ -100,7 +100,26 @@ async def run_migrations() -> bool:
                 connection = engine.connect()
                 try:
                     alembic_cfg.attributes['connection'] = connection
+                    # stale-ревизии (плагин-ветки, чей wheel не загружен в
+                    # этот запуск) неразрешимы в графе, а alembic при upgrade
+                    # обязан разрезолвить ВСЕ текущие головы — иначе падает и
+                    # блокирует собственные pending-миграции. Отцепляем их на
+                    # время апгрейда и возвращаем после, в одной транзакции:
+                    # запись плагина в alembic_version сохраняется.
+                    if stale:
+                        connection.execute(
+                            text("DELETE FROM alembic_version WHERE version_num = ANY(:s)"),
+                            {"s": list(stale)},
+                        )
                     command.upgrade(alembic_cfg, "heads")
+                    if stale:
+                        connection.execute(
+                            text(
+                                "INSERT INTO alembic_version (version_num) VALUES (:v) "
+                                "ON CONFLICT DO NOTHING"
+                            ),
+                            [{"v": s} for s in stale],
+                        )
                     connection.commit()
                 except Exception:
                     connection.rollback()
