@@ -82,11 +82,17 @@ async def run_migrations() -> bool:
                 )
 
                 pending = heads - current_heads
-                stale = current_heads - heads
-                if stale:
+                # unresolvable — ревизии из alembic_version, которых нет в
+                # нашем графе вообще (плагин-ветки, чей wheel не загружен).
+                # Сравниваем со ВСЕМИ известными ревизиями (walk_revisions),
+                # не только головами, иначе 0069 (когда голова 0071) попал бы
+                # сюда и был бы стёрт.
+                known_revs = {sc.revision for sc in script.walk_revisions()}
+                unresolvable = current_heads - known_revs
+                if unresolvable:
                     logger.info(
                         "ℹ️  В БД есть ревизии, неизвестные коду бота: %s — это плагин-ветки от панели, бот их не трогает",
-                        sorted(stale),
+                        sorted(unresolvable),
                     )
 
                 if not pending:
@@ -100,25 +106,26 @@ async def run_migrations() -> bool:
                 connection = engine.connect()
                 try:
                     alembic_cfg.attributes['connection'] = connection
-                    # stale-ревизии (плагин-ветки, чей wheel не загружен в
-                    # этот запуск) неразрешимы в графе, а alembic при upgrade
+                    # unresolvable-ревизии (плагин-ветки, чей wheel не
+                    # загружен) неразрешимы в графе, а alembic при upgrade
                     # обязан разрезолвить ВСЕ текущие головы — иначе падает и
-                    # блокирует собственные pending-миграции. Отцепляем их на
+                    # блокирует собственные pending-миграции. Отцепляем
+                    # только их (никогда не известную панельную ревизию) на
                     # время апгрейда и возвращаем после, в одной транзакции:
                     # запись плагина в alembic_version сохраняется.
-                    if stale:
+                    if unresolvable:
                         connection.execute(
                             text("DELETE FROM alembic_version WHERE version_num = ANY(:s)"),
-                            {"s": list(stale)},
+                            {"s": list(unresolvable)},
                         )
                     command.upgrade(alembic_cfg, "heads")
-                    if stale:
+                    if unresolvable:
                         connection.execute(
                             text(
                                 "INSERT INTO alembic_version (version_num) VALUES (:v) "
                                 "ON CONFLICT DO NOTHING"
                             ),
-                            [{"v": s} for s in stale],
+                            [{"v": s} for s in unresolvable],
                         )
                     connection.commit()
                 except Exception:

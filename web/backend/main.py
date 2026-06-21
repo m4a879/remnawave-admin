@@ -391,19 +391,21 @@ async def _run_migrations(database_url: str) -> bool:
                 )
 
                 pending = heads - current_heads
-                # ``stale`` = revisions the DB knows about but our code
-                # doesn't. Happens when a plugin's wheel isn't loaded yet
-                # this run (fresh container after pull) — its branch is
-                # still in the DB from previous runs. We deliberately do
-                # not try to clean those up: the plugin's pip install
-                # will land later in the lifespan and the next migration
-                # pass will see them again as known revisions.
-                stale = current_heads - heads
-                if stale:
+                # ``unresolvable`` = revisions stamped in alembic_version
+                # that don't exist in our script graph at all — plugin
+                # branches whose wheel isn't loaded this run. Compared
+                # against *all* known revisions (walk_revisions), not just
+                # heads, so a panel revision the DB merely sits behind
+                # (e.g. 0069 while head is 0071) is NOT misclassified and
+                # wiped. The plugin's pip install lands later in the
+                # lifespan and reconciles its branch then.
+                known_revs = {sc.revision for sc in script.walk_revisions()}
+                unresolvable = current_heads - known_revs
+                if unresolvable:
                     logger.info(
                         "Revisions present in DB but unknown to current code: %s "
                         "(plugin not loaded yet — will be reconciled after install)",
-                        sorted(stale),
+                        sorted(unresolvable),
                     )
 
                 if not pending:
@@ -415,27 +417,27 @@ async def _run_migrations(database_url: str) -> bool:
                 connection = engine.connect()
                 try:
                     alembic_cfg.attributes["connection"] = connection
-                    # ``stale`` heads are plugin branches whose wheel isn't
-                    # loaded this run; they're unresolvable in the script
-                    # graph, and ``alembic upgrade`` must resolve *every*
-                    # current head to plan the path — so it would crash and
-                    # block the panel's own pending migrations. Detach them
-                    # for the upgrade and restore them after, in one
-                    # transaction; the plugin's later pip install re-grafts
-                    # its branch, so its migration record survives.
-                    if stale:
+                    # ``unresolvable`` heads are plugin branches whose wheel
+                    # isn't loaded this run; ``alembic upgrade`` must resolve
+                    # *every* current head to plan the path — so an unknown
+                    # one would crash and block the panel's own pending
+                    # migrations. Detach only those (never a known panel
+                    # revision) for the upgrade and restore them after, in
+                    # one transaction; the plugin's later pip install
+                    # re-grafts its branch, so its migration record survives.
+                    if unresolvable:
                         connection.execute(
                             text("DELETE FROM alembic_version WHERE version_num = ANY(:s)"),
-                            {"s": list(stale)},
+                            {"s": list(unresolvable)},
                         )
                     command.upgrade(alembic_cfg, "heads")
-                    if stale:
+                    if unresolvable:
                         connection.execute(
                             text(
                                 "INSERT INTO alembic_version (version_num) VALUES (:v) "
                                 "ON CONFLICT DO NOTHING"
                             ),
-                            [{"v": s} for s in stale],
+                            [{"v": s} for s in unresolvable],
                         )
                     connection.commit()
                 except Exception:
