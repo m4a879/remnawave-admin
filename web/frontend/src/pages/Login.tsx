@@ -594,7 +594,10 @@ export default function Login() {
                 <h1 className="text-2xl font-display font-bold text-white tracking-tight">
                   Remnawave
                 </h1>
-                <p className="text-sm text-dark-200 mt-1">
+                <div className="text-[11px] font-semibold uppercase tracking-[0.4em] text-[#22d3ee] mt-1.5 ml-[0.4em]">
+                  Admin
+                </div>
+                <p className="text-sm text-dark-200 mt-2">
                   {needsSetup ? t('login.initialSetup') : t('login.subtitle')}
                 </p>
               </div>
