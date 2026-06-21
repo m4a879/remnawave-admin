@@ -3,6 +3,7 @@ import { useConfigStore, type XrayConfig } from '../store/configStore';
 import { runFullDiagnostics } from '../utils/diagnostics';
 import { parseJsonSubscription } from '../utils/link-parser';
 import { toast } from 'sonner';
+import i18next from 'i18next';
 
 export const useAppLogic = () => {
     const {
@@ -64,18 +65,18 @@ export const useAppLogic = () => {
                         const obs = parseJsonSubscription(result);
                         if (obs.length > 0) {
                             addOutbounds(obs);
-                            toast.success(`Imported ${obs.length} nodes from JSON file`);
+                            toast.success(i18next.t('xray.importedNodesFromJson', { count: obs.length }));
                         } else {
-                            toast.error("JSON array detected, but no valid outbounds found");
+                            toast.error(i18next.t('xray.jsonNoValidOutbounds'));
                         }
                     } else {
                         // Это обычный конфиг (объект)
                         setConfig(parsed as XrayConfig);
-                        toast.success("Configuration loaded from file");
+                        toast.success(i18next.t('xray.configLoadedFromFile'));
                     }
                     setRawMode(false);
                 }
-            } catch { toast.error("Invalid JSON file"); }
+            } catch { toast.error(i18next.t('xray.invalidJsonFile')); }
         };
         reader.readAsText(file);
     }, [setConfig, addOutbounds]);

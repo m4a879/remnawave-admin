@@ -8,6 +8,7 @@ from aiogram.utils.i18n import gettext as _
 from src.handlers.common import _edit_text_safe, _not_admin, _send_clean_message, _schedule_message_cleanup
 from src.handlers.state import PENDING_INPUT
 from src.keyboards.navigation import NavTarget, nav_row
+from src.utils.auth import BotAdmin
 from shared.database import db_service
 from shared.logger import logger
 
@@ -140,7 +141,7 @@ async def handle_block_ip_add(message: Message, ctx: dict) -> None:
 
 
 @router.callback_query(F.data == "menu:blocked_ips")
-async def cb_blocked_ips_menu(callback: CallbackQuery) -> None:
+async def cb_blocked_ips_menu(callback: CallbackQuery, admin: BotAdmin) -> None:
     if await _not_admin(callback):
         return
     await callback.answer()
@@ -170,7 +171,7 @@ async def cb_blocked_ips_menu(callback: CallbackQuery) -> None:
 
 
 @router.callback_query(F.data == "block_ip:add")
-async def cb_block_ip_add(callback: CallbackQuery) -> None:
+async def cb_block_ip_add(callback: CallbackQuery, admin: BotAdmin) -> None:
     if await _not_admin(callback):
         return
     await callback.answer()
@@ -187,7 +188,7 @@ async def cb_block_ip_add(callback: CallbackQuery) -> None:
 
 
 @router.callback_query(F.data.startswith("block_ip:remove:"))
-async def cb_block_ip_remove(callback: CallbackQuery) -> None:
+async def cb_block_ip_remove(callback: CallbackQuery, admin: BotAdmin) -> None:
     if await _not_admin(callback):
         return
     await callback.answer()
@@ -209,7 +210,7 @@ async def cb_block_ip_remove(callback: CallbackQuery) -> None:
 
 
 @router.callback_query(F.data.startswith("block_ip:confirm_remove:"))
-async def cb_block_ip_confirm_remove(callback: CallbackQuery) -> None:
+async def cb_block_ip_confirm_remove(callback: CallbackQuery, admin: BotAdmin) -> None:
     if await _not_admin(callback):
         return
     await callback.answer()

@@ -410,9 +410,9 @@ def build_user_summary(user: dict, t: Callable[[str], str]) -> str:
         f"   <code>{_esc(squad_display)}</code>",
         "",
         f"<b>🔗 {t('user.subscription_section')}</b>",
-        f"   🔗 Подписка: <code>{_esc(subscription_url)}</code>",
-        f"   📳 Был онлайн: <code>{last_online}</code>",
-        f"   📅 Создан: <code>{created_at}</code>",
+        f"   🔗 {t('user.edit_subscription_label')}: <code>{_esc(subscription_url)}</code>",
+        f"   📳 {t('user.edit_last_online')}: <code>{last_online}</code>",
+        f"   📅 {t('user.edit_created_date')}: <code>{created_at}</code>",
     ]
     
     return "\n".join(lines)
@@ -783,4 +783,31 @@ def build_billing_nodes(data: dict, t: Callable[[str], str]) -> str:
     if len(nodes) > 10:
         lines.append("")
         lines.append(t("billing_nodes.more").format(count=len(nodes) - 10))
+    return "\n".join(lines)
+
+
+def build_quota_text(admin: Any) -> str:
+    """Build admin quota summary text (no permission required)."""
+    from aiogram.utils.i18n import gettext as _
+
+    lines = [f"<b>{_('quota.title')}</b>"]
+
+    def _quota_line(used: int, limit: int | None, label: str) -> str:
+        if limit is None:
+            return f"  {label}: {used} / ∞"
+        pct = min(100, round(used / limit * 100)) if limit > 0 else 0
+        return f"  {label}: {used} / {limit} ({pct}%)"
+
+    lines.append(_quota_line(admin.users_created, admin.max_users, _("quota.users")))
+    lines.append(_quota_line(admin.nodes_created, admin.max_nodes, _("quota.nodes")))
+    lines.append(_quota_line(admin.hosts_created, admin.max_hosts, _("quota.hosts")))
+
+    used_gb = round((admin.traffic_used_bytes or 0) / 1073741824, 1)
+    if admin.unlimited_traffic_policy == "disabled":
+        limit_gb = int(admin.max_traffic_gb) if admin.max_traffic_gb is not None else 0
+        pct = min(100, round(used_gb / limit_gb * 100)) if limit_gb > 0 else 0
+        lines.append(f"  📶 Traffic: {used_gb}/{limit_gb} GB ({pct}%)")
+    else:
+        lines.append(f"  📶 Traffic: {used_gb:.1f} GB / ∞")
+
     return "\n".join(lines)

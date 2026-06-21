@@ -10,6 +10,7 @@ from web.backend.api.deps import (
 )
 from web.backend.core.errors import api_error, E
 from web.backend.core.plugins import get_extra_rbac_resources
+from web.backend.core.audit import write_audit_log
 from web.backend.core.rbac import (
     list_roles,
     get_role_by_id,
@@ -17,7 +18,6 @@ from web.backend.core.rbac import (
     create_role,
     update_role,
     delete_role,
-    write_audit_log,
 )
 from web.backend.schemas.admin import (
     RoleCreate,

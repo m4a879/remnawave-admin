@@ -110,7 +110,20 @@
     "confirmDialog": {
       "defaultTitle": "Confirm action",
       "defaultDescription": "Are you sure? This action cannot be undone."
-    }
+    },
+    "apiUnavailable": "API is currently unavailable",
+    "clear": "Clear",
+    "dateFrom": "From",
+    "dateTo": "To",
+    "exported": "Exported",
+    "logout": "Log out",
+    "next": "Next",
+    "noPermission": "You don't have permission to perform this action",
+    "previous": "Previous",
+    "resetAll": "Reset all",
+    "saved": "Saved",
+    "showAll": "Show all",
+    "status": "Status"
   },
   "nav": {
     "dashboard": "Dashboard",
@@ -163,7 +176,10 @@
   "header": {
     "searchPlaceholder": "Search...",
     "commandHint": "Cmd+K to search",
-    "online": "Online"
+    "online": "Online",
+    "menu": "Menu",
+    "notifications": "Notifications",
+    "search": "Search"
   },
   "sidebar": {
     "expand": "Expand",
@@ -173,7 +189,8 @@
     "administrator": "Administrator",
     "logout": "Logout",
     "logoutConfirmTitle": "Log out of the panel?",
-    "logoutConfirmDescription": "You'll need to sign in again. Any unsaved changes will be lost."
+    "logoutConfirmDescription": "You'll need to sign in again. Any unsaved changes will be lost.",
+    "toggleCollapse": "Toggle sidebar"
   },
   "commandPalette": {
     "placeholder": "Search pages, users, actions...",
@@ -203,7 +220,8 @@
     "resetToDefaults": "Reset to defaults",
     "density": "Density",
     "borderRadius": "Border radius",
-    "animations": "Animations"
+    "animations": "Animations",
+    "colorMode": "Color mode"
   },
   "errorBoundary": {
     "title": "Something went wrong",
@@ -249,6 +267,7 @@
     "backendUnavailable": "Backend is starting up...",
     "backendUnavailableHint": "The server may still be initializing. This can take a minute on first launch.",
     "retry": "Retry",
+    "permissionsLoadFailed": "Failed to load permissions. Please try again.",
     "initialSetup": "Initial setup",
     "createAdmin": "Create administrator",
     "setupWelcome": "Welcome! Create the first administrator account to start using the panel.",
@@ -283,6 +302,22 @@
     "details": "Details",
     "loading": "Loading...",
     "refresh": "Refresh",
+    "sync": "Sync",
+    "syncSuccess": "Sync completed",
+    "yourQuota": "Your quota",
+    "yourQuotaSubtitle": "Resource usage vs. limits for your account",
+    "unlimited": "Unlimited",
+    "usersQuota": "Users",
+    "nodesQuota": "Nodes",
+    "hostsQuota": "Hosts",
+    "trafficQuota": "Traffic",
+    "used": "{{used}} of {{limit}}",
+    "usedOnly": "{{used}} used",
+    "remaining": "{{remaining}} remaining",
+    "lifetimeEventCount": "Lifetime change count",
+    "committedAllocated": "Total commitment, partially recoverable",
+    "yourQuotaFootnote": "Users, nodes, and hosts are lifetime change counters — they increment on every create and on every delete, so the number only ever grows. Traffic is different: it represents the total traffic you are responsible for, equal to the sum of every limit you've allocated plus the traffic your users have already consumed. Creating a user adds their limit. Resetting a user adds the amount they had used — that consumed traffic is on your tab because the user just got a fresh quota. Editing a user down (when used is below the new limit) returns the difference. Deleting a user returns only the portion they hadn't used; the consumed portion stays on your tab forever.",
+    "syncError": "Sync failed",
     "loadError": "Failed to load data",
     "retry": "Retry",
     "resetLayout": "Reset widget order",
@@ -411,7 +446,13 @@
     "expiringIn30d": "In 30 days",
     "trafficAnomalies": "Traffic Anomalies",
     "trafficAnomaliesTooltip": "Nodes with traffic deviating >50% from 7-day average",
-    "noAnomalies": "All normal"
+    "noAnomalies": "All normal",
+    "dependencies": {
+      "python": "Python",
+      "postgresql": "PostgreSQL",
+      "fastapi": "FastAPI",
+      "xray": "Xray"
+    }
   },
   "users": {
     "title": "Users",
@@ -481,6 +522,8 @@
       "online7d": "Online in 7d",
       "online30d": "Online in 30d",
       "neverConnected": "Never connected",
+      "admin": "Admin",
+      "anyAdmin": "All admins",
       "perPage": "Per page",
       "sortBy": "Sort by",
       "sortName": "By name",
@@ -511,7 +554,8 @@
       "hwid": "HWID",
       "activity": "Activity",
       "expires": "Expires",
-      "created": "Created"
+      "created": "Created",
+      "createdBy": "Created by"
     },
     "createModal": {
       "title": "Create user",
@@ -527,6 +571,8 @@
       "trafficAndLimits": "Traffic & Limits",
       "unlimitedTraffic": "Unlimited traffic",
       "trafficLimit": "Traffic limit",
+      "remainingTrafficQuota": "Remaining traffic quota",
+      "remainingTrafficValue": "{{used}} / {{total}} GB",
       "gb": "GB",
       "resetStrategy": "Reset strategy",
       "expireDate": "Expiration date",
@@ -536,7 +582,8 @@
       "squads": "Squads",
       "externalSquad": "External squad",
       "notSelected": "Not selected",
-      "internalSquads": "Internal squads"
+      "internalSquads": "Internal squads",
+      "indefinite": "♾ 2099"
     },
     "strategies": {
       "monthly": "Monthly",
@@ -566,13 +613,17 @@
       "jsonExported": "JSON export completed",
       "bulkEnabled": "Enabled: {{success}}, errors: {{failed}}",
       "bulkDisabled": "Disabled: {{success}}, errors: {{failed}}",
-      "bulkDeleted": "Deleted: {{success}}, errors: {{failed}}"
+      "bulkDeleted": "Deleted: {{success}}, errors: {{failed}}",
+      "bulkReassigned": "Reassigned: {{success}}, errors: {{failed}}",
+      "bulkUnassigned": "Unassigned {{success}} users ({{failed}} failed)"
     },
     "bulkSelected": "Selected: {{count}}",
     "bulkOnPage": "{{count}} on page",
     "bulkEnable": "Enable",
     "bulkDisable": "Disable",
     "bulkDelete": "Delete",
+    "bulkReassign": "Reassign",
+    "bulkUnassign": "Unassign admin",
     "deleteConfirm": {
       "title": "Delete user?",
       "description": "User and all data will be deleted. This action cannot be undone.",
@@ -583,6 +634,18 @@
       "description": "All selected users and their data will be permanently deleted. This action cannot be undone.",
       "confirm": "Delete {{count}}"
     },
+    "bulkUnassignConfirm": {
+      "title": "Unassign admin from {{count}} users?",
+      "description": "Selected users will no longer be associated with any admin. This action cannot be undone.",
+      "confirm": "Unassign {{count}}"
+    },
+    "bulkReassignConfirm": {
+      "title": "Reassign Users",
+      "description": "Reassign {{count}} users to another admin",
+      "selectAdmin": "Select admin",
+      "confirm": "Reassign",
+      "saving": "Reassigning..."
+    },
     "disableConfirm": {
       "title": "Disable user?",
       "description": "The user will lose access to VPN connections. You can re-enable them later.",
@@ -590,7 +653,14 @@
     },
     "perPage": "per page",
     "selected": "Selected",
-    "bulkActions": "Bulk actions"
+    "bulkActions": "Bulk actions",
+    "deferred": {
+      "bulkEnable": "Enabling {{count}} users in 5s — click to undo",
+      "bulkDisable": "Disabling {{count}} users in 5s — click to undo",
+      "enable": "Enabling user in 5s — click to undo",
+      "disable": "Disabling user in 5s — click to undo"
+    },
+    "tryDifferentFilter": "Try a different filter combination"
   },
   "userDetail": {
     "strategies": {
@@ -608,9 +678,14 @@
     "generalInfo": "General Info",
     "changesSaved": "Changes saved",
     "unknown": "Unknown",
-    "indefinite": "Indefinite",
+    "indefinite": "♾ 2099",
     "trafficUnlimited": "Unlimited",
-    "protocols": "Protocols",
+    "protocolCredentials": "Protocol credentials",
+    "protocols": {
+      "vless": "VLESS UUID",
+      "trojan": "Trojan Password",
+      "shadowsocks": "Shadowsocks Password"
+    },
     "internalSquads": "Internal squads",
     "squads": {
       "title": "Squads",
@@ -620,7 +695,8 @@
       "noSquadsAvailable": "No squads available"
     },
     "violations": {
-      "title": "Violations"
+      "title": "Violations",
+      "score": "Score"
     },
     "statuses": {
       "active": "Active",
@@ -645,11 +721,14 @@
       "removeDate": "Remove date (indefinite)",
       "hwidLimit": "Device limit (HWID)",
       "readOnly": "Info (read-only)",
+      "username": "Username",
+      "shortUuid": "Short UUID",
       "created": "Created",
       "expires": "Expires",
       "lastActivity": "Last activity",
       "lastTrafficReset": "Last traffic reset",
-      "firstConnection": "First connection"
+      "firstConnection": "First connection",
+      "createdBy": "Created by"
     },
     "statusLabel": "Status",
     "selectStatus": "Select status",
@@ -723,6 +802,17 @@
         "empty": "Empty UA",
         "unknown": "Unknown client",
         "tooltip": "User-Agent does not match a known VPN client. Inspect this device"
+      },
+      "deleteAll": "Delete all devices",
+      "deleteAllConfirm": {
+        "title": "Delete all devices?",
+        "description": "All HWID-bound devices for this user will be removed. They will need to re-link on next connect.",
+        "confirm": "Delete all"
+      },
+      "deleteConfirm": {
+        "title": "Delete device?",
+        "description": "This device will be removed. The user will need to re-link it on next connect.",
+        "confirm": "Delete"
       }
     },
     "subscription": {
@@ -745,7 +835,16 @@
       "revokePasswordsConfirm": "Regenerate passwords?",
       "revokePasswordsConfirmDesc": "Connection passwords (Trojan, VLESS, Shadowsocks) will be regenerated. The subscription URL will remain the same.",
       "revokeFullSuccess": "Subscription fully reissued",
-      "revokePasswordsSuccess": "Connection passwords regenerated"
+      "revokePasswordsSuccess": "Connection passwords regenerated",
+      "daysLeft": "{{count}} day left",
+      "daysLeft_other": "{{count}} days left",
+      "expiresAt": "Expires at",
+      "infoTitle": "Subscription info",
+      "lifetime": "Lifetime",
+      "links": "Subscription links",
+      "noData": "No subscription data",
+      "resetStrategy": "Reset strategy",
+      "trafficUsed": "Traffic used"
     },
     "antiAbuse": {
       "title": "Anti-Abuse",
@@ -786,7 +885,16 @@
       "delete": "Delete",
       "deleteUser": "Delete",
       "deleteConfirmTitle": "Delete user?",
-      "deleteConfirmDesc": "User and all data will be deleted. This action cannot be undone."
+      "deleteConfirmDesc": "User and all data will be deleted. This action cannot be undone.",
+      "reassign": "Reassign",
+      "clearCreatedBy": "Unassign"
+    },
+    "reassign": {
+      "title": "Reassign user",
+      "description": "Transfer this user to another admin. The current admin will lose visibility.",
+      "selectAdmin": "Select admin",
+      "confirm": "Reassign",
+      "saving": "Reassigning..."
     },
     "deleteConfirm": {
       "title": "Delete user?",
@@ -803,7 +911,11 @@
       "userUpdated": "User updated",
       "saveError": "Save error",
       "userDeleted": "User deleted",
-      "deleteError": "Delete error"
+      "deleteError": "Delete error",
+      "reassigned": "User reassigned",
+      "adminUnassigned": "Admin unassigned",
+      "allDevicesDeleted": "All devices deleted",
+      "deviceDeleted": "Device deleted"
     },
     "toast": {
       "enabled": "User enabled",
@@ -812,7 +924,8 @@
       "deleted": "User deleted",
       "updated": "User updated",
       "hwidSynced": "HWID devices synced"
-    }
+    },
+    "gb": "GB"
   },
   "nodes": {
     "title": "Nodes",
@@ -964,6 +1077,9 @@
         "created": "Created date (↓)",
         "custom": "Custom order"
       }
+    },
+    "deferred": {
+      "disable": "Disabling {{count}} nodes in 5s — click to undo"
     }
   },
   "fleet": {
@@ -1010,7 +1126,10 @@
       "disableNode": "Disable node",
       "uptimeDaysHours": "{{days}}d {{hours}}h",
       "uptimeHoursMinutes": "{{hours}}h {{minutes}}m",
-      "uptimeMinutes": "{{minutes}}m"
+      "uptimeMinutes": "{{minutes}}m",
+      "cpu": "CPU",
+      "ram": "RAM",
+      "uptime": "Uptime"
     },
     "stats": {
       "total": "Total",
@@ -1112,7 +1231,8 @@
         "system": "System",
         "monitoring": "Monitoring",
         "custom": "Custom"
-      }
+      },
+      "parameters": "Parameters"
     },
     "terminal": {
       "title": "Terminal",
@@ -1191,7 +1311,10 @@
       "restarted": "Node restarted",
       "enabled": "Node enabled",
       "disabled": "Node disabled",
-      "error": "Operation failed"
+      "error": "Operation failed",
+      "generatedTokens": "Generated {{count}} tokens",
+      "generatedCommands": "Generated {{count}} install commands",
+      "revokedTokens": "Revoked {{count}} tokens"
     }
   },
   "hosts": {
@@ -1246,7 +1369,8 @@
       "tagPlaceholder": "Host tag",
       "serverDescription": "Server description",
       "serverDescPlaceholder": "Server description",
-      "hiddenHost": "Hidden host"
+      "hiddenHost": "Hidden host",
+      "serverDescriptionPlaceholder": "Optional description for this host"
     },
     "createHost": {
       "title": "Add host",
@@ -1255,7 +1379,8 @@
     "nodesCount": "Nodes ({{count}})",
     "deleteConfirm": {
       "title": "Delete host?",
-      "description": "Host will be deleted. This action cannot be undone."
+      "description": "Host will be deleted. This action cannot be undone.",
+      "confirm": "Delete"
     },
     "toast": {
       "enabled": "Host enabled",
@@ -1264,8 +1389,28 @@
       "updated": "Host updated",
       "created": "Host created",
       "saveError": "Save error",
-      "createError": "Create error"
-    }
+      "createError": "Create error",
+      "error": "An error occurred"
+    },
+    "form": {
+      "sni": "SNI",
+      "host": "Host",
+      "path": "Path",
+      "alpn": "ALPN",
+      "fingerprint": "Fingerprint",
+      "inbound": "Inbound",
+      "sniPlaceholder": "Server Name Indication",
+      "hostPlaceholder": "Host header",
+      "pathPlaceholder": "/path",
+      "alpnPlaceholder": "h2,http/1.1",
+      "fingerprintPlaceholder": "chrome, firefox, safari..."
+    },
+    "detail": {
+      "nodes": "Nodes"
+    },
+    "statusHidden": "Hidden",
+    "statusNoHosts": "No hosts yet",
+    "statusNoName": "Unnamed"
   },
   "blocking": {
     "title": "Blocking",
@@ -1419,7 +1564,10 @@
       "clearUserFilter": "Clear user filter",
       "country": "Country",
       "dateFrom": "From",
-      "dateTo": "To"
+      "dateTo": "To",
+      "username": "Username",
+      "usernamePlaceholder": "Search by username",
+      "sortByCount": "Sort by count"
     },
     "stats": {
       "total": "Total",
@@ -1458,7 +1606,8 @@
       "notFound": "Violation not found",
       "model": "Model",
       "os": "OS",
-      "addedAt": "Added"
+      "addedAt": "Added",
+      "hwidMatch": "HWID match"
     },
     "connectionTypes": {
       "residential": "Residential",
@@ -1556,7 +1705,8 @@
       "mode_none": "No exclusion",
       "mode_partial": "Partial",
       "mode_full": "Full whitelist"
-    }
+    },
+    "userAgent": "User-Agent"
   },
   "admins": {
     "title": "Admins",
@@ -1578,6 +1728,7 @@
     "users": "Users",
     "nodes": "Nodes",
     "hosts": "Hosts",
+    "traffic": "Traffic",
     "status": "Status",
     "resource": "Resource",
     "createAdmin": "Create admin",
@@ -1585,20 +1736,29 @@
     "editAdminDescription": "Edit admin parameters",
     "createAdminDescription": "Fill in new admin details",
     "deleteAdmin": "Delete admin",
+    "remainingTraffic": "Remaining: {{remaining}} GB / {{total}} GB",
     "deleteConfirmTitle": "Delete admin?",
     "deleteConfirmDesc": "Admin will be deleted. This action cannot be undone.",
     "username": "Username",
+    "telegramId": "Telegram ID",
     "telegramIdHint": "Telegram ID (optional, for Telegram login)",
+    "hasBotAccess": "Bot access enabled",
+    "unrestrictedUserAccess": "Can view all users",
     "selectRole": "Select role",
     "password": "Password",
     "newPassword": "New password",
     "passwordLeaveEmpty": "Leave empty to keep current",
     "passwordMinLength": "Minimum 8 characters",
-    "limitsHint": "Limits (0 = unlimited)",
+    "limitsHint": "Limits (leave empty for unlimited)",
     "maxUsers": "Max users",
     "maxTraffic": "Max traffic (GB)",
     "maxNodes": "Max nodes",
     "maxHosts": "Max hosts",
+    "unlimitedTrafficPolicy": "Unlimited traffic policy",
+    "unlimitedTrafficPolicyHint": "Controls whether this admin can set unlimited traffic on users. Superadmin is never restricted.",
+    "policyAllowed": "Allowed — admin can choose",
+    "policyDisabled": "Disabled — must set a traffic limit",
+    "policyEnforced": "Enforced — users always get unlimited traffic",
     "editRole": "Edit role",
     "createRole": "Create role",
     "editRoleDescription": "Edit role parameters",
@@ -1617,6 +1777,10 @@
     "adminUpdated": "Admin updated",
     "adminDeleted": "Admin deleted",
     "statusUpdated": "Status updated",
+    "resetCounter": "Reset counter",
+    "counterReset": "Counter reset",
+    "resetCounterConfirmTitle": "Reset counter?",
+    "resetCounterConfirmDescription": "This will reset the {{counter}} counter for admin \"{{username}}\" to 0. This action cannot be undone.",
     "roles": {
       "superadmin": "Superadmin",
       "admin": "Admin",
@@ -1660,7 +1824,22 @@
       "violation": "Violation",
       "automation": "Automation",
       "system": "System"
-    }
+    },
+    "errors": {
+      "noChanges": "No changes to save.",
+      "clearFieldHint": "Clear the field to set it to unlimited."
+    },
+    "adminsCount": "{{count}} admin",
+    "adminsCount_other": "{{count}} admins",
+    "deleteAdminDescription": "This admin will lose all access. Users they own will become unassigned.",
+    "deleteAdminTitle": "Delete admin?",
+    "deleteRoleDescription": "This role will be removed. Any admins with this role will fall back to default permissions.",
+    "deleteRoleTitle": "Delete role?",
+    "noRoles": "No roles defined yet",
+    "permissions": "Permissions",
+    "roleCreated": "Role created",
+    "roleDeleted": "Role deleted",
+    "roleUpdated": "Role updated"
   },
   "audit": {
     "title": "Audit Log",
@@ -1804,6 +1983,10 @@
       },
       "resolve": {
         "violation": "Violation resolved"
+      },
+      "automation": {
+        "toggle_on": "Enabled the automation rule",
+        "toggle_off": "Disabled the automation rule"
       }
     },
     "feed": {
@@ -2003,7 +2186,8 @@
         "users": "Users",
         "violations": "Violations",
         "traffic": "Traffic"
-      }
+      },
+      "compare": "Compare with previous period"
     },
     "onlineTrend": {
       "title": "Online trend",
@@ -2088,7 +2272,11 @@
         "maxDisk": "Max Disk",
         "samples": "Samples",
         "noData": "No historical data yet"
-      }
+      },
+      "cpu": "CPU",
+      "ram": "RAM",
+      "uptime": "Uptime",
+      "as": "AS"
     },
     "retention": {
       "title": "Retention Analysis",
@@ -2135,6 +2323,39 @@
       "estimatedLtvSub": "Cost per user over entire lifetime",
       "sampleSize": "Sample Size",
       "sampleSizeSub": "Users with activity in last 6 months"
+    },
+    "ipPreview": {
+      "ip": "IP",
+      "user": "User",
+      "node": "Node",
+      "country": "Country",
+      "provider": "Provider"
+    },
+    "geoBalance": {
+      "title": "Geographic load balance",
+      "tooltip": "Distribution of online users across regions and nodes",
+      "totalNodes": "Total nodes",
+      "medianOnline": "Median online",
+      "online": "Online",
+      "overloaded": "Overloaded",
+      "recommendations": "Recommendations",
+      "regions": "Regions",
+      "node": "Node",
+      "topCountries": "Top countries",
+      "topRegions": "Top regions"
+    },
+    "torrent": {
+      "title": "Torrent traffic",
+      "noData": "No torrent traffic observed in this period",
+      "totalEvents": "Total events",
+      "last24h": "Last 24h",
+      "uniqueUsers": "Unique users",
+      "users": "Users",
+      "events": "Events",
+      "affectedNodes": "Affected nodes",
+      "topNodes": "Top nodes",
+      "topUsers": "Top users",
+      "topDestinations": "Top destinations"
     }
   },
   "automations": {
@@ -2244,7 +2465,9 @@
       "updated": "Rule updated",
       "deleted": "Rule deleted",
       "enabled": "Rule enabled",
-      "disabled": "Rule disabled"
+      "disabled": "Rule disabled",
+      "toggledEnabled": "\"{{name}}\" enabled",
+      "toggledDisabled": "\"{{name}}\" disabled"
     },
     "pagination": "Page {{page}} of {{pages}} ({{total}} total)",
     "createFirstRule": "Create first rule",
@@ -2501,7 +2724,15 @@
           "long": "Sunday",
           "short": "Sun"
         }
-      }
+      },
+      "everyHour": "Every hour",
+      "everyHourDesc": "Trigger at the start of every hour",
+      "everyDay": "Every day",
+      "everyDayDesc": "Trigger once per day at midnight",
+      "everyWeek": "Every week",
+      "everyWeekDesc": "Trigger once per week on Monday",
+      "everyMonth": "Every month",
+      "everyMonthDesc": "Trigger once per month on the 1st"
     },
     "intervalPicker": {
       "runWithInterval": "Run with interval",
@@ -2654,7 +2885,14 @@
       "validationConditions": "Fill in all condition fields or remove incomplete ones",
       "validationMessage": "Enter message text",
       "validationWebhook": "Specify Webhook URL",
-      "validationName": "Enter rule name"
+      "validationName": "Enter rule name",
+      "topicAuto": "Auto",
+      "topicErrors": "Errors",
+      "topicNodes": "Nodes",
+      "topicService": "Service",
+      "topicType": "Type",
+      "topicUsers": "Users",
+      "topicViolations": "Violations"
     },
     "testResult": {
       "title": "Test result",
@@ -2666,7 +2904,9 @@
       "matchingTargets": "Matching targets",
       "expectedActions": "Expected actions",
       "matchingTargetsMax": "Matching targets (max 50)"
-    }
+    },
+    "deleteRuleDescription": "This rule will stop running immediately. Already-queued actions will be cancelled.",
+    "deleteRuleTitle": "Delete automation rule?"
   },
   "settings": {
     "title": "Settings",
@@ -2708,7 +2948,8 @@
       "intervals": "⏱️ Intervals",
       "rate_limits": "🚦 Rate limits",
       "cache": "💾 Cache",
-      "violation_pipeline": "🔍 Violation detection pipeline"
+      "violation_pipeline": "🔍 Violation detection pipeline",
+      "admin_restrictions": "🔐 Admin restrictions"
     },
     "faq": {
       "description": "Frequently asked questions and solutions to common problems",
@@ -2829,7 +3070,8 @@
     },
     "ipWhitelist": {
       "description": "If the list is empty, access is allowed from any IP. When IPs are added, access will be limited to the specified addresses only. CIDR notation is supported (e.g., 10.0.0.0/8).",
-      "disableWhitelist": "Disable whitelist (allow all IPs)"
+      "disableWhitelist": "Disable whitelist (allow all IPs)",
+      "title": "IP Whitelist"
     },
     "source": {
       "db": "DB",
@@ -3268,13 +3510,17 @@
       "notifications": "Notifications",
       "alertRules": "Alert Rules",
       "alertLogs": "Alert Logs",
-      "channels": "Channels"
+      "channels": "Channels",
+      "templates": "Templates"
     },
     "filters": {
       "readStatus": "Read status",
       "unread": "Unread",
       "read": "Read",
-      "severity": "Severity"
+      "severity": "Severity",
+      "severityInfo": "Info",
+      "severityWarning": "Warning",
+      "severityCritical": "Critical"
     },
     "alerts": {
       "rules": "rules",
@@ -3347,7 +3593,18 @@
       "varNodesOffline": "Number of nodes offline",
       "varTimestamp": "Current UTC timestamp",
       "clickToCopy": "click to copy",
-      "copiedVar": "Copied: {{var}}"
+      "copiedVar": "Copied: {{var}}",
+      "topicHwid": "HWID",
+      "durationMinutes": "Duration (minutes)",
+      "durationMinutesHint": "How long the alert stays active before auto-resolving",
+      "instant": "Instant",
+      "topicAuto": "Auto",
+      "topicErrors": "Errors",
+      "topicNodes": "Nodes",
+      "topicService": "Service",
+      "topicType": "Type",
+      "topicUsers": "Users",
+      "topicViolations": "Violations"
     },
     "alertLogs": {
       "status": "Status",
@@ -3368,7 +3625,15 @@
       "deleted": "Channel deleted",
       "optional": "optional",
       "webhookHint": "Supports Discord, Slack and generic JSON webhooks",
-      "emailHint": "Requires SMTP to be configured by admin"
+      "emailHint": "Requires SMTP to be configured by admin",
+      "telegram": "Telegram",
+      "webhook": "Webhook",
+      "email": "Email",
+      "chatId": "Chat ID",
+      "webhookUrl": "Webhook URL",
+      "emailLabel": "Email",
+      "tlsStarttls": "TLS (STARTTLS)",
+      "ssl": "SSL"
     },
     "smtp": {
       "title": "SMTP Configuration",
@@ -3384,6 +3649,15 @@
       "testEmailPlaceholder": "test@example.com",
       "testSuccess": "Test email sent successfully",
       "testFailed": "Test email failed"
+    },
+    "acknowledge": "Acknowledge",
+    "toggleRule": "Toggle rule",
+    "templates": {
+      "activate": "Activate",
+      "activated": "Template activated",
+      "activateError": "Failed to activate template",
+      "active": "Active",
+      "description": "Description"
     }
   },
   "mailServer": {
@@ -3485,7 +3759,8 @@
       "port": "Port",
       "auth": "Auth",
       "never": "never"
-    }
+    },
+    "ip": "IP:"
   },
   "language": {
     "title": "Language",
@@ -3567,7 +3842,9 @@
       "viewTitle": "Computed Config",
       "viewDescription": "Full expanded configuration for this profile",
       "openInEditor": "Open in editor"
-    }
+    },
+    "position": "Position:",
+    "uuid": "UUID:"
   },
   "billing": {
     "title": "Billing",
@@ -3587,7 +3864,9 @@
       "perNode": "Per Node",
       "nodeName": "Node",
       "provider": "Provider",
-      "usersOnline": "Online"
+      "usersOnline": "Online",
+      "cpu": "CPU",
+      "ram": "RAM"
     },
     "providers": {
       "description": "Infrastructure providers for hosting nodes",
@@ -3721,7 +4000,8 @@
       "orgName": "Organization",
       "type": "Type",
       "region": "Region",
-      "showingOf": "Showing {{shown}} of {{total}} records"
+      "showingOf": "Showing {{shown}} of {{total}} records",
+      "header": "ASN"
     }
   },
   "errors": {
@@ -3804,9 +4084,39 @@
     "IMPORT_FAILED": "Import failed",
     "INVALID_FILENAME": "Invalid filename",
     "NO_FIELDS_TO_UPDATE": "No fields to update",
+    "TRAFFIC_LIMIT_REQUIRED": "Traffic limit is required. Unlimited traffic is disabled for your role.",
+    "TRAFFIC_LIMIT_EXCEEDED": "Traffic limit exceeds your quota. Available: {{remaining}} GB",
+    "USERS_QUOTA_EXCEEDED": "You have reached the maximum number of users allowed for your account.",
+    "TRAFFIC_QUOTA_EXCEEDED": "Traffic limit exceeds your quota.",
+    "NODES_QUOTA_EXCEEDED": "You have reached the maximum number of nodes allowed for your account.",
+    "HOSTS_QUOTA_EXCEEDED": "You have reached the maximum number of hosts allowed for your account.",
+    "USERNAME_REQUIRED": "Username is required.",
+    "USERNAME_TOO_LONG": "Username is too long (max 100 characters).",
+    "USERNAME_INVALID_FORMAT": "Username contains invalid characters. Use 1-100 letters, digits, underscores, hyphens, or dots.",
+    "USERNAME_ALREADY_EXISTS": "A user with this username already exists.",
+    "TRAFFIC_LIMIT_NEGATIVE": "Traffic limit cannot be negative.",
+    "TRAFFIC_LIMIT_TOO_SMALL": "Traffic limit is too small. Minimum is 1 MB.",
+    "INVALID_EMAIL_FORMAT": "Email address is not valid.",
+    "INVALID_TELEGRAM_ID": "Telegram ID is not valid (must be 1-9999999999).",
+    "INVALID_HWID_DEVICE_LIMIT": "HWID device limit must be 0 (unlimited) or a positive integer.",
+    "INVALID_EXPIRE_DATE": "Expiration date must be in the future.",
+    "TAG_TOO_LONG": "Tag is too long (max 32 characters).",
+    "DESCRIPTION_TOO_LONG": "Description is too long (max 256 characters).",
+    "PANEL_REJECTED_USERNAME": "Panel rejected the username.",
+    "PANEL_REJECTED_TRAFFIC_STRATEGY": "Panel rejected the traffic limit strategy.",
+    "PANEL_REJECTED_STATUS": "Panel rejected the status value.",
+    "PANEL_REJECTED_SQUAD": "Panel rejected the squad reference.",
+    "PANEL_REJECTED_TAG": "Panel rejected the tag value.",
+    "PANEL_REJECTED_GENERIC": "Panel rejected the request.",
+    "PANEL_USER_ALREADY_EXISTS": "A user with this username already exists in the panel.",
+    "TRAFFIC_LIMIT_BELOW_USAGE": "Cannot set traffic limit below current usage.",
     "API_SERVICE_UNAVAILABLE": "API service is unavailable",
     "DB_UNAVAILABLE": "Database is unavailable",
-    "INTERNAL_ERROR": "Internal server error"
+    "INTERNAL_ERROR": "Internal server error",
+    "userCreateFailed": "Failed to create user",
+    "userUpdateFailed": "Failed to update user",
+    "userDeleteFailed": "Failed to delete user",
+    "tokenParseFailed": "Failed to parse token"
   },
   "backup": {
     "title": "Backups",
@@ -3865,7 +4175,23 @@
     "filterRestore": "Restore",
     "filterConfigImport": "Config import",
     "filterUserImport": "User import",
-    "filterUpload": "Upload"
+    "filterUpload": "Upload",
+    "postgresqlDump": "PostgreSQL dump",
+    "chatId": "Chat ID",
+    "toastUploadFailed": "Upload failed",
+    "toastRotationFailed": "Rotation failed",
+    "toastSendFailed": "Send failed",
+    "configDesc": "Full panel configuration including users, nodes, hosts, settings",
+    "exportFullConfig": "Export full config",
+    "importFullConfig": "Import full config",
+    "fullConfigExported": "Full config exported",
+    "fullConfigExportFailed": "Failed to export full config",
+    "fullConfigImported": "Full config imported",
+    "fullConfigImportFailed": "Failed to import full config",
+    "noFilesDesc": "No backup files found. Create one to get started.",
+    "rotated": "Backup rotated",
+    "sentToTelegram": "Backup sent to Telegram",
+    "uploaded": "Backup uploaded"
   },
   "apiKeys": {
     "title": "API Keys & Webhooks",
@@ -3909,9 +4235,11 @@
     "editKey": "Edit key",
     "editWebhook": "Edit webhook",
     "updated": "Key updated",
-    "updateFailed": "Failed to update",
+    "updateFailed": "Failed to update key",
     "webhookUpdated": "Webhook updated",
-    "deleteFailed": "Failed to delete",
+    "webhookUpdateFailed": "Failed to update webhook",
+    "deleteFailed": "Failed to delete key",
+    "webhookDeleteFailed": "Failed to delete webhook",
     "expired": "Expired",
     "expiresAt": "Expires",
     "ttl": "Expiration",
@@ -3928,7 +4256,21 @@
     "testFailed": "Test failed",
     "deliveryHistory": "Delivery history",
     "noDeliveries": "No deliveries yet",
-    "showResponse": "Show response"
+    "showResponse": "Show response",
+    "url": "URL",
+    "versionV2": "v2 — timestamped (recommended)",
+    "versionV1": "v1 — legacy",
+    "httpLabel": "HTTP:",
+    "description": "Description",
+    "descriptionPlaceholder": "What is this key used for?",
+    "rotate": "Rotate",
+    "confirmRotate": "Rotate this key?",
+    "confirmRotateDesc": "The current key will be invalidated immediately. Any clients using it will need to be updated.",
+    "rotateFailed": "Failed to rotate key",
+    "autoDisabled": "Auto-disabled after too many failed attempts",
+    "signatureVersion": "Signature version",
+    "signatureHint": "HMAC-SHA256 over the request body, included in the X-Signature header",
+    "webhookDescPlaceholder": "What does this webhook do?"
   },
   "forcePassword": {
     "title": "Password change required",
@@ -4222,7 +4564,8 @@
       "targetNoSub": "No subscription",
       "targetExpired": "Expired",
       "targetExpiring": "Expiring"
-    }
+    },
+    "tg": "TG"
   },
   "notFound": {
     "title": "Page Not Found",
@@ -4246,7 +4589,8 @@
     "success": "Password Changed",
     "successDescription": "Your password has been reset successfully. You can now log in with your new password.",
     "goToLogin": "Go to Login",
-    "error": "An error occurred. Please try again later."
+    "error": "An error occurred. Please try again later.",
+    "email": "Email"
   },
   "accessPolicies": {
     "listTitle": "Scope Templates",
@@ -4294,6 +4638,10 @@
       "view": "View",
       "edit": "Edit",
       "delete": "Delete"
+    },
+    "deleteConfirm": {
+      "description": "This access policy will be removed. Any admins and roles using it will lose their restrictions.",
+      "title": "Delete access policy?"
     }
   },
   "adminPlugins": {
@@ -4372,7 +4720,8 @@
         "hint": "Any free-form string works — the resolver picks the right lookup automatically.",
         "matched_by": "Matched by: {{kind}}",
         "count": "found: {{n}}",
-        "empty": "Nothing matched. Try a shorter or different query."
+        "empty": "Nothing matched. Try a shorter or different query.",
+        "empty_hint": "Try a different search term"
       },
       "report": {
         "back_to_search": "Back to search",
@@ -4614,5 +4963,89 @@
         }
       }
     }
+  },
+  "systemLogs": {
+    "live": "Live",
+    "paused": "Paused",
+    "logLevels": {
+      "debug": "DEBUG",
+      "info": "INFO",
+      "warning": "WARNING",
+      "error": "ERROR"
+    }
+  },
+  "xray": {
+    "profileLoaded": "Profile loaded",
+    "profileLoadFailed": "Failed to load profile",
+    "profileSaved": "Profile saved to panel",
+    "profileSaveFailed": "Failed to send config to panel",
+    "profileNotSelected": "Profile not selected",
+    "pushBlocked": "Push Blocked!",
+    "pushBlockedDesc": "Balancer \"{{tag}}\" has no target outbounds. Node will crash if you push this.",
+    "fixValidationBeforeSaving": "Please fix validation errors before saving",
+    "disconnectedFromPanel": "Disconnected from panel",
+    "urlAndTokenRequired": "URL and token are required",
+    "connectedToRemnawave": "Connected to Remnawave",
+    "sessionExpired": "Session expired",
+    "fillUrlAndToken": "Please fill URL and API Token",
+    "connectionFailed": "Connection failed",
+    "invalidTokenOrUrl": "Invalid token or panel URL",
+    "importedNodesFromJson": "Imported {{count}} nodes from JSON file",
+    "jsonNoValidOutbounds": "JSON array detected, but no valid outbounds found",
+    "configLoadedFromFile": "Configuration loaded from file",
+    "invalidJsonFile": "Invalid JSON file",
+    "failedDownloadDatabase": "Failed to download database for extraction",
+    "networkError": "Network error.",
+    "failedLoadDetails": "Failed to load details",
+    "errorLoadingData": "Error loading data.\n{{error}}",
+    "noRecordsFound": "No records found.",
+    "copiedToClipboard": "Copied to clipboard!",
+    "copyFailed": "Copy failed",
+    "deepSearchError": "Deep search error",
+    "failedParseDat": "Failed to parse DAT",
+    "loadedCategoriesFromFile": "Loaded {{count}} categories from local file",
+    "fileReadError": "File read error",
+    "localFileAlreadyLoaded": "Local file already loaded",
+    "invalidUrl": "Please enter a valid URL",
+    "failedFetchList": "Failed to fetch list",
+    "enterSubscriptionUrl": "Please enter a subscription URL",
+    "hwidDeviceLimitReached": "Panel rejected this device (HWID)",
+    "hwidDeviceLimitDesc": "Device limit reached. Check 'Active Devices' in the panel.",
+    "subscriptionFetched": "Subscription fetched successfully",
+    "importedNodesFromJsonSub": "Imported {{count}} nodes from JSON subscription",
+    "jsonSubFetchedRaw": "JSON subscription fetched (Raw)",
+    "jsonNoValidOutboundsInSub": "JSON detected but no valid outbounds found inside",
+    "noValidLinksInResponse": "No valid links found in response",
+    "fetchFailed": "Fetch failed",
+    "regenerateHwidConfirm": "Regenerate HWID? The panel will see this as a NEW device.",
+    "newHwidGenerated": "New HWID generated and saved",
+    "importedNodes": "Imported {{count}} nodes",
+    "noValidLinksToImport": "No valid links or JSON configs found to import",
+    "linkImported": "Link imported successfully",
+    "jsonConfigImported": "JSON configuration imported",
+    "importedOutboundsFromJson": "Imported {{count}} outbounds from JSON",
+    "onlyObfuscatorImported": "Only Obfuscator (Freedom) imported",
+    "wgChainedImported": "WG + Obfuscator (Legacy Chain) imported",
+    "wgDirectImported": "Direct WireGuard (Modern) imported",
+    "unrecognizedImportFormat": "Unrecognized import format",
+    "warpProfileGenerated": "Outbound profile generated successfully",
+    "warpGenerationFailed": "Generation failed",
+    "warpGenerationFailedDesc": "Network error or proxy timeout.",
+    "warpAccountGenerated": "WARP account generated successfully",
+    "warpAccountFailed": "Failed to generate WARP account",
+    "warpAccountFailedDesc": "CORS error or proxy is down. Check your settings.",
+    "copiedTag": "Copied: {{tag}}",
+    "analyzedConfigurations": "Analyzed {{count}} configurations",
+    "parseFailed": "Parse failed",
+    "nodeAdded": "Node added to outbounds",
+    "inboundAdded": "Inbound added",
+    "addToConfig": "Add to config",
+    "nothingToCopy": "Nothing to copy",
+    "copiedItems": "Copied {{count}} items",
+    "copyDataFailed": "Failed to copy data",
+    "importedChained": "Imported {{count}} outbounds (chained)",
+    "configImported": "Configuration imported successfully",
+    "errorGeneratingLink": "Error generating link",
+    "protocolNotSupported": "Protocol might not be supported."
   }
 }

@@ -31,6 +31,11 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import Response
 
+from shared.db_schema import USERS_TABLE, NODES_TABLE, VIOLATIONS_TABLE, \
+    USER_CONNECTIONS_TABLE, USER_HWID_DEVICES_TABLE, SYNC_METADATA_TABLE, \
+    SUBSCRIPTION_REQUEST_HISTORY_TABLE
+from shared.db_query import select_sql
+
 logger = logging.getLogger(__name__)
 
 # ── HTTP metrics ─────────────────────────────────────────────────
@@ -388,33 +393,33 @@ class GaugeUpdater:
         async with db_service.acquire() as conn:
             # Aggregates — single round-trip
             row = await conn.fetchrow(
-                """
+                f"""
                 SELECT
-                    (SELECT COUNT(DISTINCT user_uuid) FROM user_connections
+                    (SELECT COUNT(DISTINCT user_uuid) FROM {USER_CONNECTIONS_TABLE}
                      WHERE user_uuid IS NOT NULL
                        AND connected_at >= NOW() - INTERVAL '2 minutes'
                     ) AS online_users,
-                    (SELECT COUNT(*) FROM users) AS total_users,
-                    (SELECT COUNT(*) FROM users WHERE UPPER(status) = 'ACTIVE') AS active_users,
-                    (SELECT COUNT(*) FROM nodes) AS total_nodes,
-                    (SELECT COUNT(*) FROM nodes
+                    (SELECT COUNT(*) FROM {USERS_TABLE}) AS total_users,
+                    (SELECT COUNT(*) FROM {USERS_TABLE} WHERE UPPER(status) = 'ACTIVE') AS active_users,
+                    (SELECT COUNT(*) FROM {NODES_TABLE}) AS total_nodes,
+                    (SELECT COUNT(*) FROM {NODES_TABLE}
                      WHERE is_connected = true AND NOT is_disabled
                     ) AS online_nodes,
-                    (SELECT COUNT(*) FROM violations
+                    (SELECT COUNT(*) FROM {VIOLATIONS_TABLE}
                      WHERE action_taken IS NULL
                     ) AS violations_open,
-                    (SELECT COUNT(*) FROM user_connections
+                    (SELECT COUNT(*) FROM {USER_CONNECTIONS_TABLE}
                      WHERE disconnected_at IS NULL
                     ) AS active_connections,
-                    (SELECT COUNT(*) FROM users
+                    (SELECT COUNT(*) FROM {USERS_TABLE}
                      WHERE expire_at > NOW()
                        AND expire_at < NOW() + INTERVAL '7 days'
                     ) AS expiring_soon,
-                    (SELECT COUNT(*) FROM users
+                    (SELECT COUNT(*) FROM {USERS_TABLE}
                      WHERE traffic_limit_bytes > 0
                        AND used_traffic_bytes >= traffic_limit_bytes
                     ) AS traffic_limit_reached,
-                    (SELECT COUNT(*) FROM user_hwid_devices) AS hwid_total,
+                    (SELECT COUNT(*) FROM {USER_HWID_DEVICES_TABLE}) AS hwid_total,
                     (SELECT COUNT(*) FROM torrent_events
                      WHERE detected_at >= NOW() - INTERVAL '24 hours'
                     ) AS torrent_24h
@@ -422,87 +427,82 @@ class GaugeUpdater:
             )
 
             users_by_status = await conn.fetch(
-                "SELECT UPPER(status) AS status, COUNT(*) AS n FROM users "
-                "WHERE status IS NOT NULL GROUP BY UPPER(status)"
+                select_sql(USERS_TABLE, "UPPER(status) AS status, COUNT(*) AS n",
+                    "WHERE status IS NOT NULL GROUP BY UPPER(status)")
             )
 
             hwid_by_platform = await conn.fetch(
-                "SELECT COALESCE(NULLIF(LOWER(platform), ''), 'unknown') AS platform, "
-                "       COUNT(*) AS n "
-                "FROM user_hwid_devices GROUP BY 1"
+                select_sql(USER_HWID_DEVICES_TABLE,
+                    "COALESCE(NULLIF(LOWER(platform), ''), 'unknown') AS platform, COUNT(*) AS n",
+                    "GROUP BY 1")
             )
 
             nodes = await conn.fetch(
-                """
-                SELECT name,
-                       cpu_usage, cpu_cores,
-                       memory_usage, memory_total_bytes, memory_used_bytes,
-                       disk_usage, disk_total_bytes, disk_used_bytes,
-                       disk_read_speed_bps, disk_write_speed_bps,
-                       uptime_seconds,
-                       traffic_used_bytes, is_connected, is_disabled,
-                       EXTRACT(EPOCH FROM (NOW() - metrics_updated_at)) AS age_seconds
-                FROM nodes
-                WHERE name IS NOT NULL
-                """
+                select_sql(NODES_TABLE,
+                    "name, cpu_usage, cpu_cores, memory_usage, memory_total_bytes, memory_used_bytes, "
+                    "disk_usage, disk_total_bytes, disk_used_bytes, disk_read_speed_bps, disk_write_speed_bps, "
+                    "uptime_seconds, traffic_used_bytes, is_connected, is_disabled, "
+                    "EXTRACT(EPOCH FROM (NOW() - metrics_updated_at)) AS age_seconds",
+                    "WHERE name IS NOT NULL")
             )
 
             sync_rows = await conn.fetch(
-                "SELECT key, EXTRACT(EPOCH FROM (NOW() - last_sync_at)) AS lag "
-                "FROM sync_metadata WHERE last_sync_at IS NOT NULL"
+                select_sql(SYNC_METADATA_TABLE,
+                    "key, EXTRACT(EPOCH FROM (NOW() - last_sync_at)) AS lag",
+                    "WHERE last_sync_at IS NOT NULL")
             )
 
             violations_by_action = await conn.fetch(
-                "SELECT COALESCE(LOWER(recommended_action), 'unknown') AS action, "
-                "       COUNT(*) AS n "
-                "FROM violations WHERE action_taken IS NULL GROUP BY 1"
+                select_sql(VIOLATIONS_TABLE,
+                    "COALESCE(LOWER(recommended_action), 'unknown') AS action, COUNT(*) AS n",
+                    "WHERE action_taken IS NULL GROUP BY 1")
             )
 
             growth = await conn.fetchrow(
-                """
+                f"""
                 SELECT
-                    (SELECT COUNT(*) FROM users WHERE created_at >= NOW() - INTERVAL '24 hours') AS created_24h,
-                    (SELECT COUNT(*) FROM users WHERE created_at >= NOW() - INTERVAL '7 days')   AS created_7d,
-                    (SELECT COUNT(*) FROM users WHERE created_at >= NOW() - INTERVAL '30 days')  AS created_30d,
-                    (SELECT COUNT(*) FROM users
+                    (SELECT COUNT(*) FROM {USERS_TABLE} WHERE created_at >= NOW() - INTERVAL '24 hours') AS created_24h,
+                    (SELECT COUNT(*) FROM {USERS_TABLE} WHERE created_at >= NOW() - INTERVAL '7 days')   AS created_7d,
+                    (SELECT COUNT(*) FROM {USERS_TABLE} WHERE created_at >= NOW() - INTERVAL '30 days')  AS created_30d,
+                    (SELECT COUNT(*) FROM {USERS_TABLE}
                      WHERE expire_at > NOW() AND expire_at < NOW() + INTERVAL '1 day')   AS expiring_1d,
-                    (SELECT COUNT(*) FROM users
+                    (SELECT COUNT(*) FROM {USERS_TABLE}
                      WHERE expire_at > NOW() AND expire_at < NOW() + INTERVAL '30 days') AS expiring_30d,
-                    (SELECT COUNT(*) FROM users WHERE used_traffic_bytes < 10737418240) AS traffic_lt_10gb,
-                    (SELECT COUNT(*) FROM users
+                    (SELECT COUNT(*) FROM {USERS_TABLE} WHERE used_traffic_bytes < 10737418240) AS traffic_lt_10gb,
+                    (SELECT COUNT(*) FROM {USERS_TABLE}
                      WHERE used_traffic_bytes >= 10737418240 AND used_traffic_bytes < 107374182400) AS traffic_10_100gb,
-                    (SELECT COUNT(*) FROM users
+                    (SELECT COUNT(*) FROM {USERS_TABLE}
                      WHERE used_traffic_bytes >= 107374182400 AND used_traffic_bytes < 1099511627776) AS traffic_100gb_1tb,
-                    (SELECT COUNT(*) FROM users WHERE used_traffic_bytes >= 1099511627776) AS traffic_gt_1tb
+                    (SELECT COUNT(*) FROM {USERS_TABLE} WHERE used_traffic_bytes >= 1099511627776) AS traffic_gt_1tb
                 """
             )
 
             hwid_limit_reached = await conn.fetchval(
-                """
+                f"""
                 SELECT COUNT(DISTINCT u.uuid)
-                FROM users u
+                FROM {USERS_TABLE} u
                 JOIN (
-                    SELECT user_uuid, COUNT(*) AS n FROM user_hwid_devices GROUP BY user_uuid
+                    SELECT user_uuid, COUNT(*) AS n FROM {USER_HWID_DEVICES_TABLE} GROUP BY user_uuid
                 ) d ON d.user_uuid = u.uuid
                 WHERE u.hwid_device_limit > 0 AND d.n >= u.hwid_device_limit
                 """
             )
 
             hwid_avg = await conn.fetchval(
-                "SELECT AVG(n)::float FROM ("
-                "  SELECT COUNT(*) AS n FROM user_hwid_devices GROUP BY user_uuid"
-                ") s"
+                f"SELECT AVG(n)::float FROM ("
+                f"  SELECT COUNT(*) AS n FROM {USER_HWID_DEVICES_TABLE} GROUP BY user_uuid"
+                f") s"
             )
 
             # SRH table может отсутствовать на старых инсталляциях — мягко fallback'имся
             sub_req = None
             try:
                 sub_req = await conn.fetchrow(
-                    """
+                    f"""
                     SELECT
                         COUNT(*) FILTER (WHERE request_at >= NOW() - INTERVAL '1 hour') AS req_1h,
                         COUNT(*) FILTER (WHERE request_at >= NOW() - INTERVAL '24 hours') AS req_24h
-                    FROM subscription_request_history
+                    FROM {SUBSCRIPTION_REQUEST_HISTORY_TABLE}
                     """
                 )
             except Exception:

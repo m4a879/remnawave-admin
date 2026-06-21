@@ -5,9 +5,8 @@ from src.keyboards.navigation import NavTarget, nav_row
 
 
 def snippet_actions_keyboard(name: str) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [InlineKeyboardButton(text=_("snippet.delete"), callback_data=f"snippet:{name}:delete")],
-            nav_row(NavTarget.SNIPPETS_MENU),
-        ]
-    )
+    rows = [
+        [InlineKeyboardButton(text=_("snippet.delete"), callback_data=f"snippet:{name}:delete")],
+        nav_row(NavTarget.SNIPPETS_MENU),
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=rows)

@@ -9,6 +9,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional, List
 
+from shared.db_schema import BOT_CONFIG_TABLE
+from shared.db_query import select_sql, update_sql
+
 logger = logging.getLogger(__name__)
 
 BACKUP_DIR = Path(os.environ.get("BACKUP_DIR", "/app/backups"))
@@ -114,9 +117,10 @@ async def export_config() -> dict:
         from shared.database import db_service
         async with db_service.acquire() as conn:
             rows = await conn.fetch(
-                "SELECT key, value, value_type, category, subcategory, "
-                "display_name, description, default_value, is_secret, is_readonly "
-                "FROM bot_config ORDER BY category, key"
+                select_sql(BOT_CONFIG_TABLE,
+                    "key, value, value_type, category, subcategory, "
+                    "display_name, description, default_value, is_secret, is_readonly",
+                    "ORDER BY category, key")
             )
 
         settings = []
@@ -183,14 +187,14 @@ async def import_config(filename: str, overwrite: bool = False) -> dict:
 
             if not overwrite:
                 existing = await conn.fetchval(
-                    "SELECT value FROM bot_config WHERE key = $1", key
+                    select_sql(BOT_CONFIG_TABLE, "value", "WHERE key = $1"), key
                 )
                 if existing is not None:
                     skipped += 1
                     continue
 
             await conn.execute(
-                "UPDATE bot_config SET value = $2, updated_at = NOW() WHERE key = $1",
+                update_sql(BOT_CONFIG_TABLE, "value = $2, updated_at = NOW()", "key = $1"),
                 key, str(value),
             )
             imported += 1

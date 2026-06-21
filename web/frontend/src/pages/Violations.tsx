@@ -899,7 +899,7 @@ function ViolationDetailPanel({
                       )}
                       {device.user_agent && (
                         <div className="flex justify-between">
-                          <span className="text-dark-300">User-Agent</span>
+                          <span className="text-dark-300">{t('violations.userAgent')}</span>
                           <span className="text-dark-100 truncate ml-2 max-w-[60%] text-right" title={device.user_agent}>{device.user_agent}</span>
                         </div>
                       )}

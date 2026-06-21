@@ -19,6 +19,8 @@ import os
 from typing import Any, Dict, List, Optional, Sequence
 
 from shared.metrics import NOTIFICATIONS_FAILED, NOTIFICATIONS_SENT
+from shared.db_schema import ADMIN_DEVICES_TABLE
+from shared.db_query import select_sql, delete_sql
 
 logger = logging.getLogger(__name__)
 
@@ -161,7 +163,11 @@ async def _list_devices_for_admin(admin_id: int) -> List[dict]:
         return []
     async with db_service.acquire() as conn:
         rows = await conn.fetch(
-            f"SELECT {_DEVICE_FIELDS} FROM admin_devices WHERE admin_id = $1",
+            select_sql(
+                ADMIN_DEVICES_TABLE,
+                _DEVICE_FIELDS,
+                "WHERE admin_id = $1",
+            ),
             admin_id,
         )
     return [dict(r) for r in rows]
@@ -173,7 +179,10 @@ async def _list_devices_for_all_admins() -> List[dict]:
         return []
     async with db_service.acquire() as conn:
         rows = await conn.fetch(
-            f"SELECT {_DEVICE_FIELDS}, admin_id FROM admin_devices",
+            select_sql(
+                ADMIN_DEVICES_TABLE,
+                f"{_DEVICE_FIELDS}, admin_id",
+            ),
         )
     return [dict(r) for r in rows]
 
@@ -184,7 +193,11 @@ async def _delete_token(token: str) -> None:
         return
     async with db_service.acquire() as conn:
         await conn.execute(
-            "DELETE FROM admin_devices WHERE fcm_token = $1", token,
+            delete_sql(
+                ADMIN_DEVICES_TABLE,
+                "fcm_token = $1",
+            ),
+            token,
         )
 
 

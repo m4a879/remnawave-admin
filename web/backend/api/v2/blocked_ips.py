@@ -6,6 +6,9 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, Query, Request
 
+from shared.db_schema import NODES_TABLE
+from shared.db_query import select_sql
+
 from web.backend.api.deps import (
     AdminUser,
     get_client_ip,
@@ -14,7 +17,7 @@ from web.backend.api.deps import (
 )
 from web.backend.core.errors import E, api_error
 from web.backend.core.rate_limit import RATE_MUTATIONS, RATE_READ, limiter
-from web.backend.core.rbac import write_audit_log
+from web.backend.core.audit import write_audit_log
 from web.backend.schemas.blocked_ip import (
     BlockedIPBulkCreate,
     BlockedIPCreate,
@@ -65,7 +68,7 @@ async def push_blocklist_to_agents() -> int:
             try:
                 async with db_service.acquire() as conn:
                     row = await conn.fetchrow(
-                        "SELECT agent_token FROM nodes WHERE uuid = $1", node_uuid
+                        select_sql(NODES_TABLE, "agent_token", "WHERE uuid = $1"), node_uuid
                     )
                 if not row or not row["agent_token"]:
                     continue

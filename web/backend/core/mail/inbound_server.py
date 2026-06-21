@@ -8,6 +8,9 @@ from email.header import decode_header as _decode_header
 from email.utils import parseaddr, parsedate_to_datetime
 from typing import Optional
 
+from shared.db_schema import DOMAIN_CONFIG_TABLE, EMAIL_INBOX_TABLE
+from shared.db_query import select_sql, insert_sql
+
 from aiosmtpd.smtp import SMTP as SMTPProtocol, Envelope, Session
 
 logger = logging.getLogger(__name__)
@@ -49,7 +52,8 @@ class InboundMailHandler:
             from shared.database import db_service
             async with db_service.acquire() as conn:
                 is_configured = await conn.fetchval(
-                    "SELECT 1 FROM domain_config WHERE domain = $1 AND inbound_enabled = true AND is_active = true",
+                    select_sql(DOMAIN_CONFIG_TABLE, "1",
+                        "WHERE domain = $1 AND inbound_enabled = true AND is_active = true"),
                     domain,
                 )
             if not is_configured:
@@ -133,11 +137,10 @@ class InboundMailHandler:
             async with db_service.acquire() as conn:
                 for rcpt in envelope.rcpt_tos:
                     await conn.execute(
-                        "INSERT INTO email_inbox "
-                        "(mail_from, rcpt_to, from_header, to_header, subject, date_header, "
-                        " message_id, in_reply_to, body_text, body_html, raw_message, "
-                        " remote_ip, remote_hostname, has_attachments, attachment_count) "
-                        "VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)",
+                        insert_sql(EMAIL_INBOX_TABLE,
+                            ["mail_from", "rcpt_to", "from_header", "to_header", "subject", "date_header",
+                             "message_id", "in_reply_to", "body_text", "body_html", "raw_message",
+                             "remote_ip", "remote_hostname", "has_attachments", "attachment_count"]),
                         envelope.mail_from, rcpt, from_header, to_header, subject,
                         date_header, message_id, in_reply_to, body_text, body_html,
                         raw_str[:500_000],  # truncate raw to 500KB

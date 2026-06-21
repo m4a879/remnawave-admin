@@ -9,11 +9,12 @@ from aiogram.fsm.storage.memory import MemoryStorage
 import uvicorn
 
 from src.config import get_settings
-from shared.api_client import api_client
+from shared.internal_api import internal_api_client
 from shared.config_service import config_service
 from shared.database import db_service
 from src.services.health_check import PanelHealthChecker
 from src.services.report_scheduler import init_report_scheduler
+from src.services.bot_callbacks import app as callbacks_app
 from src.services.webhook import app as webhook_app
 from src.utils.auth import AdminMiddleware
 from src.utils.i18n import get_i18n_middleware
@@ -144,7 +145,7 @@ async def check_api_connection() -> bool:
 
     for attempt in range(1, max_attempts + 1):
         try:
-            await api_client.get_health()
+            await internal_api_client.get_health()
             logger.info("✅ API connection OK")
             return True
         except Exception as exc:
@@ -155,17 +156,29 @@ async def check_api_connection() -> bool:
             if attempt < max_attempts:
                 await asyncio.sleep(delay)
             else:
-                logger.error(
-                    "❌ Cannot connect to API. Check API_BASE_URL and API_TOKEN"
-                )
+                if internal_api_client.proxy_mode:
+                    import os as _os
+                    backend_url = _os.environ.get("INTERNAL_API_BACKEND_URL", "http://web-backend:8081")
+                    logger.error(
+                        "❌ Cannot connect to API (proxy mode). Check web-backend at %s (INTERNAL_API_BACKEND_URL) and that INTERNAL_API_SECRET matches between bot and backend. Error: %s",
+                        backend_url,
+                        exc
+                    )
+                else:
+                    logger.error(
+                        "❌ Cannot connect to API (direct mode). Check API_BASE_URL and API_TOKEN. Error: %s",
+                        exc
+                    )
                 return False
 
     return False
 
 
 async def run_webhook_server(bot: Bot, port: int) -> None:
-    """Запускает webhook сервер в фоновом режиме."""
+    """Запускает webhook и callback серверы в фоновом режиме."""
     webhook_app.state.bot = bot
+    # Merge callbacks routes into webhook_app so both are served on one port
+    webhook_app.include_router(callbacks_app.router)
 
     import logging as _logging
 
@@ -247,21 +260,26 @@ async def main() -> None:
     dp = Dispatcher(storage=MemoryStorage())
 
     # middlewares
-    # Сначала проверка администратора (блокирует неавторизованных пользователей)
-    dp.message.middleware(AdminMiddleware())
-    dp.callback_query.middleware(AdminMiddleware())
-    # Затем i18n middleware (для локализации)
+    # Сначала i18n middleware (нужен для переводов в AdminMiddleware)
     dp.message.middleware(get_i18n_middleware())
     dp.callback_query.middleware(get_i18n_middleware())
+    # Затем проверка администратора (блокирует неавторизованных пользователей)
+    dp.message.middleware(AdminMiddleware())
+    dp.callback_query.middleware(AdminMiddleware())
 
     register_handlers(dp)
-    dp.shutdown.register(api_client.close)
+    dp.shutdown.register(internal_api_client.close)
 
     # Запускаем webhook сервер в фоне, если настроен порт
     webhook_task = None
     if settings.webhook_port:
         logger.info("🌐 Webhook on port %d", settings.webhook_port)
-        webhook_task = asyncio.create_task(run_webhook_server(bot, settings.webhook_port))
+        try:
+            webhook_task = asyncio.create_task(run_webhook_server(bot, settings.webhook_port))
+        except Exception as exc:
+            logger.error("Failed to start webhook server: %s", exc)
+            webhook_task = None
+            # Don't exit the bot if webhook fails - it's optional
 
     # Запускаем health checker для панели
     health_checker = PanelHealthChecker(bot, check_interval=60)
@@ -334,6 +352,8 @@ async def main() -> None:
             await webhook_task
         except asyncio.CancelledError:
             pass
+        except Exception as exc:
+            logger.debug("Webhook task cleanup error: %s", exc)
     if db_service.is_connected:
         await db_service.disconnect()
     logger.info("👋 Bot stopped")

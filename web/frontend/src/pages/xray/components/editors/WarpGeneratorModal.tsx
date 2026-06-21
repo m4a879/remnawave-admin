@@ -5,6 +5,7 @@ import { Button } from '../ui/Button';
 import { Icon } from '../ui/Icon';
 import { Select } from '../ui/Select';
 import { toast } from 'sonner';
+import i18next from 'i18next';
 import { generateWarpAccount } from '../../core/generators/warp';
 import { useConfigStore } from '../../store/configStore';
 import { getPresets } from '../../core/presets';
@@ -95,13 +96,13 @@ export const WarpGeneratorModal = ({ onClose, onGenerate }: WarpGeneratorModalPr
             baseOutbound.tag = `${prefix}-${Math.floor(Math.random() * 1000)}`;
 
             onGenerate(baseOutbound);
-            toast.success("Outbound profile generated successfully");
+            toast.success(i18next.t('xray.warpProfileGenerated'));
             onClose();
 
         } catch (e: any) {
             console.error(e);
-            toast.error("Generation failed", {
-                description: e.message || "Network error or proxy timeout."
+            toast.error(i18next.t('xray.warpGenerationFailed'), {
+                description: e.message || i18next.t('xray.warpGenerationFailedDesc')
             });
         } finally {
             setLoading(false);

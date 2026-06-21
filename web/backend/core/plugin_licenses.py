@@ -18,6 +18,9 @@ import logging
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
+from shared.db_schema import PLUGIN_LICENSES_TABLE
+from shared.db_query import select_sql, insert_sql, delete_sql
+
 logger = logging.getLogger(__name__)
 
 
@@ -30,7 +33,7 @@ async def get_token(plugin_id: str) -> Optional[str]:
     try:
         async with db_service.acquire() as conn:
             row = await conn.fetchrow(
-                "SELECT jwt_token FROM plugin_licenses WHERE plugin_id = $1",
+                select_sql(PLUGIN_LICENSES_TABLE, "jwt_token", "WHERE plugin_id = $1"),
                 plugin_id,
             )
     except Exception:
@@ -50,13 +53,11 @@ async def list_all() -> List[Dict[str, Any]]:
     if not db_service.is_connected:
         return []
     async with db_service.acquire() as conn:
-        rows = await conn.fetch(
-            """
-            SELECT plugin_id, wheel_name, version, installed_at, updated_at
-            FROM plugin_licenses
-            ORDER BY plugin_id
-            """
-        )
+            rows = await conn.fetch(
+                select_sql(PLUGIN_LICENSES_TABLE,
+                    "plugin_id, wheel_name, version, installed_at, updated_at",
+                    "ORDER BY plugin_id")
+            )
     return [dict(r) for r in rows]
 
 
@@ -73,15 +74,14 @@ async def upsert(
         raise RuntimeError("plugin_licenses: database not connected")
     async with db_service.acquire() as conn:
         await conn.execute(
-            """
-            INSERT INTO plugin_licenses (plugin_id, jwt_token, wheel_name, version, installed_at, updated_at)
-            VALUES ($1, $2, $3, $4, NOW(), NOW())
-            ON CONFLICT (plugin_id) DO UPDATE SET
-                jwt_token = EXCLUDED.jwt_token,
-                wheel_name = COALESCE(EXCLUDED.wheel_name, plugin_licenses.wheel_name),
-                version = COALESCE(EXCLUDED.version, plugin_licenses.version),
-                updated_at = NOW()
-            """,
+            insert_sql(PLUGIN_LICENSES_TABLE,
+                ["plugin_id", "jwt_token", "wheel_name", "version", "installed_at", "updated_at"],
+                values="$1, $2, $3, $4, NOW(), NOW()",
+                suffix="ON CONFLICT (plugin_id) DO UPDATE SET "
+                       "jwt_token = EXCLUDED.jwt_token, "
+                       "wheel_name = COALESCE(EXCLUDED.wheel_name, plugin_licenses.wheel_name), "
+                       "version = COALESCE(EXCLUDED.version, plugin_licenses.version), "
+                       "updated_at = NOW()"),
             plugin_id,
             jwt_token,
             wheel_name,
@@ -96,7 +96,7 @@ async def delete(plugin_id: str) -> bool:
         return False
     async with db_service.acquire() as conn:
         result = await conn.execute(
-            "DELETE FROM plugin_licenses WHERE plugin_id = $1",
+            delete_sql(PLUGIN_LICENSES_TABLE, "plugin_id = $1"),
             plugin_id,
         )
     # asyncpg returns "DELETE n" — n>0 means a row was removed.
@@ -128,7 +128,9 @@ async def prime_cache() -> None:
         return
     try:
         async with db_service.acquire() as conn:
-            rows = await conn.fetch("SELECT plugin_id, jwt_token FROM plugin_licenses")
+            rows = await conn.fetch(
+                select_sql(PLUGIN_LICENSES_TABLE, "plugin_id, jwt_token")
+            )
     except Exception:
         logger.warning("plugin_licenses.prime_failed", exc_info=True)
         return

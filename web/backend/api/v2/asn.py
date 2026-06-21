@@ -5,6 +5,9 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
+from shared.db_schema import ASN_RUSSIA_TABLE
+from shared.db_query import select_sql
+
 from web.backend.api.deps import AdminUser, require_permission
 
 logger = logging.getLogger(__name__)
@@ -46,7 +49,7 @@ async def get_asn_by_type(
             # Records with NULL provider_type
             async with db.acquire() as conn:
                 rows = await conn.fetch(
-                    "SELECT * FROM asn_russia WHERE provider_type IS NULL AND is_active = true ORDER BY org_name"
+                    select_sql(ASN_RUSSIA_TABLE, "*", "WHERE provider_type IS NULL AND is_active = true ORDER BY org_name")
                 )
                 records = [dict(row) for row in rows]
         else:
@@ -71,18 +74,14 @@ async def get_asn_stats(
         async with db.acquire() as conn:
             # Total active records
             total = await conn.fetchval(
-                "SELECT COUNT(*) FROM asn_russia WHERE is_active = true"
+                select_sql(ASN_RUSSIA_TABLE, "COUNT(*)", "WHERE is_active = true")
             ) or 0
 
             # Count by provider_type (single query)
             type_rows = await conn.fetch(
-                """
-                SELECT COALESCE(provider_type, 'unknown') as provider_type, COUNT(*) as cnt
-                FROM asn_russia
-                WHERE is_active = true
-                GROUP BY provider_type
-                ORDER BY cnt DESC
-                """
+                select_sql(ASN_RUSSIA_TABLE,
+                    "COALESCE(provider_type, 'unknown') as provider_type, COUNT(*) as cnt",
+                    "WHERE is_active = true GROUP BY provider_type ORDER BY cnt DESC")
             )
             by_type = {r["provider_type"]: r["cnt"] for r in type_rows}
 

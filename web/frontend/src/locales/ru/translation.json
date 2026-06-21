@@ -110,7 +110,20 @@
     "confirmDialog": {
       "defaultTitle": "Подтвердите действие",
       "defaultDescription": "Вы уверены? Это действие нельзя отменить."
-    }
+    },
+    "apiUnavailable": "API временно недоступен",
+    "clear": "Очистить",
+    "dateFrom": "С",
+    "dateTo": "По",
+    "exported": "Экспортировано",
+    "logout": "Выйти",
+    "next": "Далее",
+    "noPermission": "У вас нет прав для этого действия",
+    "previous": "Назад",
+    "resetAll": "Сбросить всё",
+    "saved": "Сохранено",
+    "showAll": "Показать все",
+    "status": "Статус"
   },
   "nav": {
     "dashboard": "Дашборд",
@@ -163,7 +176,10 @@
   "header": {
     "searchPlaceholder": "Поиск...",
     "commandHint": "Cmd+K для поиска",
-    "online": "Онлайн"
+    "online": "Онлайн",
+    "menu": "Меню",
+    "notifications": "Уведомления",
+    "search": "Поиск"
   },
   "sidebar": {
     "expand": "Развернуть",
@@ -173,7 +189,8 @@
     "administrator": "Администратор",
     "logout": "Выход",
     "logoutConfirmTitle": "Выйти из панели?",
-    "logoutConfirmDescription": "Потребуется повторная авторизация. Все несохранённые изменения будут потеряны."
+    "logoutConfirmDescription": "Потребуется повторная авторизация. Все несохранённые изменения будут потеряны.",
+    "toggleCollapse": "Свернуть/развернуть боковую панель"
   },
   "commandPalette": {
     "placeholder": "Поиск страниц, пользователей, действий...",
@@ -203,7 +220,8 @@
     "resetToDefaults": "Сбросить настройки",
     "density": "Плотность",
     "borderRadius": "Скругление углов",
-    "animations": "Анимации"
+    "animations": "Анимации",
+    "colorMode": "Цветовая схема"
   },
   "errorBoundary": {
     "title": "Что-то пошло не так",
@@ -249,6 +267,7 @@
     "backendUnavailable": "Бэкенд запускается...",
     "backendUnavailableHint": "Сервер может ещё инициализироваться. При первом запуске это может занять около минуты.",
     "retry": "Повторить",
+    "permissionsLoadFailed": "Не удалось загрузить права. Пожалуйста, попробуйте ещё раз.",
     "initialSetup": "Первоначальная настройка",
     "createAdmin": "Создание администратора",
     "setupWelcome": "Добро пожаловать! Создайте первую учётную запись администратора для начала работы с панелью.",
@@ -283,6 +302,22 @@
     "details": "Подробнее",
     "loading": "Загрузка...",
     "refresh": "Обновить",
+    "sync": "Синхр.",
+    "syncSuccess": "Синхронизация завершена",
+    "syncError": "Ошибка синхронизации",
+    "yourQuota": "Ваша квота",
+    "yourQuotaSubtitle": "Использование ресурсов относительно лимитов вашей учётной записи",
+    "unlimited": "Безлимит",
+    "usersQuota": "Пользователи",
+    "nodesQuota": "Ноды",
+    "hostsQuota": "Хосты",
+    "trafficQuota": "Трафик",
+    "used": "{{used}} из {{limit}}",
+    "usedOnly": "использовано {{used}}",
+    "remaining": "осталось {{remaining}}",
+    "lifetimeEventCount": "Счётчик изменений за всё время",
+    "committedAllocated": "Полное обязательство, частично возвратно",
+    "yourQuotaFootnote": "Счётчики пользователей, нод и хостов — это счётчики изменений за всё время: они увеличиваются при каждом создании и при каждом удалении, поэтому число только растёт. Трафик устроен иначе: он отражает весь трафик, за который вы несёте ответственность, — это сумма всех выделенных лимитов плюс трафик, который ваши пользователи уже израсходовали. Создание пользователя прибавляет его лимит. Сброс трафика пользователя прибавляет количество, которое он успел израсходовать, — этот израсходованный трафик остаётся на вашем счёте, потому что пользователь только что получил свежую квоту. Понижение лимита при редактировании (если использовано меньше нового лимита) возвращает разницу. При удалении пользователя возвращается только неизрасходованная часть; израсходованная часть остаётся на вашем счёте навсегда.",
     "loadError": "Ошибка загрузки данных",
     "retry": "Повторить",
     "resetLayout": "Сбросить порядок виджетов",
@@ -411,7 +446,13 @@
     "expiringIn30d": "За 30 дней",
     "trafficAnomalies": "Аномалии трафика",
     "trafficAnomaliesTooltip": "Ноды с отклонением трафика >50% от среднего за 7 дней",
-    "noAnomalies": "Всё в норме"
+    "noAnomalies": "Всё в норме",
+    "dependencies": {
+      "python": "Python",
+      "postgresql": "PostgreSQL",
+      "fastapi": "FastAPI",
+      "xray": "Xray"
+    }
   },
   "users": {
     "title": "Пользователи",
@@ -481,6 +522,8 @@
       "online7d": "Онлайн за 7д",
       "online30d": "Онлайн за 30д",
       "neverConnected": "Не подключался",
+      "admin": "Администратор",
+      "anyAdmin": "Все администраторы",
       "perPage": "На страницу",
       "sortBy": "Сортировка",
       "sortName": "По имени",
@@ -511,7 +554,8 @@
       "hwid": "HWID",
       "activity": "Активность",
       "expires": "Истекает",
-      "created": "Создан"
+      "created": "Создан",
+      "createdBy": "Кем создан"
     },
     "createModal": {
       "title": "Создание пользователя",
@@ -527,16 +571,19 @@
       "trafficAndLimits": "Трафик и лимиты",
       "unlimitedTraffic": "Безлимитный трафик",
       "trafficLimit": "Лимит трафика",
+      "remainingTrafficQuota": "Остаток квоты трафика",
+      "remainingTrafficValue": "{{used}} / {{total}} ГБ",
       "gb": "ГБ",
       "resetStrategy": "Стратегия сброса",
       "expireDate": "Дата истечения",
       "expireHint": "Оставьте пустым для бессрочного доступа",
       "hwidLimit": "Лимит устройств",
       "hwidHint": "0 = без ограничений",
-      "squads": "Отряды",
-      "externalSquad": "Внешний отряд",
+      "squads": "Сквады",
+      "externalSquad": "Внешний сквад",
       "notSelected": "Не выбрано",
-      "internalSquads": "Внутренние отряды"
+      "internalSquads": "Внутренние сквады",
+      "indefinite": "♾ 2099"
     },
     "strategies": {
       "monthly": "Ежемесячно",
@@ -566,13 +613,17 @@
       "jsonExported": "Экспорт JSON завершён",
       "bulkEnabled": "Включено: {{success}}, ошибок: {{failed}}",
       "bulkDisabled": "Отключено: {{success}}, ошибок: {{failed}}",
-      "bulkDeleted": "Удалено: {{success}}, ошибок: {{failed}}"
+      "bulkDeleted": "Удалено: {{success}}, ошибок: {{failed}}",
+      "bulkReassigned": "Переназначено: {{success}}, ошибок: {{failed}}",
+      "bulkUnassigned": "Снято назначение: {{success}}, ошибок: {{failed}}"
     },
     "bulkSelected": "Выбрано: {{count}}",
     "bulkOnPage": "{{count}} на стр.",
     "bulkEnable": "Включить",
     "bulkDisable": "Отключить",
     "bulkDelete": "Удалить",
+    "bulkReassign": "Переназначить",
+    "bulkUnassign": "Отвязать админа",
     "deleteConfirm": {
       "title": "Удалить пользователя?",
       "description": "Пользователь и все его данные будут удалены. Это действие нельзя отменить.",
@@ -583,6 +634,18 @@
       "description": "Все выбранные юзеры и их данные будут удалены безвозвратно. Это действие нельзя отменить.",
       "confirm": "Удалить {{count}}"
     },
+    "bulkUnassignConfirm": {
+      "title": "Снять назначение админа с {{count}} пользователей?",
+      "description": "Выбранные пользователи больше не будут привязаны ни к одному админу. Это действие нельзя отменить.",
+      "confirm": "Отвязать {{count}}"
+    },
+    "bulkReassignConfirm": {
+      "title": "Переназначить пользователей",
+      "description": "Переназначить {{count}} пользователей другому админу",
+      "selectAdmin": "Выберите админа",
+      "confirm": "Переназначить",
+      "saving": "Переназначение..."
+    },
     "disableConfirm": {
       "title": "Отключить пользователя?",
       "description": "Пользователь потеряет доступ к VPN-подключениям. Вы сможете включить его обратно позже.",
@@ -590,7 +653,14 @@
     },
     "perPage": "на страницу",
     "selected": "Выбрано",
-    "bulkActions": "Массовые действия"
+    "bulkActions": "Массовые действия",
+    "deferred": {
+      "bulkEnable": "Включение {{count}} пользователей через 5 с — нажмите, чтобы отменить",
+      "bulkDisable": "Отключение {{count}} пользователей через 5 с — нажмите, чтобы отменить",
+      "enable": "Включение пользователя через 5 с — нажмите, чтобы отменить",
+      "disable": "Отключение пользователя через 5 с — нажмите, чтобы отменить"
+    },
+    "tryDifferentFilter": "Попробуйте другую комбинацию фильтров"
   },
   "userDetail": {
     "strategies": {
@@ -608,9 +678,14 @@
     "generalInfo": "Общая информация",
     "changesSaved": "Изменения сохранены",
     "unknown": "Неизвестно",
-    "indefinite": "Бессрочно",
+    "indefinite": "♾ 2099",
     "trafficUnlimited": "Безлимит",
-    "protocols": "Протоколы",
+    "protocolCredentials": "Учётные данные протоколов",
+    "protocols": {
+      "vless": "VLESS UUID",
+      "trojan": "Trojan Password",
+      "shadowsocks": "Shadowsocks Password"
+    },
     "internalSquads": "Внутренние сквады",
     "squads": {
       "title": "Сквады",
@@ -620,7 +695,8 @@
       "noSquadsAvailable": "Нет доступных сквадов"
     },
     "violations": {
-      "title": "Нарушения"
+      "title": "Нарушения",
+      "score": "Оценка"
     },
     "statuses": {
       "active": "Активен",
@@ -645,11 +721,14 @@
       "removeDate": "Убрать дату (бессрочно)",
       "hwidLimit": "Лимит устройств (HWID)",
       "readOnly": "Информация (только чтение)",
+      "username": "Имя пользователя",
+      "shortUuid": "Short UUID",
       "created": "Создан",
       "expires": "Истекает",
       "lastActivity": "Последняя активность",
       "lastTrafficReset": "Последний сброс трафика",
-      "firstConnection": "Первое подключение"
+      "firstConnection": "Первое подключение",
+      "createdBy": "Кем создан"
     },
     "statusLabel": "Статус",
     "selectStatus": "Выберите статус",
@@ -723,6 +802,17 @@
         "empty": "Пустой UA",
         "unknown": "Неизвестный клиент",
         "tooltip": "User-Agent не похож на легитимный VPN-клиент. Проверьте устройство"
+      },
+      "deleteAll": "Удалить все устройства",
+      "deleteAllConfirm": {
+        "title": "Удалить все устройства?",
+        "description": "Все HWID-привязанные устройства этого пользователя будут удалены. Потребуется повторная привязка при следующем подключении.",
+        "confirm": "Удалить все"
+      },
+      "deleteConfirm": {
+        "title": "Удалить устройство?",
+        "description": "Это устройство будет удалено. Пользователю потребуется привязать его заново при следующем подключении.",
+        "confirm": "Удалить"
       }
     },
     "subscription": {
@@ -745,7 +835,16 @@
       "revokePasswordsConfirm": "Перевыпустить пароли?",
       "revokePasswordsConfirmDesc": "Пароли подключения (Trojan, VLESS, Shadowsocks) будут перегенерированы. URL подписки останется прежним.",
       "revokeFullSuccess": "Подписка полностью перевыпущена",
-      "revokePasswordsSuccess": "Пароли подключения перегенерированы"
+      "revokePasswordsSuccess": "Пароли подключения перегенерированы",
+      "daysLeft": "Осталось {{count}} день",
+      "daysLeft_other": "Осталось {{count}} дней",
+      "expiresAt": "Истекает",
+      "infoTitle": "Информация о подписке",
+      "lifetime": "Бессрочно",
+      "links": "Ссылки подписки",
+      "noData": "Нет данных о подписке",
+      "resetStrategy": "Стратегия сброса",
+      "trafficUsed": "Использовано трафика"
     },
     "antiAbuse": {
       "title": "Anti-Abuse",
@@ -786,7 +885,16 @@
       "delete": "Удалить",
       "deleteUser": "Удалить",
       "deleteConfirmTitle": "Удалить пользователя?",
-      "deleteConfirmDesc": "Пользователь и все его данные будут удалены. Это действие нельзя отменить."
+      "deleteConfirmDesc": "Пользователь и все его данные будут удалены. Это действие нельзя отменить.",
+      "reassign": "Переназначить",
+      "clearCreatedBy": "Открепить"
+    },
+    "reassign": {
+      "title": "Переназначить пользователя",
+      "description": "Передать этого пользователя другому администратору. Текущий администратор потеряет видимость.",
+      "selectAdmin": "Выберите администратора",
+      "confirm": "Переназначить",
+      "saving": "Переназначение..."
     },
     "deleteConfirm": {
       "title": "Удалить пользователя?",
@@ -803,7 +911,11 @@
       "userUpdated": "Пользователь обновлён",
       "saveError": "Ошибка сохранения",
       "userDeleted": "Пользователь удалён",
-      "deleteError": "Ошибка удаления"
+      "deleteError": "Ошибка удаления",
+      "reassigned": "Пользователь переназначен",
+      "adminUnassigned": "Администратор откреплён",
+      "allDevicesDeleted": "Все устройства удалены",
+      "deviceDeleted": "Устройство удалено"
     },
     "toast": {
       "enabled": "Пользователь включён",
@@ -812,7 +924,8 @@
       "deleted": "Пользователь удалён",
       "updated": "Пользователь обновлён",
       "hwidSynced": "HWID устройства синхронизированы"
-    }
+    },
+    "gb": "ГБ"
   },
   "nodes": {
     "title": "Ноды",
@@ -964,6 +1077,9 @@
         "created": "По дате создания (↓)",
         "custom": "Свой порядок"
       }
+    },
+    "deferred": {
+      "disable": "Отключение {{count}} нод через 5 с — нажмите, чтобы отменить"
     }
   },
   "fleet": {
@@ -1010,7 +1126,10 @@
       "disableNode": "Отключить ноду",
       "uptimeDaysHours": "{{days}}д {{hours}}ч",
       "uptimeHoursMinutes": "{{hours}}ч {{minutes}}м",
-      "uptimeMinutes": "{{minutes}}м"
+      "uptimeMinutes": "{{minutes}}м",
+      "cpu": "CPU",
+      "ram": "RAM",
+      "uptime": "Аптайм"
     },
     "stats": {
       "total": "Всего",
@@ -1112,7 +1231,8 @@
         "system": "Система",
         "monitoring": "Мониторинг",
         "custom": "Пользовательские"
-      }
+      },
+      "parameters": "Параметры"
     },
     "terminal": {
       "title": "Терминал",
@@ -1163,7 +1283,7 @@
       "resume": "Возобновить",
       "runs": "запусков: {{count}}",
       "deleteConfirmTitle": "Удалить задачу?",
-      "deleteConfirmDescription": "Задача «{{name}}» будет удалена. Само скрипт и история выполнения сохранятся.",
+      "deleteConfirmDescription": "Задача «{{name}}» будет удалена. Сам скрипт и история выполнения сохранятся.",
       "toast": {
         "created": "Задача создана",
         "updated": "Задача обновлена",
@@ -1191,7 +1311,10 @@
       "restarted": "Нода перезапущена",
       "enabled": "Нода включена",
       "disabled": "Нода отключена",
-      "error": "Ошибка операции"
+      "error": "Ошибка операции",
+      "generatedTokens": "Сгенерировано {{count}} токенов",
+      "generatedCommands": "Сгенерировано {{count}} команд установки",
+      "revokedTokens": "Отозвано {{count}} токенов"
     }
   },
   "hosts": {
@@ -1246,7 +1369,8 @@
       "tagPlaceholder": "Тег хоста",
       "serverDescription": "Описание сервера",
       "serverDescPlaceholder": "Описание сервера",
-      "hiddenHost": "Скрытый хост"
+      "hiddenHost": "Скрытый хост",
+      "serverDescriptionPlaceholder": "Необязательное описание этого хоста"
     },
     "createHost": {
       "title": "Добавление хоста",
@@ -1255,7 +1379,8 @@
     "nodesCount": "Ноды ({{count}})",
     "deleteConfirm": {
       "title": "Удалить хост?",
-      "description": "Хост будет удалён. Это действие нельзя отменить."
+      "description": "Хост будет удалён. Это действие нельзя отменить.",
+      "confirm": "Удалить"
     },
     "toast": {
       "enabled": "Хост включён",
@@ -1264,8 +1389,28 @@
       "updated": "Хост обновлён",
       "created": "Хост создан",
       "saveError": "Ошибка сохранения",
-      "createError": "Ошибка создания"
-    }
+      "createError": "Ошибка создания",
+      "error": "Произошла ошибка"
+    },
+    "form": {
+      "sni": "SNI",
+      "host": "Хост",
+      "path": "Путь",
+      "alpn": "ALPN",
+      "fingerprint": "Отпечаток",
+      "inbound": "Входящий",
+      "sniPlaceholder": "Server Name Indication",
+      "hostPlaceholder": "Заголовок хоста",
+      "pathPlaceholder": "/путь",
+      "alpnPlaceholder": "h2,http/1.1",
+      "fingerprintPlaceholder": "chrome, firefox, safari..."
+    },
+    "detail": {
+      "nodes": "Ноды"
+    },
+    "statusHidden": "Скрыт",
+    "statusNoHosts": "Хостов пока нет",
+    "statusNoName": "Без имени"
   },
   "blocking": {
     "title": "Блокировки",
@@ -1419,12 +1564,15 @@
       "clearUserFilter": "Сбросить фильтр юзера",
       "country": "Страна",
       "dateFrom": "С",
-      "dateTo": "По"
+      "dateTo": "По",
+      "username": "Имя пользователя",
+      "usernamePlaceholder": "Поиск по имени пользователя",
+      "sortByCount": "Сортировать по количеству"
     },
     "stats": {
       "total": "Всего",
       "totalTooltip": "Общее количество зафиксированных нарушений за выбранный период.",
-      "uniqueUsers": "Уник. юзеров",
+      "uniqueUsers": "Уникальные пользователи",
       "uniqueUsersTooltip": "Количество уникальных пользователей с нарушениями за выбранный период.",
       "avgScore": "Средн. скор",
       "avgScoreTooltip": "Средний скор нарушений (0–100).",
@@ -1458,7 +1606,8 @@
       "notFound": "Нарушение не найдено",
       "model": "Модель",
       "os": "ОС",
-      "addedAt": "Добавлено"
+      "addedAt": "Добавлено",
+      "hwidMatch": "Совпадение HWID"
     },
     "connectionTypes": {
       "residential": "Домашний",
@@ -1556,7 +1705,8 @@
       "mode_none": "Без исключений",
       "mode_partial": "Частичное",
       "mode_full": "Полный whitelist"
-    }
+    },
+    "userAgent": "User-Agent"
   },
   "admins": {
     "title": "Администраторы",
@@ -1578,6 +1728,7 @@
     "users": "Пользователи",
     "nodes": "Ноды",
     "hosts": "Хосты",
+    "traffic": "Трафик",
     "status": "Статус",
     "resource": "Ресурс",
     "createAdmin": "Создать администратора",
@@ -1585,20 +1736,29 @@
     "editAdminDescription": "Измените параметры администратора",
     "createAdminDescription": "Заполните данные нового администратора",
     "deleteAdmin": "Удалить администратора",
+    "remainingTraffic": "Осталось: {{remaining}} GB из {{total}} GB",
     "deleteConfirmTitle": "Удалить администратора?",
     "deleteConfirmDesc": "Администратор будет удалён. Это действие нельзя отменить.",
     "username": "Имя пользователя",
+    "telegramId": "Telegram ID",
     "telegramIdHint": "Telegram ID (опционально, для входа через Telegram)",
+    "hasBotAccess": "Доступ к боту",
+    "unrestrictedUserAccess": "Может видеть всех пользователей",
     "selectRole": "Выберите роль",
     "password": "Пароль",
     "newPassword": "Новый пароль",
     "passwordLeaveEmpty": "Оставьте пустым, чтобы не менять",
     "passwordMinLength": "Минимум 8 символов",
-    "limitsHint": "Лимиты (0 = безлимитно)",
+    "limitsHint": "Лимиты (оставьте пустым для безлимита)",
     "maxUsers": "Макс. пользователей",
     "maxTraffic": "Макс. трафик (ГБ)",
     "maxNodes": "Макс. нод",
     "maxHosts": "Макс. хостов",
+    "unlimitedTrafficPolicy": "Политика безлимитного трафика",
+    "unlimitedTrafficPolicyHint": "Определяет, может ли этот администратор устанавливать безлимитный трафик пользователям. Суперадминистратор не ограничен.",
+    "policyAllowed": "Разрешено — администратор может выбирать",
+    "policyDisabled": "Запрещено — обязательно указать лимит",
+    "policyEnforced": "Принудительно — пользователи всегда получают безлимитный трафик",
     "editRole": "Редактировать роль",
     "createRole": "Создать роль",
     "editRoleDescription": "Измените параметры роли",
@@ -1617,6 +1777,10 @@
     "adminUpdated": "Администратор обновлён",
     "adminDeleted": "Администратор удалён",
     "statusUpdated": "Статус обновлён",
+    "resetCounter": "Сбросить счётчик",
+    "counterReset": "Счётчик сброшен",
+    "resetCounterConfirmTitle": "Сбросить счётчик?",
+    "resetCounterConfirmDescription": "Счётчик {{counter}} для администратора \"{{username}}\" будет сброшен на 0. Это действие нельзя отменить.",
     "roles": {
       "superadmin": "Суперадмин",
       "admin": "Админ",
@@ -1660,7 +1824,22 @@
       "violation": "Нарушение",
       "automation": "Автоматизация",
       "system": "Система"
-    }
+    },
+    "errors": {
+      "noChanges": "Нет изменений для сохранения.",
+      "clearFieldHint": "Очистите поле, чтобы установить значение «безлимит»."
+    },
+    "adminsCount": "{{count}} админ",
+    "adminsCount_other": "{{count}} админов",
+    "deleteAdminDescription": "Этот админ потеряет доступ. Принадлежащие ему пользователи станут неназначенными.",
+    "deleteAdminTitle": "Удалить админа?",
+    "deleteRoleDescription": "Эта роль будет удалена. Все админы с этой ролью вернутся к правам по умолчанию.",
+    "deleteRoleTitle": "Удалить роль?",
+    "noRoles": "Роли ещё не созданы",
+    "permissions": "Права",
+    "roleCreated": "Роль создана",
+    "roleDeleted": "Роль удалена",
+    "roleUpdated": "Роль обновлена"
   },
   "audit": {
     "title": "Журнал аудита",
@@ -1804,6 +1983,10 @@
       },
       "resolve": {
         "violation": "Нарушение обработано"
+      },
+      "automation": {
+        "toggle_on": "Включил правило автоматизации",
+        "toggle_off": "Отключил правило автоматизации"
       }
     },
     "feed": {
@@ -2003,7 +2186,8 @@
         "users": "Пользователи",
         "violations": "Нарушения",
         "traffic": "Трафик"
-      }
+      },
+      "compare": "Сравнить с предыдущим периодом"
     },
     "onlineTrend": {
       "title": "Тренд онлайна",
@@ -2088,7 +2272,11 @@
         "maxDisk": "Макс. диск",
         "samples": "Замеров",
         "noData": "Нет исторических данных"
-      }
+      },
+      "cpu": "CPU",
+      "ram": "RAM",
+      "uptime": "Аптайм",
+      "as": "AS"
     },
     "retention": {
       "title": "Анализ ретенции",
@@ -2135,6 +2323,39 @@
       "estimatedLtvSub": "Затраты на пользователя за всё время",
       "sampleSize": "Выборка",
       "sampleSizeSub": "Пользователей с активностью за 6 мес"
+    },
+    "ipPreview": {
+      "ip": "IP",
+      "user": "Пользователь",
+      "node": "Нода",
+      "country": "Страна",
+      "provider": "Провайдер"
+    },
+    "geoBalance": {
+      "title": "Географическая балансировка",
+      "tooltip": "Распределение онлайн-пользователей по регионам и нодам",
+      "totalNodes": "Всего нод",
+      "medianOnline": "Медиана онлайн",
+      "online": "Онлайн",
+      "overloaded": "Перегружено",
+      "recommendations": "Рекомендации",
+      "regions": "Регионы",
+      "node": "Нода",
+      "topCountries": "Топ стран",
+      "topRegions": "Топ регионов"
+    },
+    "torrent": {
+      "title": "Торрент-трафик",
+      "noData": "Торрент-трафик за этот период не наблюдался",
+      "totalEvents": "Всего событий",
+      "last24h": "За 24ч",
+      "uniqueUsers": "Уникальных пользователей",
+      "users": "Пользователи",
+      "events": "События",
+      "affectedNodes": "Затронуто нод",
+      "topNodes": "Топ нод",
+      "topUsers": "Топ пользователей",
+      "topDestinations": "Топ направлений"
     }
   },
   "automations": {
@@ -2244,7 +2465,9 @@
       "updated": "Правило обновлено",
       "deleted": "Правило удалено",
       "enabled": "Правило включено",
-      "disabled": "Правило отключено"
+      "disabled": "Правило выключено",
+      "toggledEnabled": "«{{name}}» включено",
+      "toggledDisabled": "«{{name}}» выключено"
     },
     "pagination": "Стр. {{page}} из {{pages}} ({{total}} записей)",
     "createFirstRule": "Создать первое правило",
@@ -2501,7 +2724,15 @@
           "long": "Воскресенье",
           "short": "Вс"
         }
-      }
+      },
+      "everyHour": "Каждый час",
+      "everyHourDesc": "Срабатывает в начале каждого часа",
+      "everyDay": "Каждый день",
+      "everyDayDesc": "Срабатывает раз в день в полночь",
+      "everyWeek": "Каждую неделю",
+      "everyWeekDesc": "Срабатывает раз в неделю в понедельник",
+      "everyMonth": "Каждый месяц",
+      "everyMonthDesc": "Срабатывает раз в месяц 1-го числа"
     },
     "intervalPicker": {
       "runWithInterval": "Запускать с интервалом",
@@ -2654,7 +2885,14 @@
       "validationConditions": "Заполните все поля в условиях или удалите незаполненные",
       "validationMessage": "Введите текст сообщения",
       "validationWebhook": "Укажите URL для Webhook",
-      "validationName": "Введите название правила"
+      "validationName": "Введите название правила",
+      "topicAuto": "Авто",
+      "topicErrors": "Ошибки",
+      "topicNodes": "Ноды",
+      "topicService": "Сервис",
+      "topicType": "Тип",
+      "topicUsers": "Пользователи",
+      "topicViolations": "Нарушения"
     },
     "testResult": {
       "title": "Результат тестирования",
@@ -2666,7 +2904,9 @@
       "matchingTargets": "Подходящих целей",
       "expectedActions": "Ожидаемых действий",
       "matchingTargetsMax": "Подходящие цели (макс. 50)"
-    }
+    },
+    "deleteRuleDescription": "Это правило будет немедленно остановлено. Уже поставленные в очередь действия будут отменены.",
+    "deleteRuleTitle": "Удалить правило автоматизации?"
   },
   "settings": {
     "title": "Настройки",
@@ -2708,7 +2948,8 @@
       "intervals": "⏱️ Интервалы",
       "rate_limits": "🚦 Лимиты запросов",
       "cache": "💾 Кэш",
-      "violation_pipeline": "🔍 Конвейер проверки нарушений"
+      "violation_pipeline": "🔍 Конвейер проверки нарушений",
+      "admin_restrictions": "🔐 Ограничения администраторов"
     },
     "faq": {
       "description": "Частые вопросы и решения типичных проблем",
@@ -2829,7 +3070,8 @@
     },
     "ipWhitelist": {
       "description": "Если список пуст — доступ разрешён с любого IP. При добавлении IP доступ будет ограничен только указанными адресами. Поддерживаются CIDR (например, 10.0.0.0/8).",
-      "disableWhitelist": "Отключить белый список (разрешить все IP)"
+      "disableWhitelist": "Отключить белый список (разрешить все IP)",
+      "title": "IP Whitelist"
     },
     "source": {
       "db": "БД",
@@ -3268,13 +3510,17 @@
       "notifications": "Уведомления",
       "alertRules": "Правила алертов",
       "alertLogs": "Журнал алертов",
-      "channels": "Каналы"
+      "channels": "Каналы",
+      "templates": "Шаблоны"
     },
     "filters": {
       "readStatus": "Статус",
       "unread": "Непрочитанные",
       "read": "Прочитанные",
-      "severity": "Важность"
+      "severity": "Важность",
+      "severityInfo": "Инфо",
+      "severityWarning": "Предупреждение",
+      "severityCritical": "Критический"
     },
     "alerts": {
       "rules": "правил",
@@ -3347,7 +3593,18 @@
       "varNodesOffline": "Количество нод офлайн",
       "varTimestamp": "Текущая метка времени UTC",
       "clickToCopy": "нажмите для копирования",
-      "copiedVar": "Скопировано: {{var}}"
+      "copiedVar": "Скопировано: {{var}}",
+      "topicHwid": "HWID",
+      "durationMinutes": "Длительность (мин.)",
+      "durationMinutesHint": "Сколько алерт остаётся активным до автосброса",
+      "instant": "Мгновенно",
+      "topicAuto": "Авто",
+      "topicErrors": "Ошибки",
+      "topicNodes": "Ноды",
+      "topicService": "Сервис",
+      "topicType": "Тип",
+      "topicUsers": "Пользователи",
+      "topicViolations": "Нарушения"
     },
     "alertLogs": {
       "status": "Статус",
@@ -3368,7 +3625,15 @@
       "deleted": "Канал удалён",
       "optional": "необязательно",
       "webhookHint": "Поддерживает Discord, Slack и generic JSON вебхуки",
-      "emailHint": "Требуется настройка SMTP администратором"
+      "emailHint": "Требуется настройка SMTP администратором",
+      "telegram": "Telegram",
+      "webhook": "Webhook",
+      "email": "Email",
+      "chatId": "Chat ID",
+      "webhookUrl": "Webhook URL",
+      "emailLabel": "Email",
+      "tlsStarttls": "TLS (STARTTLS)",
+      "ssl": "SSL"
     },
     "smtp": {
       "title": "Настройка SMTP",
@@ -3384,6 +3649,15 @@
       "testEmailPlaceholder": "test@example.com",
       "testSuccess": "Тестовое письмо отправлено успешно",
       "testFailed": "Ошибка отправки тестового письма"
+    },
+    "acknowledge": "Подтвердить",
+    "toggleRule": "Переключить правило",
+    "templates": {
+      "activate": "Активировать",
+      "activated": "Шаблон активирован",
+      "activateError": "Не удалось активировать шаблон",
+      "active": "Активен",
+      "description": "Описание"
     }
   },
   "mailServer": {
@@ -3485,7 +3759,8 @@
       "port": "Порт",
       "auth": "Авторизация",
       "never": "никогда"
-    }
+    },
+    "ip": "IP:"
   },
   "language": {
     "title": "Язык",
@@ -3567,7 +3842,9 @@
       "viewTitle": "Вычисленная конфигурация",
       "viewDescription": "Полная раскрытая конфигурация для этого профиля",
       "openInEditor": "Открыть в редакторе"
-    }
+    },
+    "position": "Позиция:",
+    "uuid": "UUID:"
   },
   "billing": {
     "title": "Биллинг",
@@ -3587,7 +3864,9 @@
       "perNode": "По нодам",
       "nodeName": "Нода",
       "provider": "Провайдер",
-      "usersOnline": "Онлайн"
+      "usersOnline": "Онлайн",
+      "cpu": "CPU",
+      "ram": "RAM"
     },
     "providers": {
       "description": "Провайдеры инфраструктуры для хостинга нод",
@@ -3721,7 +4000,8 @@
       "orgName": "Организация",
       "type": "Тип",
       "region": "Регион",
-      "showingOf": "Показано {{shown}} из {{total}} записей"
+      "showingOf": "Показано {{shown}} из {{total}} записей",
+      "header": "ASN"
     }
   },
   "errors": {
@@ -3804,9 +4084,39 @@
     "IMPORT_FAILED": "Ошибка импорта",
     "INVALID_FILENAME": "Недопустимое имя файла",
     "NO_FIELDS_TO_UPDATE": "Нет полей для обновления",
+    "TRAFFIC_LIMIT_REQUIRED": "Требуется лимит трафика. Безлимитный трафик отключён для вашей роли.",
+    "TRAFFIC_LIMIT_EXCEEDED": "Лимит трафика превышает вашу квоту. Доступно: {{remaining}} ГБ",
+    "USERS_QUOTA_EXCEEDED": "Вы достигли максимального количества пользователей, разрешённого для вашей учётной записи.",
+    "TRAFFIC_QUOTA_EXCEEDED": "Лимит трафика превышает вашу квоту.",
+    "NODES_QUOTA_EXCEEDED": "Вы достигли максимального количества нод, разрешённого для вашей учётной записи.",
+    "HOSTS_QUOTA_EXCEEDED": "Вы достигли максимального количества хостов, разрешённого для вашей учётной записи.",
+    "USERNAME_REQUIRED": "Требуется имя пользователя.",
+    "USERNAME_TOO_LONG": "Имя пользователя слишком длинное (макс. 100 символов).",
+    "USERNAME_INVALID_FORMAT": "Имя пользователя содержит недопустимые символы. Используйте 1-100 букв, цифр, подчёркиваний, дефисов или точек.",
+    "USERNAME_ALREADY_EXISTS": "Пользователь с таким именем уже существует.",
+    "TRAFFIC_LIMIT_NEGATIVE": "Лимит трафика не может быть отрицательным.",
+    "TRAFFIC_LIMIT_TOO_SMALL": "Лимит трафика слишком мал. Минимум — 1 МБ.",
+    "INVALID_EMAIL_FORMAT": "Email-адрес недействителен.",
+    "INVALID_TELEGRAM_ID": "Telegram ID недействителен (должен быть от 1 до 9999999999).",
+    "INVALID_HWID_DEVICE_LIMIT": "Лимит устройств HWID должен быть 0 (безлимит) или положительным целым числом.",
+    "INVALID_EXPIRE_DATE": "Дата истечения должна быть в будущем.",
+    "TAG_TOO_LONG": "Тег слишком длинный (макс. 32 символа).",
+    "DESCRIPTION_TOO_LONG": "Описание слишком длинное (макс. 256 символов).",
+    "PANEL_REJECTED_USERNAME": "Панель отклонила имя пользователя.",
+    "PANEL_REJECTED_TRAFFIC_STRATEGY": "Панель отклонила стратегию лимита трафика.",
+    "PANEL_REJECTED_STATUS": "Панель отклонила значение статуса.",
+    "PANEL_REJECTED_SQUAD": "Панель отклонила ссылку на squad.",
+    "PANEL_REJECTED_TAG": "Панель отклонила значение тега.",
+    "PANEL_REJECTED_GENERIC": "Панель отклонила запрос.",
+    "PANEL_USER_ALREADY_EXISTS": "Пользователь с таким именем уже существует в панели.",
+    "TRAFFIC_LIMIT_BELOW_USAGE": "Нельзя установить лимит трафика ниже текущего использования.",
     "API_SERVICE_UNAVAILABLE": "Сервис API недоступен",
     "DB_UNAVAILABLE": "База данных недоступна",
-    "INTERNAL_ERROR": "Внутренняя ошибка сервера"
+    "INTERNAL_ERROR": "Внутренняя ошибка сервера",
+    "userCreateFailed": "Не удалось создать пользователя",
+    "userUpdateFailed": "Не удалось обновить пользователя",
+    "userDeleteFailed": "Не удалось удалить пользователя",
+    "tokenParseFailed": "Не удалось разобрать токен"
   },
   "backup": {
     "title": "Резервные копии",
@@ -3865,7 +4175,23 @@
     "filterRestore": "Восстановление",
     "filterConfigImport": "Импорт конфигурации",
     "filterUserImport": "Импорт пользователей",
-    "filterUpload": "Загрузка"
+    "filterUpload": "Загрузка",
+    "postgresqlDump": "Дамп PostgreSQL",
+    "chatId": "Chat ID",
+    "toastUploadFailed": "Ошибка загрузки",
+    "toastRotationFailed": "Ошибка ротации",
+    "toastSendFailed": "Ошибка отправки",
+    "configDesc": "Полная конфигурация панели: пользователи, ноды, хосты, настройки",
+    "exportFullConfig": "Экспорт полной конфигурации",
+    "importFullConfig": "Импорт полной конфигурации",
+    "fullConfigExported": "Полная конфигурация экспортирована",
+    "fullConfigExportFailed": "Не удалось экспортировать конфигурацию",
+    "fullConfigImported": "Полная конфигурация импортирована",
+    "fullConfigImportFailed": "Не удалось импортировать конфигурацию",
+    "noFilesDesc": "Файлы резервных копий не найдены. Создайте первую копию.",
+    "rotated": "Резервная копия ротирована",
+    "sentToTelegram": "Резервная копия отправлена в Telegram",
+    "uploaded": "Резервная копия загружена"
   },
   "apiKeys": {
     "title": "API ключи и Вебхуки",
@@ -3909,9 +4235,11 @@
     "editKey": "Редактировать ключ",
     "editWebhook": "Редактировать вебхук",
     "updated": "Ключ обновлён",
-    "updateFailed": "Не удалось обновить",
+    "updateFailed": "Не удалось обновить ключ",
     "webhookUpdated": "Вебхук обновлён",
-    "deleteFailed": "Не удалось удалить",
+    "webhookUpdateFailed": "Не удалось обновить вебхук",
+    "deleteFailed": "Не удалось удалить ключ",
+    "webhookDeleteFailed": "Не удалось удалить вебхук",
     "expired": "Истёк",
     "expiresAt": "Истекает",
     "ttl": "Срок действия",
@@ -3928,7 +4256,21 @@
     "testFailed": "Тест не удался",
     "deliveryHistory": "История вызовов",
     "noDeliveries": "Пока вызовов не было",
-    "showResponse": "Показать ответ"
+    "showResponse": "Показать ответ",
+    "url": "URL",
+    "versionV2": "v2 — с меткой времени (рекомендуется)",
+    "versionV1": "v1 — устаревший",
+    "httpLabel": "HTTP:",
+    "description": "Описание",
+    "descriptionPlaceholder": "Для чего используется этот ключ?",
+    "rotate": "Ротировать",
+    "confirmRotate": "Ротировать этот ключ?",
+    "confirmRotateDesc": "Текущий ключ будет немедленно отозван. Все клиенты, использующие его, потребуют обновления.",
+    "rotateFailed": "Не удалось ротировать ключ",
+    "autoDisabled": "Авто-отключён после серии неудачных попыток",
+    "signatureVersion": "Версия подписи",
+    "signatureHint": "HMAC-SHA256 от тела запроса, передаётся в заголовке X-Signature",
+    "webhookDescPlaceholder": "Что делает этот вебхук?"
   },
   "forcePassword": {
     "title": "Смена пароля обязательна",
@@ -4222,7 +4564,8 @@
       "targetNoSub": "Без подписки",
       "targetExpired": "Истёкшие",
       "targetExpiring": "Истекающие"
-    }
+    },
+    "tg": "TG"
   },
   "notFound": {
     "title": "Страница не найдена",
@@ -4246,7 +4589,8 @@
     "success": "Пароль изменён",
     "successDescription": "Ваш пароль успешно сброшен. Теперь вы можете войти с новым паролем.",
     "goToLogin": "Перейти к входу",
-    "error": "Произошла ошибка. Попробуйте позже."
+    "error": "Произошла ошибка. Попробуйте позже.",
+    "email": "Email"
   },
   "accessPolicies": {
     "listTitle": "Шаблоны прав",
@@ -4294,6 +4638,10 @@
       "view": "Просмотр",
       "edit": "Правка",
       "delete": "Удаление"
+    },
+    "deleteConfirm": {
+      "description": "Эта политика доступа будет удалена. Все админы и роли, использующие её, потеряют свои ограничения.",
+      "title": "Удалить политику доступа?"
     }
   },
   "adminPlugins": {
@@ -4372,7 +4720,8 @@
         "hint": "Можно вставить любую строку из тикета — резолвер сам определит тип.",
         "matched_by": "Совпадение по: {{kind}}",
         "count": "найдено: {{n}}",
-        "empty": "Ничего не нашлось. Попробуйте сократить или поправить запрос."
+        "empty": "Ничего не нашлось. Попробуйте сократить или поправить запрос.",
+        "empty_hint": "Попробуйте другой поисковый запрос"
       },
       "report": {
         "back_to_search": "Назад к поиску",
@@ -4614,5 +4963,89 @@
         }
       }
     }
+  },
+  "systemLogs": {
+    "live": "В прямом эфире",
+    "paused": "Пауза",
+    "logLevels": {
+      "debug": "DEBUG",
+      "info": "INFO",
+      "warning": "WARNING",
+      "error": "ОШИБКА"
+    }
+  },
+  "xray": {
+    "profileLoaded": "Профиль загружен",
+    "profileLoadFailed": "Не удалось загрузить профиль",
+    "profileSaved": "Профиль сохранён в панели",
+    "profileSaveFailed": "Не удалось отправить конфиг в панель",
+    "profileNotSelected": "Профиль не выбран",
+    "pushBlocked": "Push заблокирован!",
+    "pushBlockedDesc": "Балансировщик \"{{tag}}\" не имеет целевых исходящих. Нода упадёт, если отправить этот конфиг.",
+    "fixValidationBeforeSaving": "Пожалуйста, исправьте ошибки валидации перед сохранением",
+    "disconnectedFromPanel": "Соединение с панелью закрыто",
+    "urlAndTokenRequired": "Нужны URL и токен",
+    "connectedToRemnawave": "Подключено к Remnawave",
+    "sessionExpired": "Сессия истекла",
+    "fillUrlAndToken": "Пожалуйста, заполните URL и API Token",
+    "connectionFailed": "Ошибка подключения",
+    "invalidTokenOrUrl": "Неверный токен или URL панели",
+    "importedNodesFromJson": "Импортировано {{count}} нод из JSON-файла",
+    "jsonNoValidOutbounds": "JSON-массив обнаружен, но валидных outbound'ов не найдено",
+    "configLoadedFromFile": "Конфигурация загружена из файла",
+    "invalidJsonFile": "Неверный JSON-файл",
+    "failedDownloadDatabase": "Не удалось скачать базу данных для извлечения",
+    "networkError": "Ошибка сети.",
+    "failedLoadDetails": "Не удалось загрузить детали",
+    "errorLoadingData": "Ошибка загрузки данных.\n{{error}}",
+    "noRecordsFound": "Записи не найдены.",
+    "copiedToClipboard": "Скопировано в буфер обмена!",
+    "copyFailed": "Не удалось скопировать",
+    "deepSearchError": "Ошибка глубокого поиска",
+    "failedParseDat": "Не удалось распарсить DAT",
+    "loadedCategoriesFromFile": "Загружено {{count}} категорий из локального файла",
+    "fileReadError": "Ошибка чтения файла",
+    "localFileAlreadyLoaded": "Локальный файл уже загружен",
+    "invalidUrl": "Пожалуйста, введите корректный URL",
+    "failedFetchList": "Не удалось получить список",
+    "enterSubscriptionUrl": "Пожалуйста, введите URL подписки",
+    "hwidDeviceLimitReached": "Панель отклонила это устройство (HWID)",
+    "hwidDeviceLimitDesc": "Достигнут лимит устройств. Проверьте 'Активные устройства' в панели.",
+    "subscriptionFetched": "Подписка успешно загружена",
+    "importedNodesFromJsonSub": "Импортировано {{count}} нод из JSON-подписки",
+    "jsonSubFetchedRaw": "JSON-подписка загружена (как есть)",
+    "jsonNoValidOutboundsInSub": "JSON обнаружен, но внутри не найдено валидных outbound'ов",
+    "noValidLinksInResponse": "В ответе не найдено валидных ссылок",
+    "fetchFailed": "Ошибка загрузки",
+    "regenerateHwidConfirm": "Перегенерировать HWID? Панель увидит это как НОВОЕ устройство.",
+    "newHwidGenerated": "Новый HWID сгенерирован и сохранён",
+    "importedNodes": "Импортировано {{count}} нод",
+    "noValidLinksToImport": "Не найдено валидных ссылок или JSON-конфигов для импорта",
+    "linkImported": "Ссылка успешно импортирована",
+    "jsonConfigImported": "JSON-конфигурация импортирована",
+    "importedOutboundsFromJson": "Импортировано {{count}} outbound'ов из JSON",
+    "onlyObfuscatorImported": "Импортирован только обфускатор (Freedom)",
+    "wgChainedImported": "WG + Обфускатор (Legacy Chain) импортировано",
+    "wgDirectImported": "Direct WireGuard (Modern) импортировано",
+    "unrecognizedImportFormat": "Неизвестный формат импорта",
+    "warpProfileGenerated": "Профиль outbound успешно сгенерирован",
+    "warpGenerationFailed": "Ошибка генерации",
+    "warpGenerationFailedDesc": "Ошибка сети или таймаут прокси.",
+    "warpAccountGenerated": "WARP аккаунт успешно сгенерирован",
+    "warpAccountFailed": "Не удалось сгенерировать WARP аккаунт",
+    "warpAccountFailedDesc": "Ошибка CORS или прокси недоступен. Проверьте настройки.",
+    "copiedTag": "Скопировано: {{tag}}",
+    "analyzedConfigurations": "Проанализировано {{count}} конфигураций",
+    "parseFailed": "Ошибка парсинга",
+    "nodeAdded": "Нода добавлена в outbounds",
+    "inboundAdded": "Inbound добавлен",
+    "addToConfig": "Добавить в конфиг",
+    "nothingToCopy": "Нечего копировать",
+    "copiedItems": "Скопировано {{count}} элементов",
+    "copyDataFailed": "Не удалось скопировать данные",
+    "importedChained": "Импортировано {{count}} outbound'ов (chained)",
+    "configImported": "Конфигурация успешно импортирована",
+    "errorGeneratingLink": "Ошибка генерации ссылки",
+    "protocolNotSupported": "Протокол может не поддерживаться."
   }
 }

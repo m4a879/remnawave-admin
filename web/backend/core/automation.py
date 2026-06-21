@@ -8,6 +8,9 @@ import logging
 import math
 from typing import Optional, List, Tuple
 
+from shared.db_schema import AUTOMATION_RULES_TABLE, AUTOMATION_LOG_TABLE
+from shared.db_query import select_sql, insert_sql, update_sql, delete_sql, left_join_sql
+
 logger = logging.getLogger(__name__)
 
 
@@ -165,14 +168,14 @@ async def list_automation_rules(
             where_clause = (" WHERE " + " AND ".join(where_parts)) if where_parts else ""
 
             total = await conn.fetchval(
-                f"SELECT COUNT(*) FROM automation_rules{where_clause}",
+                select_sql(AUTOMATION_RULES_TABLE, "COUNT(*)", where_clause),
                 *params,
             )
 
             offset = (page - 1) * per_page
             rows = await conn.fetch(
-                f"SELECT * FROM automation_rules{where_clause} "
-                f"ORDER BY created_at DESC LIMIT ${idx} OFFSET ${idx + 1}",
+                select_sql(AUTOMATION_RULES_TABLE, "*",
+                    f"{where_clause} ORDER BY created_at DESC LIMIT ${idx} OFFSET ${idx + 1}"),
                 *params, per_page, offset,
             )
 
@@ -188,12 +191,9 @@ async def get_automation_rules_stats() -> dict:
         from shared.database import db_service
         async with db_service.acquire() as conn:
             row = await conn.fetchrow(
-                """
-                SELECT
-                    COALESCE(SUM(CASE WHEN is_enabled THEN 1 ELSE 0 END), 0) AS total_active,
-                    COALESCE(SUM(trigger_count), 0) AS total_triggers
-                FROM automation_rules
-                """
+                select_sql(AUTOMATION_RULES_TABLE,
+                    "COALESCE(SUM(CASE WHEN is_enabled THEN 1 ELSE 0 END), 0) AS total_active, "
+                    "COALESCE(SUM(trigger_count), 0) AS total_triggers")
             )
             return dict(row) if row else {"total_active": 0, "total_triggers": 0}
     except Exception as e:
@@ -207,7 +207,7 @@ async def get_automation_rule_by_id(rule_id: int) -> Optional[dict]:
         from shared.database import db_service
         async with db_service.acquire() as conn:
             row = await conn.fetchrow(
-                "SELECT * FROM automation_rules WHERE id = $1", rule_id
+                select_sql(AUTOMATION_RULES_TABLE, "*", "WHERE id = $1"), rule_id
             )
             return dict(row) if row else None
     except Exception as e:
@@ -232,13 +232,10 @@ async def create_automation_rule(
         from shared.database import db_service
         async with db_service.acquire() as conn:
             row = await conn.fetchrow(
-                """
-                INSERT INTO automation_rules
-                    (name, description, is_enabled, category, trigger_type,
-                     trigger_config, conditions, action_type, action_config, created_by)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-                RETURNING *
-                """,
+                insert_sql(AUTOMATION_RULES_TABLE,
+                    ["name", "description", "is_enabled", "category", "trigger_type",
+                     "trigger_config", "conditions", "action_type", "action_config", "created_by"],
+                    returning="*"),
                 name, description, is_enabled, category, trigger_type,
                 json.dumps(trigger_config), json.dumps(conditions),
                 action_type, json.dumps(action_config), created_by,
@@ -277,8 +274,7 @@ async def update_automation_rule(rule_id: int, **fields) -> Optional[dict]:
 
         async with db_service.acquire() as conn:
             row = await conn.fetchrow(
-                f"UPDATE automation_rules SET {', '.join(set_parts)} "
-                f"WHERE id = ${idx} RETURNING *",
+                update_sql(AUTOMATION_RULES_TABLE, ', '.join(set_parts), f"id = ${idx}", returning="*"),
                 *params,
             )
             return dict(row) if row else None
@@ -293,12 +289,9 @@ async def toggle_automation_rule(rule_id: int) -> Optional[dict]:
         from shared.database import db_service
         async with db_service.acquire() as conn:
             row = await conn.fetchrow(
-                """
-                UPDATE automation_rules
-                SET is_enabled = NOT is_enabled, updated_at = NOW()
-                WHERE id = $1
-                RETURNING *
-                """,
+                update_sql(AUTOMATION_RULES_TABLE,
+                    "is_enabled = NOT is_enabled, updated_at = NOW()",
+                    "id = $1", returning="*"),
                 rule_id,
             )
             return dict(row) if row else None
@@ -313,7 +306,7 @@ async def delete_automation_rule(rule_id: int) -> bool:
         from shared.database import db_service
         async with db_service.acquire() as conn:
             result = await conn.execute(
-                "DELETE FROM automation_rules WHERE id = $1", rule_id
+                delete_sql(AUTOMATION_RULES_TABLE, "id = $1"), rule_id
             )
             return result == "DELETE 1"
     except Exception as e:
@@ -327,12 +320,9 @@ async def increment_trigger_count(rule_id: int) -> None:
         from shared.database import db_service
         async with db_service.acquire() as conn:
             await conn.execute(
-                """
-                UPDATE automation_rules
-                SET trigger_count = trigger_count + 1,
-                    last_triggered_at = NOW()
-                WHERE id = $1
-                """,
+                update_sql(AUTOMATION_RULES_TABLE,
+                    "trigger_count = trigger_count + 1, last_triggered_at = NOW()",
+                    "id = $1"),
                 rule_id,
             )
     except Exception as e:
@@ -349,16 +339,11 @@ async def try_acquire_trigger(rule_id: int, min_interval_seconds: int = 60) -> b
         from shared.database import db_service
         async with db_service.acquire() as conn:
             row = await conn.fetchrow(
-                """
-                UPDATE automation_rules
-                SET trigger_count = trigger_count + 1,
-                    last_triggered_at = NOW()
-                WHERE id = $1
-                  AND is_enabled = true
-                  AND (last_triggered_at IS NULL
-                       OR last_triggered_at < NOW() - INTERVAL '1 second' * $2)
-                RETURNING id
-                """,
+                update_sql(AUTOMATION_RULES_TABLE,
+                    "trigger_count = trigger_count + 1, last_triggered_at = NOW()",
+                    "id = $1 AND is_enabled = true AND (last_triggered_at IS NULL"
+                    " OR last_triggered_at < NOW() - INTERVAL '1 second' * $2)",
+                    returning="id"),
                 rule_id, min_interval_seconds,
             )
             return row is not None
@@ -382,11 +367,8 @@ async def write_automation_log(
         from shared.database import db_service
         async with db_service.acquire() as conn:
             await conn.execute(
-                """
-                INSERT INTO automation_log
-                    (rule_id, target_type, target_id, action_taken, result, details)
-                VALUES ($1, $2, $3, $4, $5, $6)
-                """,
+                insert_sql(AUTOMATION_LOG_TABLE,
+                    ["rule_id", "target_type", "target_id", "action_taken", "result", "details"]),
                 rule_id, target_type, target_id, action_taken, result,
                 json.dumps(details) if details else None,
             )
@@ -448,34 +430,24 @@ async def get_automation_logs(
             count_where = (" WHERE " + " AND ".join(count_where_parts)) if count_where_parts else ""
 
             total = await conn.fetchval(
-                f"SELECT COUNT(*) FROM automation_log l{count_where}",
+                select_sql(AUTOMATION_LOG_TABLE, "COUNT(*)", f"l{count_where}"),
                 *count_params,
             )
 
             if cursor is not None:
                 params.append(per_page)
+                join = f"l {left_join_sql(AUTOMATION_RULES_TABLE, 'r', 'r.id = l.rule_id')}"
                 rows = await conn.fetch(
-                    f"""
-                    SELECT l.*, r.name AS rule_name
-                    FROM automation_log l
-                    LEFT JOIN automation_rules r ON r.id = l.rule_id
-                    {where_clause}
-                    ORDER BY l.id DESC
-                    LIMIT ${idx}
-                    """,
+                    select_sql(AUTOMATION_LOG_TABLE, "l.*, r.name AS rule_name",
+                        f"{join} {where_clause} ORDER BY l.id DESC LIMIT ${idx}"),
                     *params,
                 )
             else:
                 offset = (page - 1) * per_page
+                join = f"l {left_join_sql(AUTOMATION_RULES_TABLE, 'r', 'r.id = l.rule_id')}"
                 rows = await conn.fetch(
-                    f"""
-                    SELECT l.*, r.name AS rule_name
-                    FROM automation_log l
-                    LEFT JOIN automation_rules r ON r.id = l.rule_id
-                    {where_clause}
-                    ORDER BY l.triggered_at DESC
-                    LIMIT ${idx} OFFSET ${idx + 1}
-                    """,
+                    select_sql(AUTOMATION_LOG_TABLE, "l.*, r.name AS rule_name",
+                        f"{join} {where_clause} ORDER BY l.triggered_at DESC LIMIT ${idx} OFFSET ${idx + 1}"),
                     *params, per_page, offset,
                 )
 
@@ -491,11 +463,8 @@ async def get_enabled_rules_by_trigger_type(trigger_type: str) -> List[dict]:
         from shared.database import db_service
         async with db_service.acquire() as conn:
             rows = await conn.fetch(
-                """
-                SELECT * FROM automation_rules
-                WHERE is_enabled = true AND trigger_type = $1
-                ORDER BY id
-                """,
+                select_sql(AUTOMATION_RULES_TABLE, "*",
+                    "WHERE is_enabled = true AND trigger_type = $1 ORDER BY id"),
                 trigger_type,
             )
             return [dict(r) for r in rows]
@@ -510,13 +479,9 @@ async def get_enabled_event_rules(event_type: str) -> List[dict]:
         from shared.database import db_service
         async with db_service.acquire() as conn:
             rows = await conn.fetch(
-                """
-                SELECT * FROM automation_rules
-                WHERE is_enabled = true
-                  AND trigger_type = 'event'
-                  AND trigger_config->>'event' = $1
-                ORDER BY id
-                """,
+                select_sql(AUTOMATION_RULES_TABLE, "*",
+                    "WHERE is_enabled = true AND trigger_type = 'event'"
+                    " AND trigger_config->>'event' = $1 ORDER BY id"),
                 event_type,
             )
             return [dict(r) for r in rows]

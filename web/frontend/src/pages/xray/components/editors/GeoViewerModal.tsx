@@ -4,6 +4,7 @@ import { Modal } from '../ui/Modal';
 import { Button } from '../ui/Button';
 import { Icon } from '../ui/Icon';
 import { toast } from 'sonner';
+import i18next from 'i18next';
 import { JsonEditor } from '../ui/JsonEditor';
 import { Select } from '../ui/Select';
 import { useGeoViewer } from '../../hooks/useGeoViewer';
@@ -79,10 +80,10 @@ export const GeoViewerModal = ({ onClose }: { onClose: () => void }) => {
     } = useGeoViewer();
 
     const handleCopyAll = async () => {
-        if (displayData.length === 0) return toast.warning("Nothing to copy");
+        if (displayData.length === 0) return toast.warning(i18next.t('xray.nothingToCopy'));
         const prefix = activeTab === 'geosite' ? 'geosite:' : activeTab === 'geoip' ? 'geoip:' : '';
         const textToCopy = displayData.map(d => `${prefix}${d.code}`).join('\n');
-        
+
         try {
             if (navigator.clipboard && window.isSecureContext) await navigator.clipboard.writeText(textToCopy);
             else {
@@ -90,8 +91,8 @@ export const GeoViewerModal = ({ onClose }: { onClose: () => void }) => {
                 ta.value = textToCopy; ta.style.position = "fixed"; ta.style.left = "-999999px";
                 document.body.appendChild(ta); ta.focus(); ta.select(); document.execCommand('copy'); ta.remove();
             }
-            toast.success(`Copied ${displayData.length} items`);
-        } catch { toast.error("Failed to copy data"); }
+            toast.success(i18next.t('xray.copiedItems', { count: displayData.length }));
+        } catch { toast.error(i18next.t('xray.copyDataFailed')); }
     };
 
     const renderItem = (item: any) => {

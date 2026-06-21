@@ -36,6 +36,8 @@ vi.mock('@/api/auth', () => ({
       username: 'admin',
       role: 'superadmin',
       role_id: 1,
+      account_id: 1,
+      unlimited_traffic_policy: 'allowed',
       auth_method: 'password',
       password_is_generated: false,
       permissions: [],

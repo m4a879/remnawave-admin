@@ -2,6 +2,9 @@
 import logging
 from typing import Any, Dict, List, Optional
 
+from shared.db_schema import DOMAIN_CONFIG_TABLE
+from shared.db_query import select_sql, insert_sql, update_sql
+
 from web.backend.core.mail.outbound_queue import OutboundMailQueue, outbound_queue
 from web.backend.core.mail.inbound_server import InboundMailServer
 from web.backend.core.mail.submission_server import SubmissionServer
@@ -121,13 +124,14 @@ class MailService:
 
         async with db_service.acquire() as conn:
             row = await conn.fetchrow(
-                "INSERT INTO domain_config (domain, dkim_private_key, dkim_public_key, dkim_selector) "
-                "VALUES ($1, $2, $3, 'rw') "
-                "ON CONFLICT (domain) DO UPDATE SET "
-                "  dkim_private_key = EXCLUDED.dkim_private_key, "
-                "  dkim_public_key = EXCLUDED.dkim_public_key, "
-                "  updated_at = NOW() "
-                "RETURNING *",
+                insert_sql(DOMAIN_CONFIG_TABLE,
+                    ["domain", "dkim_private_key", "dkim_public_key", "dkim_selector"],
+                    values="$1, $2, $3, 'rw'",
+                    suffix="ON CONFLICT (domain) DO UPDATE SET "
+                           "dkim_private_key = EXCLUDED.dkim_private_key, "
+                           "dkim_public_key = EXCLUDED.dkim_public_key, "
+                           "updated_at = NOW()",
+                    returning="*"),
                 domain, private_pem, public_pem,
             )
 
@@ -143,7 +147,9 @@ class MailService:
         from shared.database import db_service
 
         async with db_service.acquire() as conn:
-            row = await conn.fetchrow("SELECT * FROM domain_config WHERE id = $1", domain_id)
+            row = await conn.fetchrow(
+                select_sql(DOMAIN_CONFIG_TABLE, "*", "WHERE id = $1"), domain_id
+            )
             if not row:
                 return {"error": "Domain not found"}
 
@@ -158,10 +164,10 @@ class MailService:
             ptr_ok, _ = check_ptr_record(server_ip, domain)
 
             await conn.execute(
-                "UPDATE domain_config SET "
-                "dns_mx_ok = $1, dns_spf_ok = $2, dns_dkim_ok = $3, dns_dmarc_ok = $4, "
-                "dns_ptr_ok = $5, dns_checked_at = NOW(), updated_at = NOW() "
-                "WHERE id = $6",
+                update_sql(DOMAIN_CONFIG_TABLE,
+                    "dns_mx_ok = $1, dns_spf_ok = $2, dns_dkim_ok = $3, dns_dmarc_ok = $4, "
+                    "dns_ptr_ok = $5, dns_checked_at = NOW(), updated_at = NOW()",
+                    "id = $6"),
                 mx_ok, spf_ok, dkim_ok, dmarc_ok, ptr_ok, domain_id,
             )
 
@@ -180,9 +186,8 @@ class MailService:
             from shared.database import db_service
             async with db_service.acquire() as conn:
                 row = await conn.fetchrow(
-                    "SELECT * FROM domain_config "
-                    "WHERE is_active = true AND outbound_enabled = true "
-                    "ORDER BY id LIMIT 1"
+                    select_sql(DOMAIN_CONFIG_TABLE, "*",
+                        "WHERE is_active = true AND outbound_enabled = true ORDER BY id LIMIT 1")
                 )
                 return dict(row) if row else None
         except Exception:
@@ -199,7 +204,9 @@ class MailService:
         from shared.database import db_service
 
         async with db_service.acquire() as conn:
-            row = await conn.fetchrow("SELECT * FROM domain_config WHERE id = $1", domain_id)
+            row = await conn.fetchrow(
+                select_sql(DOMAIN_CONFIG_TABLE, "*", "WHERE id = $1"), domain_id
+            )
             if not row:
                 return []
 

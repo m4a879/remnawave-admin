@@ -1376,6 +1376,7 @@ export default function Nodes() {
     mutationFn: (uuid: string) => client.delete(`/nodes/${uuid}`),
     onSuccess: (_data, uuid) => {
       queryClient.invalidateQueries({ queryKey: ['nodes'] })
+      queryClient.invalidateQueries({ queryKey: ['admins'] })
       toast.success(t('nodes.toast.deleted'), { description: getNodeName(uuid) })
     },
     onError: (err: Error & { response?: { data?: { detail?: string } } }) => {
@@ -1402,6 +1403,7 @@ export default function Nodes() {
     mutationFn: (data: Record<string, unknown>) => client.post('/nodes', data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['nodes'] })
+      queryClient.invalidateQueries({ queryKey: ['admins'] })
       setShowCreateModal(false)
       setCreateError('')
       toast.success(t('nodes.toast.created'))

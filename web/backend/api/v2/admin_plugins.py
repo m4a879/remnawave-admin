@@ -276,7 +276,7 @@ async def apply_master_license(
     if payload_obj is None:
         raise HTTPException(
             status_code=422,
-            detail={"code": "malformed_jwt", "message": "Не удалось разобрать токен"},
+            detail={"code": "malformed_jwt", "message": "Failed to parse token"},
         )
     plugin_ids = [str(p) for p in (payload_obj.get("plugins") or []) if isinstance(p, str)]
     if not plugin_ids:

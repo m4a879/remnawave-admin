@@ -10,10 +10,13 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, Query, Request
 from pydantic import BaseModel
 
+from shared.db_schema import NODES_TABLE, NODE_COMMAND_LOG_TABLE
+from shared.db_query import select_sql
+
 from web.backend.api.deps import AdminUser, get_client_ip, require_permission
 from web.backend.core.agent_manager import agent_manager
 from web.backend.core.rate_limit import limiter, RATE_ANALYTICS
-from web.backend.core.rbac import write_audit_log
+from web.backend.core.audit import write_audit_log
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -73,13 +76,9 @@ async def get_fleet_agents(
 
         async with db_service.acquire() as conn:
             rows = await conn.fetch(
-                """
-                SELECT uuid, name, address,
-                       COALESCE(agent_v2_connected, false) as agent_v2_connected,
-                       agent_v2_last_ping
-                FROM nodes
-                ORDER BY agent_v2_connected DESC, name
-                """
+                select_sql(NODES_TABLE,
+                    "uuid, name, address, COALESCE(agent_v2_connected, false) as agent_v2_connected, agent_v2_last_ping",
+                    "ORDER BY agent_v2_connected DESC, name")
             )
 
         items = []
@@ -148,22 +147,16 @@ async def get_command_log(
 
             # Count
             total = await conn.fetchval(
-                f"SELECT COUNT(*) FROM node_command_log {where}",
+                select_sql(NODE_COMMAND_LOG_TABLE, "COUNT(*)", where),
                 *params,
             )
 
             # Fetch page
             offset = (page - 1) * per_page
             rows = await conn.fetch(
-                f"""
-                SELECT id, node_uuid, admin_username, command_type,
-                       command_data, status, output, exit_code,
-                       started_at, finished_at, duration_ms
-                FROM node_command_log
-                {where}
-                ORDER BY started_at DESC
-                LIMIT ${idx} OFFSET ${idx + 1}
-                """,
+                select_sql(NODE_COMMAND_LOG_TABLE,
+                    "id, node_uuid, admin_username, command_type, command_data, status, output, exit_code, started_at, finished_at, duration_ms",
+                    f"{where} ORDER BY started_at DESC LIMIT ${idx} OFFSET ${idx + 1}"),
                 *params, per_page, offset,
             )
 

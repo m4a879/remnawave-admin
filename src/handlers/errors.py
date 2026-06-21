@@ -2,7 +2,7 @@ from aiogram.types.error_event import ErrorEvent
 from aiogram.utils.i18n import gettext as _
 
 from src.handlers.common import _get_error_message
-from shared.api_client import (
+from shared.internal_api import (
     ApiClientError,
     NetworkError,
     NotFoundError,

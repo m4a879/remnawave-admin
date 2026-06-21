@@ -9,6 +9,7 @@ from fastapi.responses import JSONResponse
 from aiogram import Bot
 
 from src.config import get_settings
+from src.handlers.state import BOT_CREATING_USERS
 from shared.api_client import api_client, NotFoundError
 from shared.database import db_service
 from shared.sync import sync_service
@@ -286,6 +287,12 @@ async def _handle_user_event(bot: Bot, event: str, event_data: dict, diff_result
     
     if event == "user.created":
         action = "created"
+        # Если бот сам создал этого пользователя — вебхук уже не нужен,
+        # бот отправил уведомление сам.
+        username = event_data.get("username") if isinstance(event_data, dict) else None
+        if username and username in BOT_CREATING_USERS:
+            logger.debug("Skipping webhook user.created notification for %s (bot handled)", username)
+            return
     elif event == "user.modified":
         action = "updated"
     elif event == "user.deleted":
@@ -310,6 +317,12 @@ async def _handle_user_event(bot: Bot, event: str, event_data: dict, diff_result
     
     logger.debug("User notification: event=%s action=%s uuid=%s", event, action, user_uuid)
     
+    subscription_url = None
+    if action == "created":
+        # Извлекаем subscriptionUrl из event_data для QR-кода
+        info = user_data.get("response", user_data)
+        subscription_url = info.get("subscriptionUrl")
+    
     await send_user_notification(
         bot=bot,
         action=action,
@@ -317,6 +330,7 @@ async def _handle_user_event(bot: Bot, event: str, event_data: dict, diff_result
         old_user_info=old_user_info,
         changes=changes,
         event_type=event,
+        subscription_url=subscription_url,
     )
 
 

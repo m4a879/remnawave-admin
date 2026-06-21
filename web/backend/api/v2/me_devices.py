@@ -18,6 +18,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from web.backend.api.deps import AdminUser, get_current_admin
+from shared.db_schema import ADMIN_DEVICES_TABLE
+from shared.db_query import select_sql, insert_sql, update_sql, delete_sql
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -132,20 +134,23 @@ async def register_device(
     async with db_service.acquire() as conn:
         async with conn.transaction():
             row = await conn.fetchrow(
-                """
-                INSERT INTO admin_devices (admin_id, fcm_token, platform, app_version, device_label)
-                VALUES ($1, $2, $3, $4, $5)
-                ON CONFLICT (fcm_token) DO UPDATE SET
-                    admin_id = EXCLUDED.admin_id,
-                    platform = EXCLUDED.platform,
-                    app_version = EXCLUDED.app_version,
-                    device_label = COALESCE(EXCLUDED.device_label, admin_devices.device_label),
-                    last_seen_at = NOW()
-                RETURNING id, platform, app_version, device_label,
-                          notifications_enabled, subscriptions,
-                          disabled_categories, disabled_events,
-                          created_at, last_seen_at
-                """,
+                insert_sql(
+                    ADMIN_DEVICES_TABLE,
+                    ["admin_id", "fcm_token", "platform", "app_version", "device_label"],
+                    values="$1, $2, $3, $4, $5",
+                    suffix=(
+                        "ON CONFLICT (fcm_token) DO UPDATE SET "
+                        "admin_id = EXCLUDED.admin_id, "
+                        "platform = EXCLUDED.platform, "
+                        "app_version = EXCLUDED.app_version, "
+                        "device_label = COALESCE(EXCLUDED.device_label, admin_devices.device_label), "
+                        "last_seen_at = NOW()"
+                    ),
+                    returning="id, platform, app_version, device_label, "
+                              "notifications_enabled, subscriptions, "
+                              "disabled_categories, disabled_events, "
+                              "created_at, last_seen_at",
+                ),
                 admin_id,
                 payload.fcm_token,
                 payload.platform,
@@ -159,13 +164,10 @@ async def register_device(
             # неотличимы — не великая потеря.
             if payload.device_label:
                 await conn.execute(
-                    """
-                    DELETE FROM admin_devices
-                    WHERE admin_id = $1
-                      AND platform = $2
-                      AND device_label = $3
-                      AND id <> $4
-                    """,
+                    delete_sql(
+                        ADMIN_DEVICES_TABLE,
+                        "admin_id = $1 AND platform = $2 AND device_label = $3 AND id <> $4",
+                    ),
                     admin_id,
                     payload.platform,
                     payload.device_label,
@@ -184,11 +186,14 @@ async def list_devices(
         return []
     async with db_service.acquire() as conn:
         rows = await conn.fetch(
-            "SELECT id, platform, app_version, device_label, "
-            "notifications_enabled, subscriptions, "
-            "disabled_categories, disabled_events, "
-            "created_at, last_seen_at "
-            "FROM admin_devices WHERE admin_id = $1 ORDER BY last_seen_at DESC",
+            select_sql(
+                ADMIN_DEVICES_TABLE,
+                "id, platform, app_version, device_label, "
+                "notifications_enabled, subscriptions, "
+                "disabled_categories, disabled_events, "
+                "created_at, last_seen_at",
+                "WHERE admin_id = $1 ORDER BY last_seen_at DESC",
+            ),
             admin_id,
         )
     return [_row_to_device(r) for r in rows]
@@ -234,20 +239,19 @@ async def update_device(
 
     async with db_service.acquire() as conn:
         row = await conn.fetchrow(
-            """
-            UPDATE admin_devices
-            SET
-                notifications_enabled = COALESCE($3, notifications_enabled),
-                subscriptions = CASE WHEN $4 THEN $5::jsonb ELSE subscriptions END,
-                disabled_categories = CASE WHEN $6 THEN $7::jsonb ELSE disabled_categories END,
-                disabled_events = CASE WHEN $8 THEN $9::jsonb ELSE disabled_events END,
-                last_seen_at = NOW()
-            WHERE id = $1 AND admin_id = $2
-            RETURNING id, platform, app_version, device_label,
-                      notifications_enabled, subscriptions,
-                      disabled_categories, disabled_events,
-                      created_at, last_seen_at
-            """,
+            update_sql(
+                ADMIN_DEVICES_TABLE,
+                "notifications_enabled = COALESCE($3, notifications_enabled), "
+                "subscriptions = CASE WHEN $4 THEN $5::jsonb ELSE subscriptions END, "
+                "disabled_categories = CASE WHEN $6 THEN $7::jsonb ELSE disabled_categories END, "
+                "disabled_events = CASE WHEN $8 THEN $9::jsonb ELSE disabled_events END, "
+                "last_seen_at = NOW()",
+                "id = $1 AND admin_id = $2",
+                returning="id, platform, app_version, device_label, "
+                          "notifications_enabled, subscriptions, "
+                          "disabled_categories, disabled_events, "
+                          "created_at, last_seen_at",
+            ),
             device_id,
             admin_id,
             payload.notifications_enabled,
@@ -295,7 +299,12 @@ async def send_test_push(
     if db_service.is_connected:
         async with db_service.acquire() as conn:
             devices_count = await conn.fetchval(
-                "SELECT COUNT(*) FROM admin_devices WHERE admin_id = $1", admin_id,
+                select_sql(
+                    ADMIN_DEVICES_TABLE,
+                    "COUNT(*)",
+                    "WHERE admin_id = $1",
+                ),
+                admin_id,
             ) or 0
     result = await send_to_admin(
         admin_id=admin_id,
@@ -325,7 +334,10 @@ async def unregister_device_by_id(
         raise HTTPException(status_code=503, detail="DB not connected")
     async with db_service.acquire() as conn:
         result = await conn.execute(
-            "DELETE FROM admin_devices WHERE admin_id = $1 AND id = $2",
+            delete_sql(
+                ADMIN_DEVICES_TABLE,
+                "admin_id = $1 AND id = $2",
+            ),
             admin_id,
             device_id,
         )
@@ -348,7 +360,10 @@ async def unregister_device(
         raise HTTPException(status_code=503, detail="DB not connected")
     async with db_service.acquire() as conn:
         result = await conn.execute(
-            "DELETE FROM admin_devices WHERE admin_id = $1 AND fcm_token = $2",
+            delete_sql(
+                ADMIN_DEVICES_TABLE,
+                "admin_id = $1 AND fcm_token = $2",
+            ),
             admin_id,
             token,
         )

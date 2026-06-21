@@ -1,14 +1,17 @@
 """Утилиты для отправки уведомлений в Telegram топики."""
 import asyncio
+import io
 import re
 from datetime import datetime, timedelta
 from typing import Any, Dict, Optional
 
+import qrcode
 from aiogram import Bot
-from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import BufferedInputFile, InlineKeyboardMarkup, InlineKeyboardButton
 
 from src.config import get_settings
 from src.utils.formatters import format_bytes, format_datetime, format_provider_name
+from src.utils.i18n import tr
 from shared.logger import logger
 
 
@@ -132,6 +135,7 @@ async def send_user_notification(
     old_user_info: dict | None = None,
     changes: list | None = None,  # Список изменений из sync_service
     event_type: str | None = None,  # Оригинальный тип события из webhook
+    subscription_url: str | None = None,  # Для QR-кода при создании
 ) -> None:
     """Отправляет уведомление о действии с пользователем в Telegram топик."""
     settings = get_settings()
@@ -150,32 +154,18 @@ async def send_user_notification(
     
     try:
         info = user_info.get("response", user_info)
-        
+
         lines = []
-        
-        # Заголовок уведомления в зависимости от типа события
-        event_titles = {
-            "created": "✅ <b>Пользователь создан</b>",
-            "updated": "✏️ <b>Пользователь изменен</b>",
-            "deleted": "🗑 <b>Пользователь удален</b>",
-            "expired": "⏱️ <b>Подписка истекла</b>",
-            "expires_in_72h": "⏰ <b>Подписка истекает через 72 часа</b>",
-            "expires_in_48h": "⏰ <b>Подписка истекает через 48 часов</b>",
-            "expires_in_24h": "⏰ <b>Подписка истекает через 24 часа</b>",
-            "expired_24h_ago": "⏱️ <b>Подписка истекла 24 часа назад</b>",
-            "revoked": "🚫 <b>Подписка отозвана</b>",
-            "disabled": "❌ <b>Пользователь отключен</b>",
-            "enabled": "✅ <b>Пользователь включен</b>",
-            "limited": "⚠️ <b>Достигнут лимит трафика</b>",
-            "traffic_reset": "🔄 <b>Трафик сброшен</b>",
-            "first_connected": "🟢 <b>Первый вход пользователя</b>",
-            "bandwidth_threshold": "📊 <b>Достигнут порог использования трафика</b>",
-            "not_connected": "🔴 <b>Пользователь не подключался</b>",
-        }
-        
-        lines.append(event_titles.get(action, "✏️ <b>Пользователь изменен</b>"))
+
+        # Заголовок уведомления в зависимости от типа события.
+        # Если ключ не найден в локали, `tr()` вернёт сам ключ — это
+        # используем как маркер отсутствия и берём fallback.
+        title_value = tr(f"notify.user.title.{action}")
+        if title_value == f"notify.user.title.{action}":
+            title_value = tr("notify.user.fallback")
+        lines.append(title_value)
         lines.append("")
-        
+
         # Идентификация
         lines.append(f"👤 <code>{_esc(info.get('username', 'n/a'))}</code>  <code>{info.get('uuid', '')[:8]}</code>")
         lines.append("")
@@ -185,16 +175,21 @@ async def send_user_notification(
             old_info = old_user_info.get("response", old_user_info)
             diff_lines = []
 
+            unlimited = tr("notify.user.label.unlimited")
+
+            def _fmt_unlimited(v):
+                return format_bytes(v) if v else unlimited
+
             diff_fields = [
-                ("trafficLimitBytes", "Лимит трафика", lambda v: format_bytes(v) if v else "Безлимит"),
-                ("expireAt", "Дата истечения", lambda v: format_datetime(v) if v else "—"),
-                ("trafficLimitStrategy", "Период сброса", lambda v: v or "NO_RESET"),
-                ("hwidDeviceLimit", "HWID лимит", lambda v: "Безлимит" if v == 0 else str(v) if v is not None else "—"),
-                ("status", "Статус", lambda v: str(v) if v else "—"),
-                ("description", "Описание", lambda v: _esc(str(v)[:60]) if v else "—"),
-                ("telegramId", "Telegram ID", lambda v: str(v) if v is not None else "—"),
-                ("email", "Email", lambda v: _esc(str(v)) if v else "—"),
-                ("tag", "Тег", lambda v: _esc(str(v)) if v else "—"),
+                ("trafficLimitBytes", tr("notify.user.field.traffic_limit"), _fmt_unlimited),
+                ("expireAt", tr("notify.user.field.expire"), lambda v: format_datetime(v) if v else "—"),
+                ("trafficLimitStrategy", tr("notify.user.field.strategy"), lambda v: v or "NO_RESET"),
+                ("hwidDeviceLimit", tr("notify.user.field.hwid_limit"), lambda v: unlimited if v == 0 else str(v) if v is not None else "—"),
+                ("status", tr("notify.user.field.status"), lambda v: str(v) if v else "—"),
+                ("description", tr("notify.user.field.description"), lambda v: _esc(str(v)[:60]) if v else "—"),
+                ("telegramId", tr("notify.user.field.telegram_id"), lambda v: str(v) if v is not None else "—"),
+                ("email", tr("notify.user.field.email"), lambda v: _esc(str(v)) if v else "—"),
+                ("tag", tr("notify.user.field.tag"), lambda v: _esc(str(v)) if v else "—"),
             ]
 
             for key, label, fmt in diff_fields:
@@ -210,79 +205,102 @@ async def send_user_notification(
                 old_sq = await _resolve_squads_display(old_active_squads)
                 new_sq = await _resolve_squads_display(active_squads)
                 if old_sq != new_sq:
-                    diff_lines.append(f"   Сквад: <code>{old_sq}</code> → <code>{new_sq}</code>")
+                    diff_lines.append(f"   {tr('notify.user.field.squad')}: <code>{old_sq}</code> → <code>{new_sq}</code>")
 
             if diff_lines:
-                lines.append("📋 <b>Изменения</b>")
+                lines.append(tr("notify.user.section.changes"))
                 lines.extend(diff_lines)
             elif changes:
-                lines.append("📋 <b>Изменения</b>")
+                lines.append(tr("notify.user.section.changes"))
                 for change in changes:
                     lines.append(f"   {_esc(change)}")
             else:
-                lines.append("<i>Изменения не определены</i>")
+                lines.append(tr("notify.user.section.no_changes"))
 
             # Краткая карточка с основными полями (контекст)
             lines.append("")
             card_parts = []
             status = info.get("status")
             if status:
-                card_parts.append(f"Статус: <code>{status}</code>")
+                card_parts.append(f"{tr('notify.user.field.status')}: <code>{status}</code>")
             traffic_limit = info.get("trafficLimitBytes")
-            card_parts.append(f"Лимит: <code>{format_bytes(traffic_limit) if traffic_limit else 'Безлимит'}</code>")
+            card_parts.append(f"{tr('notify.user.label.limit')}: <code>{format_bytes(traffic_limit) if traffic_limit else unlimited}</code>")
             expire_at = info.get("expireAt")
             if expire_at:
-                card_parts.append(f"Истекает: <code>{format_datetime(expire_at)}</code>")
+                card_parts.append(f"{tr('notify.user.label.expires')}: <code>{format_datetime(expire_at)}</code>")
             telegram_id = info.get("telegramId")
             if telegram_id is not None:
                 card_parts.append(f"TG: <code>{telegram_id}</code>")
             email = info.get("email")
             if email:
-                card_parts.append(f"Email: <code>{_esc(email)}</code>")
+                card_parts.append(f"{tr('notify.user.field.email')}: <code>{_esc(email)}</code>")
             description = info.get("description")
             if description:
-                card_parts.append(f"Описание: <code>{_esc(description[:50])}</code>")
-            lines.append("ℹ️ " + " · ".join(card_parts))
+                card_parts.append(f"{tr('notify.user.field.description')}: <code>{_esc(description[:50])}</code>")
+            sep = tr("notify.user.label.card_separator")
+            lines.append("ℹ️ " + sep.join(card_parts))
 
         else:
             # Для created/deleted/other: полная информация
-            lines.append("📊 <b>Трафик и лимиты</b>")
+            lines.append(tr("notify.user.section.traffic_limits"))
             traffic_limit = info.get("trafficLimitBytes")
-            lines.append(f"   Лимит: <code>{format_bytes(traffic_limit) if traffic_limit else 'Безлимит'}</code>")
+            unlimited = tr("notify.user.label.unlimited")
+            lines.append(f"   {tr('notify.user.label.limit')}: <code>{format_bytes(traffic_limit) if traffic_limit else unlimited}</code>")
             expire_at = info.get("expireAt")
-            lines.append(f"   Истекает: <code>{format_datetime(expire_at) if expire_at else '—'}</code>")
-            lines.append(f"   Сброс: <code>{info.get('trafficLimitStrategy') or 'NO_RESET'}</code>")
+            lines.append(f"   {tr('notify.user.label.expires')}: <code>{format_datetime(expire_at) if expire_at else '—'}</code>")
+            lines.append(f"   {tr('notify.user.label.reset')}: <code>{info.get('trafficLimitStrategy') or 'NO_RESET'}</code>")
             hwid_limit = info.get("hwidDeviceLimit")
             if hwid_limit is not None:
-                lines.append(f"   HWID: <code>{'Безлимит' if hwid_limit == 0 else hwid_limit}</code>")
+                lines.append(f"   {tr('notify.user.label.hwid')}: <code>{unlimited if hwid_limit == 0 else hwid_limit}</code>")
             lines.append("")
 
             subscription_url = info.get("subscriptionUrl")
             if subscription_url:
                 url_display = _esc(subscription_url[:80]) + ("..." if len(subscription_url) > 80 else "")
-                lines.append(f"🔗 Ссылка: <code>{url_display}</code>")
+                lines.append(tr("notify.user.subscription_link", url=url_display))
 
             active_squads = info.get("activeInternalSquads", [])
             squad_display = await _resolve_squads_display(active_squads)
             external_squad = info.get("externalSquadUuid")
             if squad_display == "—" and external_squad:
-                squad_display = f"External: {external_squad[:8]}..."
+                squad_display = tr("notify.user.external_squad", uuid=external_squad[:8])
             if squad_display != "—":
-                lines.append(f"   Сквад: <code>{squad_display}</code>")
+                lines.append(f"   {tr('notify.user.label.squad')}: <code>{squad_display}</code>")
 
             telegram_id = info.get("telegramId")
             email = info.get("email")
             if telegram_id is not None:
-                lines.append(f"📞 Telegram: <code>{telegram_id}</code>")
+                lines.append(f"📞 {tr('notify.user.label.telegram')}: <code>{telegram_id}</code>")
             if email:
-                lines.append(f"📧 Email: <code>{_esc(email)}</code>")
+                lines.append(f"📧 {tr('notify.user.field.email')}: <code>{_esc(email)}</code>")
 
             description = info.get("description")
             if description:
                 lines.append(f"📝 <code>{_esc(description[:100])}</code>")
         
         text = "\n".join(lines)
-        
+
+        # Для "created" отправляем фото с QR-кодом и полным текстом в caption
+        if action == "created" and subscription_url:
+            try:
+                qr_buf = io.BytesIO()
+                qrcode.make(subscription_url, box_size=8, border=2).save(qr_buf, format='PNG')
+                qr_buf.seek(0)
+                photo_kwargs = {
+                    "chat_id": settings.notifications_chat_id,
+                    "photo": BufferedInputFile(qr_buf.read(), filename="subscription.png"),
+                    "caption": text,
+                    "parse_mode": "HTML",
+                }
+                if topic_id is not None:
+                    photo_kwargs["message_thread_id"] = topic_id
+                await bot.send_photo(**photo_kwargs)
+                logger.info("User created notification with QR sent successfully chat_id=%s", settings.notifications_chat_id)
+                return
+            except Exception as e:
+                logger.warning("Failed to send QR photo, falling back to text: %s", e)
+                # Fall through to text message
+
         # Отправляем в топик
         message_kwargs = {
             "chat_id": settings.notifications_chat_id,
@@ -312,26 +330,11 @@ async def send_user_notification(
             "bandwidth_threshold": "user.bandwidth_usage_threshold_reached",
         }
         event_id = action_to_event.get(action, f"user.{action}")
-        push_titles = {
-            "created": "Новый пользователь",
-            "updated": "Изменён пользователь",
-            "deleted": "Удалён пользователь",
-            "disabled": "Пользователь отключён",
-            "enabled": "Пользователь включён",
-            "limited": "Лимит трафика исчерпан",
-            "expired": "Подписка истекла",
-            "traffic_reset": "Трафик сброшен",
-            "revoked": "Подписка отозвана",
-            "first_connected": "Первое подключение",
-            "expires_in_72h": "Подписка истекает через 72ч",
-            "expires_in_48h": "Подписка истекает через 48ч",
-            "expires_in_24h": "Подписка истекает через 24ч",
-            "expired_24h_ago": "Подписка истекла 24ч назад",
-            "bandwidth_threshold": "Порог трафика превышен",
-            "not_connected": "Нет подключения",
-        }
+        push_title = tr(f"notify.push.user.{action}")
+        if push_title == f"notify.push.user.{action}":
+            push_title = tr("notify.push.user.fallback", action=action)
         _push_dispatch(
-            title=push_titles.get(action, f"Юзер: {action}"),
+            title=push_title,
             body=info.get("username") or info.get("uuid", "")[:8],
             notification_type="info",
             source="panel.webhook",
@@ -417,24 +420,17 @@ async def send_node_notification(
 
     try:
         node_info = node_data.get("response", node_data) if isinstance(node_data, dict) else node_data
-        
+
         lines = []
-        
+
         # Определяем заголовок по типу события
-        event_titles = {
-            "node.created": "🆕 <b>Нода создана</b>",
-            "node.modified": "✏️ <b>Нода изменена</b>",
-            "node.disabled": "❌ <b>Нода отключена</b>",
-            "node.enabled": "✅ <b>Нода включена</b>",
-            "node.deleted": "🗑 <b>Нода удалена</b>",
-            "node.connection_lost": "🔴 <b>Потеряно соединение с нодой</b>",
-            "node.connection_restored": "🟢 <b>Соединение с нодой восстановлено</b>",
-            "node.traffic_notify": "📊 <b>Уведомление о трафике ноды</b>",
-        }
-        
-        lines.append(event_titles.get(event, f"ℹ️ <b>Событие ноды: {event}</b>"))
+        title_key = f"notify.node.title.{event}"
+        title_value = tr(title_key)
+        if title_value == title_key:
+            title_value = tr("notify.node.fallback", event=event)
+        lines.append(title_value)
         lines.append("")
-        
+
         # Информация о ноде
         node_name = node_info.get("name", "n/a")
         node_uuid = node_info.get("uuid", "n/a")
@@ -442,25 +438,25 @@ async def send_node_notification(
         port = node_info.get("port", "—")
         country = node_info.get("countryCode", "—")
         status = node_info.get("status", "—")
-        
+
         lines.append(f"🖥 <b>{_esc(node_name)}</b>  <code>{node_uuid[:8]}</code>")
         addr_str = f"{_esc(str(address))}:{port}" if port != "—" else _esc(str(address))
-        lines.append(f"   Адрес: <code>{addr_str}</code>  {country if country != '—' else ''}")
+        lines.append(f"   {tr('notify.node.label.address')}: <code>{addr_str}</code>  {country if country != '—' else ''}")
         if status != "—":
-            lines.append(f"📊 <b>Статус:</b> <code>{status}</code>")
-        
+            lines.append(f"📊 <b>{tr('notify.node.label.status')}:</b> <code>{status}</code>")
+
         # Трафик (если есть)
         traffic_limit = node_info.get("trafficLimitBytes")
         if traffic_limit:
-            lines.append(f"📶 <b>Лимит трафика:</b> <code>{format_bytes(traffic_limit)}</code>")
-        
+            lines.append(f"📶 <b>{tr('notify.node.label.traffic_limit')}:</b> <code>{format_bytes(traffic_limit)}</code>")
+
         # Секция изменений
         if changes and event == "node.modified":
             lines.append("")
-            lines.append("📋 <b>Изменения</b>")
+            lines.append(tr("notify.node.label.changes"))
             for change in changes:
                 lines.append(f"   {_esc(change)}")
-        
+
         text = "\n".join(lines)
 
         message_kwargs = {
@@ -480,8 +476,11 @@ async def send_node_notification(
         critical_events = {"node.connection_lost", "node.disabled", "node.deleted"}
         push_severity = "critical" if event in critical_events else "info"
         push_type = "alert" if event in critical_events else "info"
+        push_title = tr(title_key)
+        if push_title == title_key:
+            push_title = tr("notify.push.node_fallback")
         _push_dispatch(
-            title=event_titles.get(event, "Событие ноды"),
+            title=push_title,
             body=f"{node_name} ({address})",
             notification_type=push_type,
             source="panel.webhook",
@@ -510,41 +509,38 @@ async def send_service_notification(
 
     try:
         lines = []
-        
-        event_titles = {
-            "service.panel_started": "🚀 <b>Панель запущена</b>",
-            "service.login_attempt_failed": "⚠️ <b>Неудачная попытка входа</b>",
-            "service.login_attempt_success": "✅ <b>Успешный вход</b>",
-            "panel.unavailable": "❌ <b>Панель недоступна</b>",
-        }
-        
-        lines.append(event_titles.get(event, f"ℹ️ <b>Событие сервиса: {event}</b>"))
+
+        title_key = f"notify.service.title.{event}"
+        title_value = tr(title_key)
+        if title_value == title_key:
+            title_value = tr("notify.service.fallback", event=event)
+        lines.append(title_value)
         lines.append("")
-        
+
         # Дополнительная информация
         if event == "service.login_attempt_failed" or event == "service.login_attempt_success":
             username = event_data.get("username", "—")
             ip = event_data.get("ip", "—")
             user_agent = event_data.get("userAgent", "—")
-            
-            lines.append(f"👤 <b>Username:</b> <code>{_esc(username)}</code>")
+
+            lines.append(tr("notify.service.login.username", username=_esc(username)))
             if ip != "—":
-                lines.append(f"🌐 <b>IP:</b> <code>{_esc(ip)}</code>")
+                lines.append(tr("notify.service.login.ip", ip=_esc(ip)))
             if user_agent != "—":
-                lines.append(f"🔍 <b>User Agent:</b> <code>{_esc(user_agent[:50])}</code>")
+                lines.append(tr("notify.service.login.user_agent", user_agent=_esc(user_agent[:50])))
         elif event == "panel.unavailable":
             error_type = event_data.get("error_type", "—")
             error_message = event_data.get("error_message", "—")
             consecutive_failures = event_data.get("consecutive_failures", 0)
             last_check = event_data.get("last_check", "—")
-            
-            lines.append(f"⚠️ <b>Ошибка:</b> <code>{_esc(error_type)}</code>")
+
+            lines.append(tr("notify.service.panel_unavailable.error_type", error_type=_esc(error_type)))
             if error_message != "—":
-                lines.append(f"📝 <b>Сообщение:</b> <code>{_esc(error_message[:100])}</code>")
-            lines.append(f"🔄 <b>Неудачных попыток подряд:</b> {consecutive_failures}")
+                lines.append(tr("notify.service.panel_unavailable.error_message", error_message=_esc(error_message[:100])))
+            lines.append(tr("notify.service.panel_unavailable.failures", count=consecutive_failures))
             if last_check != "—":
-                lines.append(f"🕒 <b>Последняя проверка:</b> {last_check}")
-        
+                lines.append(tr("notify.service.panel_unavailable.last_check", last_check=last_check))
+
         text = "\n".join(lines)
 
         message_kwargs = {
@@ -562,8 +558,8 @@ async def send_service_notification(
         # Сервисные события (бэкап, рестарт панели и т.п.) — alert-категория,
         # они интересны на телефоне даже когда ты не у компа.
         _push_dispatch(
-            title=f"Сервис: {event}",
-            body=f"Событие {event}",
+            title=tr("notify.push.service_title", event=event),
+            body=tr("notify.push.service_body", event=event),
             notification_type="alert",
             source="panel.webhook",
             source_id=event,
@@ -591,15 +587,14 @@ async def send_hwid_notification(
 
     try:
         lines = []
-        
-        event_titles = {
-            "user_hwid_devices.added": "➕ <b>HWID устройство добавлено</b>",
-            "user_hwid_devices.deleted": "➖ <b>HWID устройство удалено</b>",
-        }
-        
-        lines.append(event_titles.get(event, f"💻 <b>Событие HWID: {event}</b>"))
+
+        title_key = f"notify.hwid.title.{event}"
+        title_value = tr(title_key)
+        if title_value == title_key:
+            title_value = tr("notify.hwid.fallback", event=event)
+        lines.append(title_value)
         lines.append("")
-        
+
         # Информация о пользователе
         user_data = event_data.get("user", {})
         # Webhook может прислать hwidDevice или hwidUserDevice
@@ -613,25 +608,25 @@ async def send_hwid_notification(
             description = user_data.get("description", "")
             hwid_device_limit = user_data.get("hwidDeviceLimit", 0)
 
-            lines.append(f"👤 <b>Пользователь:</b> <code>{_esc(username)}</code>")
-            lines.append(f"🆔 <b>UUID:</b> <code>{user_uuid}</code>")
+            lines.append(tr("notify.hwid.label.user", username=_esc(username)))
+            lines.append(tr("notify.hwid.label.uuid", uuid=user_uuid))
 
             if telegram_id is not None:
-                lines.append(f"📱 <b>TG ID:</b> <code>{telegram_id}</code>")
+                lines.append(tr("notify.hwid.label.tg_id", telegram_id=telegram_id))
 
-            lines.append(f"📊 <b>Статус:</b> <code>{status}</code>")
+            lines.append(tr("notify.hwid.label.status", status=status))
 
             if description:
-                lines.append(f"📝 <b>Описание:</b> <code>{_esc(description[:100])}</code>")
+                lines.append(tr("notify.hwid.label.description", description=_esc(description[:100])))
 
             # Информация о лимите устройств
             limit_display = "∞" if hwid_device_limit == 0 else str(hwid_device_limit)
-            lines.append(f"📲 <b>Лимит устройств:</b> <code>{limit_display}</code>")
+            lines.append(tr("notify.hwid.label.device_limit", limit=limit_display))
 
             lines.append("")
 
         if hwid_data:
-            lines.append("💻 <b>Информация об устройстве</b>")
+            lines.append(tr("notify.hwid.device_header"))
             hwid = hwid_data.get("hwid", "—")
             platform = hwid_data.get("platform", "—")
             os_version = hwid_data.get("osVersion", "—")
@@ -640,17 +635,17 @@ async def send_hwid_notification(
             created_at = hwid_data.get("createdAt")
 
             if hwid != "—":
-                lines.append(f"   HWID: <code>{_esc(hwid)}</code>")
+                lines.append(tr("notify.hwid.device.hwid", hwid=_esc(hwid)))
             if platform != "—":
-                lines.append(f"   Платформа: <code>{_esc(platform)}</code>")
+                lines.append(tr("notify.hwid.device.platform", platform=_esc(platform)))
             if os_version != "—":
-                lines.append(f"   Версия ОС: <code>{_esc(os_version)}</code>")
+                lines.append(tr("notify.hwid.device.os_version", os_version=_esc(os_version)))
             if device_model != "—":
-                lines.append(f"   Модель: <code>{_esc(device_model)}</code>")
+                lines.append(tr("notify.hwid.device.model", model=_esc(device_model)))
             if user_agent != "—":
-                lines.append(f"   User-Agent: <code>{_esc(user_agent[:60])}</code>")
+                lines.append(tr("notify.hwid.device.user_agent", user_agent=_esc(user_agent[:60])))
             if created_at:
-                lines.append(f"   Добавлено: <code>{format_datetime(created_at)}</code>")
+                lines.append(tr("notify.hwid.device.added", created_at=format_datetime(created_at)))
         
         text = "\n".join(lines)
 
@@ -674,9 +669,12 @@ async def send_hwid_notification(
         username = user_data.get("username") if user_data else None
         user_uuid = user_data.get("uuid") if user_data else None
         platform = hwid_data.get("platform") if hwid_data else None
-        action_label = "Добавлено устройство" if event == "user_hwid_devices.added" else (
-            "Удалено устройство" if event == "user_hwid_devices.deleted" else f"HWID: {event}"
-        )
+        if event == "user_hwid_devices.added":
+            action_label = tr("notify.hwid.action.added")
+        elif event == "user_hwid_devices.deleted":
+            action_label = tr("notify.hwid.action.deleted")
+        else:
+            action_label = tr("notify.hwid.action.fallback", event=event)
         body_parts = []
         if username:
             body_parts.append(str(username))
@@ -713,16 +711,16 @@ async def send_error_notification(
 
     try:
         lines = []
-        
-        lines.append("⚠️ <b>Ошибка системы</b>")
+
+        lines.append(tr("notify.error.title"))
         lines.append("")
-        lines.append(f"<b>Тип:</b> <code>{_esc(event)}</code>")
-        
+        lines.append(tr("notify.error.type", event=_esc(event)))
+
         # Дополнительная информация
         message = event_data.get("message", "")
         if message:
-            lines.append(f"<b>Сообщение:</b> <code>{_esc(message)}</code>")
-        
+            lines.append(tr("notify.error.message", message=_esc(message)))
+
         text = "\n".join(lines)
 
         message_kwargs = {
@@ -739,8 +737,8 @@ async def send_error_notification(
 
         # Ошибки/системные алерты обязательно пушим — это то, ради чего пуши и нужны.
         _push_dispatch(
-            title=f"Ошибка: {event}",
-            body=f"Событие {event}",
+            title=tr("notify.push.error_title", event=event),
+            body=tr("notify.push.error_body", event=event),
             notification_type="alert",
             source="panel.webhook",
             source_id=event,
@@ -769,17 +767,11 @@ async def send_crm_notification(
     try:
         lines = []
 
-        event_titles = {
-            "crm.infra_billing_node_payment_in_7_days": "📅 <b>Оплата ноды через 7 дней</b>",
-            "crm.infra_billing_node_payment_in_48hrs": "⏰ <b>Оплата ноды через 48 часов</b>",
-            "crm.infra_billing_node_payment_in_24hrs": "⏰ <b>Оплата ноды через 24 часа</b>",
-            "crm.infra_billing_node_payment_due_today": "🔴 <b>Оплата ноды сегодня</b>",
-            "crm.infra_billing_node_payment_overdue_24hrs": "⚠️ <b>Оплата ноды просрочена на 24 часа</b>",
-            "crm.infra_billing_node_payment_overdue_48hrs": "⚠️ <b>Оплата ноды просрочена на 48 часов</b>",
-            "crm.infra_billing_node_payment_overdue_7_days": "🚨 <b>Оплата ноды просрочена на 7 дней</b>",
-        }
-
-        lines.append(event_titles.get(event, f"💰 <b>Событие CRM: {event}</b>"))
+        title_key = f"notify.crm.title.{event}"
+        title_value = tr(title_key)
+        if title_value == title_key:
+            title_value = tr("notify.crm.fallback", event=event)
+        lines.append(title_value)
         lines.append("")
 
         # Webhook может прислать данные в двух форматах:
@@ -794,21 +786,21 @@ async def send_crm_notification(
 
         if node_name or provider_name:
             # Плоский формат webhook
-            lines.append("🖥 <b>Информация о ноде</b>")
+            lines.append(tr("notify.crm.section.node"))
             if node_name:
-                lines.append(f"   Название: <code>{_esc(node_name)}</code>")
+                lines.append(f"   {tr('notify.crm.label.name')}: <code>{_esc(node_name)}</code>")
             lines.append("")
 
             if provider_name:
-                lines.append("🏢 <b>Провайдер</b>")
-                lines.append(f"   Название: <code>{_esc(provider_name)}</code>")
+                lines.append(tr("notify.crm.section.provider"))
+                lines.append(f"   {tr('notify.crm.label.name')}: <code>{_esc(provider_name)}</code>")
                 if login_url:
-                    lines.append(f"   Личный кабинет: {_esc(login_url)}")
+                    lines.append(f"   {tr('notify.crm.label.login_url', url=_esc(login_url))}")
                 lines.append("")
 
             if next_billing_at:
-                lines.append("💰 <b>Информация об оплате</b>")
-                lines.append(f"   Следующая оплата: <code>{format_datetime(next_billing_at)}</code>")
+                lines.append(tr("notify.crm.section.billing"))
+                lines.append(f"   {tr('notify.crm.label.next_billing', date=format_datetime(next_billing_at))}")
         else:
             # Вложенный формат (для совместимости)
             node_data = event_data.get("node", {})
@@ -816,35 +808,35 @@ async def send_crm_notification(
             billing_data = event_data.get("billingNode", {})
 
             if node_data:
-                lines.append("🖥 <b>Информация о ноде</b>")
+                lines.append(tr("notify.crm.section.node"))
                 node_name = node_data.get("name", "n/a")
                 node_uuid = node_data.get("uuid", "")
                 node_address = node_data.get("address", "")
                 node_port = node_data.get("port")
                 node_country = node_data.get("countryCode", "")
 
-                lines.append(f"   Название: <code>{_esc(node_name)}</code>")
+                lines.append(f"   {tr('notify.crm.label.name')}: <code>{_esc(node_name)}</code>")
                 if node_uuid:
-                    lines.append(f"   UUID: <code>{node_uuid}</code>")
+                    lines.append(f"   {tr('notify.crm.label.uuid')}: <code>{node_uuid}</code>")
                 if node_address:
-                    lines.append(f"   Адрес: <code>{_esc(node_address)}</code>")
+                    lines.append(f"   {tr('notify.crm.label.address')}: <code>{_esc(node_address)}</code>")
                 if node_port:
-                    lines.append(f"   Порт: <code>{node_port}</code>")
+                    lines.append(f"   {tr('notify.crm.label.port')}: <code>{node_port}</code>")
                 if node_country:
-                    lines.append(f"   Страна: <code>{node_country}</code>")
+                    lines.append(f"   {tr('notify.crm.label.country')}: <code>{node_country}</code>")
                 lines.append("")
 
             if provider_data:
-                lines.append("🏢 <b>Провайдер</b>")
+                lines.append(tr("notify.crm.section.provider"))
                 provider_name = provider_data.get("name", "n/a")
                 provider_uuid = provider_data.get("uuid", "")
-                lines.append(f"   Название: <code>{_esc(provider_name)}</code>")
+                lines.append(f"   {tr('notify.crm.label.name')}: <code>{_esc(provider_name)}</code>")
                 if provider_uuid:
-                    lines.append(f"   UUID: <code>{provider_uuid}</code>")
+                    lines.append(f"   {tr('notify.crm.label.uuid')}: <code>{provider_uuid}</code>")
                 lines.append("")
 
             if billing_data:
-                lines.append("💰 <b>Информация об оплате</b>")
+                lines.append(tr("notify.crm.section.billing"))
                 amount = billing_data.get("amount")
                 currency = billing_data.get("currency", "")
                 next_billing_at = billing_data.get("nextBillingAt")
@@ -855,13 +847,13 @@ async def send_crm_notification(
                     amount_str = f"{amount}"
                     if currency:
                         amount_str += f" {currency}"
-                    lines.append(f"   Сумма: <code>{amount_str}</code>")
+                    lines.append(f"   {tr('notify.crm.label.amount')}: <code>{amount_str}</code>")
                 if billing_interval:
-                    lines.append(f"   Интервал: <code>{billing_interval}</code>")
+                    lines.append(f"   {tr('notify.crm.label.interval')}: <code>{billing_interval}</code>")
                 if next_billing_at:
-                    lines.append(f"   Следующая оплата: <code>{format_datetime(next_billing_at)}</code>")
+                    lines.append(f"   {tr('notify.crm.label.next_billing', date=format_datetime(next_billing_at))}")
                 if last_billing_at:
-                    lines.append(f"   Последняя оплата: <code>{format_datetime(last_billing_at)}</code>")
+                    lines.append(f"   {tr('notify.crm.label.last_billing', date=format_datetime(last_billing_at))}")
 
         text = "\n".join(lines)
 
@@ -1009,28 +1001,28 @@ async def send_violation_notification(
 
         # Формируем сообщение
         lines = []
-        lines.append("🚨 <b>НАРУШИТЕЛЬ ЛИМИТА</b>")
+        lines.append(tr("notify.violation.title"))
         lines.append("")
 
         # Информация о пользователе
         if email:
-            lines.append(f"📧 Email: <code>{_esc(email)}</code>")
+            lines.append(tr("notify.violation.email", email=_esc(email)))
         else:
-            lines.append(f"📧 Username: <code>{_esc(username)}</code>")
+            lines.append(tr("notify.violation.username", username=_esc(username)))
 
         if telegram_id is not None:
-            lines.append(f"📱 TG ID: <code>{telegram_id}</code>")
+            lines.append(tr("notify.violation.tg_id", telegram_id=telegram_id))
 
         if description:
-            lines.append(f"📝 Описание: <code>{_esc(description[:100])}</code>")
+            lines.append(tr("notify.violation.description", description=_esc(description[:100])))
 
         lines.append("")
 
         # IP адреса
-        lines.append(f"🌐 IP адресов: <b>{ip_count}/{device_limit}</b>")
+        lines.append(tr("notify.violation.ip_count", count=ip_count, limit=device_limit))
 
         if unique_ips:
-            lines.append("📍 IP (провайдеры):")
+            lines.append(tr("notify.violation.ips_providers"))
             for ip in sorted(unique_ips):
                 provider_info = ""
                 country_code = ""
@@ -1042,20 +1034,19 @@ async def send_violation_notification(
                     if hasattr(meta, 'country_code') and meta.country_code:
                         country_code = meta.country_code
 
-                if provider_info or country_code:
-                    suffix = ""
-                    if provider_info:
-                        suffix = f" - {_esc(provider_info)}"
-                    if country_code:
-                        suffix += f" ({country_code})"
-                    lines.append(f"   <code>{ip}</code>{suffix}")
+                if provider_info and country_code:
+                    lines.append(tr("notify.violation.ip_with_meta", ip=ip, provider=_esc(provider_info), country=country_code))
+                elif country_code:
+                    lines.append(tr("notify.violation.ip_with_country", ip=ip, country=country_code))
+                elif provider_info:
+                    lines.append(tr("notify.violation.ip_with_meta", ip=ip, provider=_esc(provider_info), country=""))
                 else:
-                    lines.append(f"   <code>{ip}</code>")
+                    lines.append(tr("notify.violation.ip_bare", ip=ip))
 
         # Ноды
         if nodes_used:
             nodes_str = ", ".join(sorted(nodes_used))
-            lines.append(f"🖥 Ноды: <code>{_esc(nodes_str)}</code>")
+            lines.append(tr("notify.violation.nodes", nodes=_esc(nodes_str)))
 
         lines.append("")
 
@@ -1077,14 +1068,10 @@ async def send_violation_notification(
                 app_version = device.get("app_version", "")
 
                 # Форматируем название платформы
-                platform_names = {
-                    "android": "Android",
-                    "ios": "iOS",
-                    "windows": "Windows",
-                    "macos": "macOS",
-                    "linux": "Linux",
-                }
-                platform_display = platform_names.get(platform.lower(), platform) if platform else "Unknown"
+                platform_key = f"notify.violation.platform.{platform.lower()}" if platform else "notify.violation.platform.unknown"
+                platform_display = tr(platform_key)
+                if platform_display == platform_key:
+                    platform_display = platform or tr("notify.violation.platform.unknown")
 
                 # Собираем строку устройства
                 device_str = platform_display
@@ -1096,9 +1083,9 @@ async def send_violation_notification(
                 device_parts.append(device_str)
 
             if hwid_count > 5:
-                device_parts.append(f"... и ещё {hwid_count - 5}")
+                device_parts.append(tr("notify.violation.more_devices", count=hwid_count - 5))
 
-            lines.append(f"📲 Устройства ({hwid_count}/{device_limit}):")
+            lines.append(tr("notify.violation.devices", count=hwid_count, limit=device_limit))
             for part in device_parts:
                 lines.append(f"   {_esc(part)}")
         else:
@@ -1114,40 +1101,40 @@ async def send_violation_notification(
                             device_parts.append(os_name)
                 else:
                     if os_list:
-                        device_parts.append(f"ОС: {', '.join(os_list)}")
+                        device_parts.append(tr("notify.violation.os_list", list=", ".join(os_list)))
                     if client_list:
-                        device_parts.append(f"Клиенты: {', '.join(client_list)}")
+                        device_parts.append(tr("notify.violation.client_list", list=", ".join(client_list)))
 
                 if device_parts:
-                    lines.append(f"📲 Устройства (по UA): {'; '.join(device_parts)}")
+                    lines.append(tr("notify.violation.devices_ua", details="; ".join(device_parts)))
                 else:
-                    lines.append(f"📲 Устройства: —")
+                    lines.append(tr("notify.violation.devices_empty"))
             else:
-                lines.append(f"📲 Устройства: —")
+                lines.append(tr("notify.violation.devices_empty"))
 
         # Время в нарушении
         if violation_duration_sec > 0:
-            lines.append(f"⏱ В нарушении: <code>{violation_duration_sec} сек</code>")
+            lines.append(tr("notify.violation.duration", seconds=violation_duration_sec))
 
         # Скор нарушения
-        lines.append(f"📊 Скор: <code>{total_score:.1f}/100</code>")
+        lines.append(tr("notify.violation.score", score=f"{total_score:.1f}"))
 
         # Время
-        lines.append(f"🕐 Время (МСК): <code>{moscow_time_str}</code>")
+        lines.append(tr("notify.violation.time_msk", time=moscow_time_str))
 
         text = "\n".join(lines)
 
         keyboard = InlineKeyboardMarkup(inline_keyboard=[
             [
-                InlineKeyboardButton(text="👤 Подробнее", callback_data=f"vact:info:{user_uuid}"),
-                InlineKeyboardButton(text="🔒 Заблокировать", callback_data=f"vact:block:{user_uuid}"),
+                InlineKeyboardButton(text=tr("notify.violation.btn.info"), callback_data=f"vact:info:{user_uuid}"),
+                InlineKeyboardButton(text=tr("notify.violation.btn.block"), callback_data=f"vact:block:{user_uuid}"),
             ],
             [
-                InlineKeyboardButton(text="⛔ Откл + разорвать", callback_data=f"vact:kill:{user_uuid}"),
-                InlineKeyboardButton(text="🔄 Сбросить трафик", callback_data=f"vact:reset:{user_uuid}"),
+                InlineKeyboardButton(text=tr("notify.violation.btn.kill"), callback_data=f"vact:kill:{user_uuid}"),
+                InlineKeyboardButton(text=tr("notify.violation.btn.reset"), callback_data=f"vact:reset:{user_uuid}"),
             ],
             [
-                InlineKeyboardButton(text="🚫 Аннулировать", callback_data=f"vact:dismiss:{user_uuid}"),
+                InlineKeyboardButton(text=tr("notify.violation.btn.annul"), callback_data=f"vact:dismiss:{user_uuid}"),
             ],
         ])
 

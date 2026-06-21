@@ -3,14 +3,15 @@ from aiogram import F, Router
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 from aiogram.utils.i18n import gettext as _
 
-from src.handlers.common import _edit_text_safe, _not_admin, _send_clean_message
+from src.handlers.common import _edit_text_safe, _not_admin, require_permission, _send_clean_message
 from src.handlers.state import PENDING_INPUT
 from src.keyboards.asn_sync_menu import asn_sync_menu_keyboard
 from src.keyboards.main_menu import system_menu_keyboard
 from src.keyboards.navigation import NavTarget, nav_row
 from src.keyboards.stats_menu import stats_menu_keyboard, stats_period_keyboard
 from src.keyboards.system_nodes import system_nodes_keyboard
-from shared.api_client import ApiClientError, UnauthorizedError, api_client
+from src.utils.auth import BotAdmin, resolve_admin
+from shared.internal_api import ApiClientError, UnauthorizedError, internal_api_client
 from src.services.asn_parser import ASNParser
 from shared.database import db_service
 from src.utils.formatters import build_bandwidth_stats, format_bytes, format_datetime, format_uptime
@@ -46,7 +47,7 @@ def _format_bytes(n: float) -> str:
 async def _fetch_health_text() -> str:
     """Получает текст для отображения health check."""
     try:
-        data = await api_client.get_health()
+        data = await internal_api_client.get_health()
         resp = data.get("response", {})
         # Panel 2.7+: runtimeMetrics replaces pm2Stats
         metrics = resp.get("runtimeMetrics") or resp.get("pm2Stats", [])
@@ -84,7 +85,7 @@ async def _fetch_panel_stats_text() -> str:
     """Статистика панели (пользователи, ноды, хосты, ресурсы)."""
     try:
         # Получаем основную статистику системы
-        data = await api_client.get_stats()
+        data = await internal_api_client.get_stats()
         res = data.get("response", {})
         users = res.get("users", {})
         online = res.get("onlineStats", {})
@@ -112,7 +113,7 @@ async def _fetch_panel_stats_text() -> str:
                 enabled_hosts = hosts_stats.get("enabled", 0)
                 disabled_hosts = hosts_stats.get("disabled", 0)
             else:
-                hosts_data = await api_client.get_hosts()
+                hosts_data = await internal_api_client.get_hosts()
                 hosts = hosts_data.get("response", [])
                 total_hosts = len(hosts)
                 enabled_hosts = sum(1 for h in hosts if not h.get("isDisabled"))
@@ -130,13 +131,13 @@ async def _fetch_panel_stats_text() -> str:
                 disabled_nodes = nodes_stats.get("disabled", 0)
                 # Для online нужен API
                 try:
-                    nodes_data = await api_client.get_nodes()
+                    nodes_data = await internal_api_client.get_nodes()
                     nodes_list = nodes_data.get("response", [])
                     online_nodes = sum(1 for n in nodes_list if n.get("isConnected"))
                 except Exception:
                     online_nodes = nodes_stats.get("connected", 0)
             else:
-                nodes_data = await api_client.get_nodes()
+                nodes_data = await internal_api_client.get_nodes()
                 nodes_list = nodes_data.get("response", [])
                 total_nodes = len(nodes_list)
                 enabled_nodes = sum(1 for n in nodes_list if not n.get("isDisabled"))
@@ -152,21 +153,21 @@ async def _fetch_panel_stats_text() -> str:
         lines.append("")
         lines.append(f"*{_('stats.resources_section')}*")
         try:
-            templates_data = await api_client.get_templates()
+            templates_data = await internal_api_client.get_templates()
             templates = templates_data.get("response", {}).get("templates", [])
             lines.append(f"  {_('stats.templates').format(count=len(templates))}")
         except Exception:
             lines.append(f"  {_('stats.templates').format(count='—')}")
 
         try:
-            tokens_data = await api_client.get_tokens()
+            tokens_data = await internal_api_client.get_tokens()
             tokens = tokens_data.get("response", {}).get("apiKeys", [])
             lines.append(f"  {_('stats.tokens').format(count=len(tokens))}")
         except Exception:
             lines.append(f"  {_('stats.tokens').format(count='—')}")
 
         try:
-            snippets_data = await api_client.get_snippets()
+            snippets_data = await internal_api_client.get_snippets()
             snippets = snippets_data.get("response", {}).get("snippets", [])
             lines.append(f"  {_('stats.snippets').format(count=len(snippets))}")
         except Exception:
@@ -183,7 +184,7 @@ async def _fetch_panel_stats_text() -> str:
 async def _fetch_server_stats_text() -> str:
     """Статистика сервера (CPU, RAM, нагрузка, системная информация)."""
     try:
-        data = await api_client.get_stats()
+        data = await internal_api_client.get_stats()
         res = data.get("response", {})
         mem = res.get("memory", {})
         cpu = res.get("cpu", {})
@@ -267,7 +268,7 @@ async def _fetch_extended_stats_text() -> str:
     """Расширенная статистика с графиками и трендами."""
     try:
         # Получаем основную статистику системы
-        data = await api_client.get_stats()
+        data = await internal_api_client.get_stats()
         res = data.get("response", {})
         users = res.get("users", {})
         online = res.get("onlineStats", {})
@@ -351,13 +352,13 @@ async def _fetch_extended_stats_text() -> str:
                 enabled_nodes = nodes_stats.get("enabled", 0)
                 # Для online нужен API
                 try:
-                    nodes_data = await api_client.get_nodes()
+                    nodes_data = await internal_api_client.get_nodes()
                     nodes_list = nodes_data.get("response", [])
                     online_nodes = sum(1 for n in nodes_list if n.get("isConnected"))
                 except Exception:
                     online_nodes = nodes_stats.get("connected", 0)
             else:
-                nodes_data = await api_client.get_nodes()
+                nodes_data = await internal_api_client.get_nodes()
                 nodes_list = nodes_data.get("response", [])
                 total_nodes = len(nodes_list)
                 enabled_nodes = sum(1 for n in nodes_list if not n.get("isDisabled"))
@@ -384,7 +385,7 @@ async def _fetch_extended_stats_text() -> str:
                 total_hosts = hosts_stats.get("total", 0)
                 enabled_hosts = hosts_stats.get("enabled", 0)
             else:
-                hosts_data = await api_client.get_hosts()
+                hosts_data = await internal_api_client.get_hosts()
                 hosts = hosts_data.get("response", [])
                 total_hosts = len(hosts)
                 enabled_hosts = sum(1 for h in hosts if not h.get("isDisabled"))
@@ -428,7 +429,7 @@ async def _fetch_stats_text() -> str:
     """Получает общую статистику системы."""
     try:
         # Получаем основную статистику системы
-        data = await api_client.get_stats()
+        data = await internal_api_client.get_stats()
         res = data.get("response", {})
         mem = res.get("memory", {})
         cpu = res.get("cpu", {})
@@ -463,7 +464,7 @@ async def _fetch_stats_text() -> str:
                 enabled_hosts = hosts_stats.get("enabled", 0)
                 disabled_hosts = hosts_stats.get("disabled", 0)
             else:
-                hosts_data = await api_client.get_hosts()
+                hosts_data = await internal_api_client.get_hosts()
                 hosts = hosts_data.get("response", [])
                 total_hosts = len(hosts)
                 enabled_hosts = sum(1 for h in hosts if not h.get("isDisabled"))
@@ -481,13 +482,13 @@ async def _fetch_stats_text() -> str:
                 disabled_nodes = nodes_stats.get("disabled", 0)
                 # Для online нужен API
                 try:
-                    nodes_data = await api_client.get_nodes()
+                    nodes_data = await internal_api_client.get_nodes()
                     nodes_list = nodes_data.get("response", [])
                     online_nodes = sum(1 for n in nodes_list if n.get("isConnected"))
                 except Exception:
                     online_nodes = nodes_stats.get("connected", 0)
             else:
-                nodes_data = await api_client.get_nodes()
+                nodes_data = await internal_api_client.get_nodes()
                 nodes_list = nodes_data.get("response", [])
                 total_nodes = len(nodes_list)
                 enabled_nodes = sum(1 for n in nodes_list if not n.get("isDisabled"))
@@ -503,21 +504,21 @@ async def _fetch_stats_text() -> str:
         lines.append("")
         lines.append(f"*{_('stats.resources_section')}*")
         try:
-            templates_data = await api_client.get_templates()
+            templates_data = await internal_api_client.get_templates()
             templates = templates_data.get("response", {}).get("templates", [])
             lines.append(f"  {_('stats.templates').format(count=len(templates))}")
         except Exception:
             lines.append(f"  {_('stats.templates').format(count='—')}")
 
         try:
-            tokens_data = await api_client.get_tokens()
+            tokens_data = await internal_api_client.get_tokens()
             tokens = tokens_data.get("response", {}).get("apiKeys", [])
             lines.append(f"  {_('stats.tokens').format(count=len(tokens))}")
         except Exception:
             lines.append(f"  {_('stats.tokens').format(count='—')}")
 
         try:
-            snippets_data = await api_client.get_snippets()
+            snippets_data = await internal_api_client.get_snippets()
             snippets = snippets_data.get("response", {}).get("snippets", [])
             lines.append(f"  {_('stats.snippets').format(count=len(snippets))}")
         except Exception:
@@ -534,7 +535,7 @@ async def _fetch_stats_text() -> str:
 async def _fetch_bandwidth_text() -> str:
     """Получает текст для отображения статистики трафика."""
     try:
-        data = await api_client.get_bandwidth_stats()
+        data = await internal_api_client.get_bandwidth_stats()
         return build_bandwidth_stats(data, _)
     except UnauthorizedError:
         return _("errors.unauthorized")
@@ -544,17 +545,55 @@ async def _fetch_bandwidth_text() -> str:
 
 
 @router.callback_query(F.data == "menu:health")
-async def cb_health(callback: CallbackQuery) -> None:
+async def cb_health(callback: CallbackQuery, admin: BotAdmin) -> None:
     """Обработчик кнопки 'Здоровье'."""
     if await _not_admin(callback):
         return
     await callback.answer()
     text = await _fetch_health_text()
-    await _edit_text_safe(callback.message, text, reply_markup=system_menu_keyboard(), parse_mode="HTML")
+    await _edit_text_safe(callback.message, text, reply_markup=system_menu_keyboard(admin=admin), parse_mode="HTML")
+
+
+@router.callback_query(F.data == "menu:quota")
+async def cb_quota(callback: CallbackQuery, admin: BotAdmin) -> None:
+    """Обработчик кнопки 'Мои квоты'."""
+    if await _not_admin(callback):
+        return
+    await callback.answer()
+
+    if admin.account_id is None:
+        text = _("quota.no_account")
+        await _edit_text_safe(callback.message, text, reply_markup=system_menu_keyboard(admin=admin))
+        return
+
+    def _fmt_limit(val) -> str:
+        return str(val) if val is not None else _("quota.unlimited")
+
+    traffic_gb = admin.traffic_used_bytes / (1024 ** 3) if admin.traffic_used_bytes else 0
+
+    lines = [f"<b>{_('quota.title')}</b>", ""]
+    lines.append(_("quota.users_limit").format(used=admin.users_created, limit=_fmt_limit(admin.max_users)))
+    lines.append(_("quota.nodes_limit").format(used=admin.nodes_created, limit=_fmt_limit(admin.max_nodes)))
+    lines.append(_("quota.hosts_limit").format(used=admin.hosts_created, limit=_fmt_limit(admin.max_hosts)))
+
+    if admin.unlimited_traffic_policy == "disabled" and admin.max_traffic_gb is not None:
+        used_gb = round(admin.traffic_used_bytes / 1073741824, 1)
+        limit_gb = int(admin.max_traffic_gb)
+        pct = min(100, round(used_gb / limit_gb * 100)) if limit_gb > 0 else 0
+        lines.append(f"📶 Traffic: {used_gb}/{limit_gb} GB ({pct}%)")
+    else:
+        lines.append(f"📶 Traffic: {traffic_gb:.1f} GB / ∞")
+
+    text = "\n".join(lines)
+    await _edit_text_safe(
+        callback.message, text,
+        reply_markup=system_menu_keyboard(admin=admin),
+        parse_mode="HTML",
+    )
 
 
 @router.callback_query(F.data == "menu:stats")
-async def cb_stats(callback: CallbackQuery) -> None:
+async def cb_stats(callback: CallbackQuery, admin: BotAdmin) -> None:
     """Обработчик кнопки 'Статистика'."""
     if await _not_admin(callback):
         return
@@ -564,7 +603,7 @@ async def cb_stats(callback: CallbackQuery) -> None:
 
 
 @router.callback_query(F.data.in_(["stats:panel", "stats:server", "stats:traffic", "stats:extended"]))
-async def cb_stats_type(callback: CallbackQuery) -> None:
+async def cb_stats_type(callback: CallbackQuery, admin: BotAdmin) -> None:
     """Обработчик выбора типа статистики."""
     if await _not_admin(callback):
         return
@@ -589,7 +628,7 @@ async def cb_stats_type(callback: CallbackQuery) -> None:
 
 
 @router.callback_query(F.data == "stats:refresh")
-async def cb_stats_refresh(callback: CallbackQuery) -> None:
+async def cb_stats_refresh(callback: CallbackQuery, admin: BotAdmin) -> None:
     """Обработчик кнопки 'Обновить' в меню статистики."""
     if await _not_admin(callback):
         return
@@ -600,16 +639,16 @@ async def cb_stats_refresh(callback: CallbackQuery) -> None:
 
 
 @router.callback_query(F.data == "menu:system_nodes")
-async def cb_system_nodes(callback: CallbackQuery) -> None:
+async def cb_system_nodes(callback: CallbackQuery, admin: BotAdmin) -> None:
     """Обработчик кнопки 'Управление нодами'."""
     if await _not_admin(callback):
         return
     await callback.answer()
-    await _edit_text_safe(callback.message, _("system_nodes.overview"), reply_markup=system_nodes_keyboard())
+    await _edit_text_safe(callback.message, _("system_nodes.overview"), reply_markup=system_nodes_keyboard(admin=admin))
 
 
 @router.callback_query(F.data.startswith("system:nodes:"))
-async def cb_system_nodes_actions(callback: CallbackQuery) -> None:
+async def cb_system_nodes_actions(callback: CallbackQuery, admin: BotAdmin) -> None:
     """Обработчик действий с системными нодами."""
     if await _not_admin(callback):
         return
@@ -619,7 +658,7 @@ async def cb_system_nodes_actions(callback: CallbackQuery) -> None:
 
     if action == "list":
         text = await _fetch_nodes_text()
-        await _edit_text_safe(callback.message, text, reply_markup=system_nodes_keyboard())
+        await _edit_text_safe(callback.message, text, reply_markup=system_nodes_keyboard(admin=admin))
         return
 
     # Все массовые операции перенесены в bulk.py
@@ -629,7 +668,7 @@ async def cb_system_nodes_actions(callback: CallbackQuery) -> None:
 async def _fetch_traffic_stats_text(start: str, end: str) -> str:
     """Получает статистику трафика за период."""
     try:
-        data = await api_client.get_nodes_usage_range(start, end, top_nodes_limit=20)
+        data = await internal_api_client.get_nodes_usage_range(start, end, top_nodes_limit=20)
         
         # Логируем структуру ответа для отладки
         logger.info("API response for traffic stats: type=%s, keys=%s", type(data).__name__, list(data.keys()) if isinstance(data, dict) else "N/A")
@@ -740,7 +779,7 @@ async def _fetch_traffic_stats_text(start: str, end: str) -> str:
 
 
 @router.callback_query(F.data.startswith("stats:traffic_period:"))
-async def cb_stats_traffic_period(callback: CallbackQuery) -> None:
+async def cb_stats_traffic_period(callback: CallbackQuery, admin: BotAdmin) -> None:
     """Обработчик выбора периода для статистики трафика."""
     if await _not_admin(callback):
         return
@@ -848,19 +887,18 @@ async def _fetch_asn_sync_status_text() -> str:
                 lines.append("")
                 lines.append(f"*{_('asn_sync.by_type')}:*")
                 
-                # Маппинг типов на русские названия
                 type_names = {
-                    'isp': 'Крупные провайдеры',
-                    'regional_isp': 'Региональные ISP',
-                    'fixed': 'Проводной ШПД',
-                    'mobile_isp': 'Мобильные операторы',
-                    'hosting': 'Хостинг',
-                    'business': 'Корпоративные',
-                    'mobile': 'Мобильные пулы',
-                    'infrastructure': 'Магистральная инфраструктура',
-                    'vpn': 'VPN/Proxy',
-                    'residential': 'Домашние',
-                    'datacenter': 'Датацентры',
+                    'isp': _('asn_sync.type_isp'),
+                    'regional_isp': _('asn_sync.type_regional_isp'),
+                    'fixed': _('asn_sync.type_fixed'),
+                    'mobile_isp': _('asn_sync.type_mobile_isp'),
+                    'hosting': _('asn_sync.type_hosting'),
+                    'business': _('asn_sync.type_business'),
+                    'mobile': _('asn_sync.type_mobile'),
+                    'infrastructure': _('asn_sync.type_infrastructure'),
+                    'vpn': _('asn_sync.type_vpn'),
+                    'residential': _('asn_sync.type_residential'),
+                    'datacenter': _('asn_sync.type_datacenter'),
                 }
                 
                 for type_row in type_rows:
@@ -877,17 +915,17 @@ async def _fetch_asn_sync_status_text() -> str:
 
 
 @router.callback_query(F.data == "menu:sync_asn")
-async def cb_sync_asn_menu(callback: CallbackQuery) -> None:
-    """Обработчик кнопки 'Синхронизация ASN'."""
+async def cb_sync_asn_menu(callback: CallbackQuery, admin: BotAdmin) -> None:
+    """Обработчик кнопки 'ASN Sync'."""
     if await _not_admin(callback):
         return
     await callback.answer()
-    text = _("asn_sync.menu_title")
-    await _edit_text_safe(callback.message, text, reply_markup=asn_sync_menu_keyboard(), parse_mode="HTML")
+    text = await _fetch_asn_sync_status_text()
+    await _edit_text_safe(callback.message, text, reply_markup=asn_sync_menu_keyboard(admin=admin), parse_mode="HTML")
 
 
 @router.callback_query(F.data.startswith("asn_sync:"))
-async def cb_asn_sync_action(callback: CallbackQuery) -> None:
+async def cb_asn_sync_action(callback: CallbackQuery, admin: BotAdmin) -> None:
     """Обработчик действий синхронизации ASN."""
     if await _not_admin(callback):
         return
@@ -898,11 +936,13 @@ async def cb_asn_sync_action(callback: CallbackQuery) -> None:
     if action == "status":
         await callback.answer()
         text = await _fetch_asn_sync_status_text()
-        await _edit_text_safe(callback.message, text, reply_markup=asn_sync_menu_keyboard(), parse_mode="HTML")
+        await _edit_text_safe(callback.message, text, reply_markup=asn_sync_menu_keyboard(admin=admin), parse_mode="HTML")
         return
     
     if action == "custom":
         await callback.answer()
+        if not await require_permission(callback, admin, "settings", "edit"):
+            return
         # Запрашиваем пользовательский лимит
         user_id = callback.from_user.id
         PENDING_INPUT[user_id] = {
@@ -910,10 +950,13 @@ async def cb_asn_sync_action(callback: CallbackQuery) -> None:
             "message_id": callback.message.message_id
         }
         text = _("asn_sync.enter_limit")
-        await _edit_text_safe(callback.message, text, reply_markup=asn_sync_menu_keyboard(), parse_mode="HTML")
+        await _edit_text_safe(callback.message, text, reply_markup=asn_sync_menu_keyboard(admin=admin), parse_mode="HTML")
         return
     
     # Запускаем синхронизацию
+    if not await require_permission(callback, admin, "settings", "edit"):
+        return
+
     await callback.answer(_("asn_sync.starting"), show_alert=False)
     
     # Отправляем сообщение о начале синхронизации
@@ -950,7 +993,7 @@ async def cb_asn_sync_action(callback: CallbackQuery) -> None:
             result_text += f"{_('asn_sync.failed')}: *{stats['failed']}*\n"
             result_text += f"{_('asn_sync.skipped')}: *{stats['skipped']}*"
             
-            await _edit_text_safe(status_message, result_text, reply_markup=asn_sync_menu_keyboard(), parse_mode="HTML")
+            await _edit_text_safe(status_message, result_text, reply_markup=asn_sync_menu_keyboard(admin=admin), parse_mode="HTML")
             
         finally:
             await parser_service.close()
@@ -958,14 +1001,18 @@ async def cb_asn_sync_action(callback: CallbackQuery) -> None:
     except Exception as e:
         logger.error("Error during ASN sync: %s", e, exc_info=True)
         error_text = f"{_('asn_sync.error')}: {str(e)}"
-        await _edit_text_safe(status_message, error_text, reply_markup=asn_sync_menu_keyboard(), parse_mode="HTML")
+        await _edit_text_safe(status_message, error_text, reply_markup=asn_sync_menu_keyboard(admin=admin), parse_mode="HTML")
 
 
-async def _handle_asn_sync_custom_limit_input(message: Message, ctx: dict) -> None:
+async def _handle_asn_sync_custom_limit_input(message: Message, ctx: dict, admin: BotAdmin | None = None) -> None:
     """Обработчик ввода пользовательского лимита для синхронизации ASN."""
     from src.handlers.common import _edit_text_safe, _send_clean_message
     from src.keyboards.asn_sync_menu import asn_sync_menu_keyboard
     
+    _admin = await resolve_admin(message.from_user.id)
+    if not _admin or not await require_permission(message, _admin, "settings", "edit"):
+        return
+
     try:
         limit = int(message.text.strip())
         if limit <= 0:
@@ -1000,7 +1047,7 @@ async def _handle_asn_sync_custom_limit_input(message: Message, ctx: dict) -> No
                 result_text += f"{_('asn_sync.failed')}: *{stats['failed']}*\n"
                 result_text += f"{_('asn_sync.skipped')}: *{stats['skipped']}*"
                 
-                await _edit_text_safe(status_message, result_text, reply_markup=asn_sync_menu_keyboard(), parse_mode="HTML")
+                await _edit_text_safe(status_message, result_text, reply_markup=asn_sync_menu_keyboard(admin=_admin), parse_mode="HTML")
                 
             finally:
                 await parser_service.close()
@@ -1008,7 +1055,7 @@ async def _handle_asn_sync_custom_limit_input(message: Message, ctx: dict) -> No
         except Exception as e:
             logger.error("Error during ASN sync: %s", e, exc_info=True)
             error_text = f"{_('asn_sync.error')}: {str(e)}"
-            await _edit_text_safe(status_message, error_text, reply_markup=asn_sync_menu_keyboard(), parse_mode="HTML")
+            await _edit_text_safe(status_message, error_text, reply_markup=asn_sync_menu_keyboard(admin=_admin), parse_mode="HTML")
     
     except ValueError:
         await _send_clean_message(message, _("asn_sync.invalid_limit"))

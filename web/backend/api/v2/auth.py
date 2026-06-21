@@ -683,7 +683,18 @@ async def get_current_user(admin: AdminUser = Depends(get_current_admin)):
     # Check if password is auto-generated (needs changing)
     password_is_generated = False
     admin_email = None
-    if admin.auth_method == "password" and admin.account_id:
+    unlimited_traffic_policy = "allowed"
+    unrestricted_user_access = False
+    max_users = None
+    max_traffic_gb = None
+    max_nodes = None
+    max_hosts = None
+    users_created = 0
+    traffic_used_bytes = 0
+    nodes_created = 0
+    hosts_created = 0
+
+    if admin.account_id:
         try:
             from web.backend.core.rbac import get_admin_account_by_id
             account = await get_admin_account_by_id(admin.account_id)
@@ -691,6 +702,16 @@ async def get_current_user(admin: AdminUser = Depends(get_current_admin)):
                 if account.get("is_generated_password"):
                     password_is_generated = True
                 admin_email = account.get("email")
+                unlimited_traffic_policy = account.get("unlimited_traffic_policy", "allowed")
+                unrestricted_user_access = account.get("unrestricted_user_access", False) or False
+                max_users = account.get("max_users")
+                max_traffic_gb = account.get("max_traffic_gb")
+                max_nodes = account.get("max_nodes")
+                max_hosts = account.get("max_hosts")
+                users_created = account.get("users_created", 0) or 0
+                traffic_used_bytes = account.get("traffic_used_bytes", 0) or 0
+                nodes_created = account.get("nodes_created", 0) or 0
+                hosts_created = account.get("hosts_created", 0) or 0
         except Exception as e:
             logger.debug("Non-critical: %s", e)
 
@@ -706,6 +727,17 @@ async def get_current_user(admin: AdminUser = Depends(get_current_admin)):
         email=admin_email,
         role=admin.role,
         role_id=admin.role_id,
+        account_id=admin.account_id,
+        max_users=max_users,
+        max_traffic_gb=max_traffic_gb,
+        max_nodes=max_nodes,
+        max_hosts=max_hosts,
+        users_created=users_created,
+        traffic_used_bytes=traffic_used_bytes,
+        nodes_created=nodes_created,
+        hosts_created=hosts_created,
+        unlimited_traffic_policy=unlimited_traffic_policy,
+        unrestricted_user_access=unrestricted_user_access,
         auth_method=admin.auth_method,
         password_is_generated=password_is_generated,
         permissions=permissions,

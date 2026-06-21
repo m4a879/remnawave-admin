@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useConfigStore } from '../store/configStore';
 import { RemnawaveClient, type RemnawaveProfile } from '../utils/remnawave-client';
 import { toast } from 'sonner';
+import i18next from 'i18next';
 
 export const useRemnawaveEditor = (onClose: () => void) => {
     const { 
@@ -43,23 +44,23 @@ export const useRemnawaveEditor = (onClose: () => void) => {
 
     const handleConnect = useCallback(async () => {
         if (!url || !apiToken) {
-            toast.error("Please fill URL and API Token");
+            toast.error(i18next.t('xray.fillUrlAndToken'));
             return;
         }
         setLoading(true);
         try {
             const client = new RemnawaveClient(url);
             client.setToken(apiToken);
-            
+
             const loadedProfiles = await client.getConfigProfiles();
-            
+
             // Если профили загрузились — токен валидный
             connectRemnawaveToken(url, apiToken);
             setProfiles(loadedProfiles);
             setStep('select');
         } catch (e: any) {
             console.error(e);
-            toast.error("Connection failed", { description: "Invalid token or panel URL" });
+            toast.error(i18next.t('xray.connectionFailed'), { description: i18next.t('xray.invalidTokenOrUrl') });
         } finally {
             setLoading(false);
         }

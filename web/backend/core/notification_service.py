@@ -12,6 +12,14 @@ from typing import Any, Dict, List, Optional
 import httpx
 
 from shared.metrics import NOTIFICATIONS_FAILED, NOTIFICATIONS_SENT
+from shared.db_schema import (
+    ADMIN_TABLE,
+    SMTP_CONFIG_TABLE,
+    NOTIFICATIONS_TABLE,
+    NOTIFICATION_CHANNELS_TABLE,
+    NOTIFICATION_CHANNEL_CONFIGS_TABLE,
+)
+from shared.db_query import select_sql, insert_sql
 
 logger = logging.getLogger(__name__)
 
@@ -62,7 +70,7 @@ async def _get_smtp_config() -> Optional[Dict[str, Any]]:
         from shared.database import db_service
         async with db_service.acquire() as conn:
             row = await conn.fetchrow(
-                "SELECT * FROM smtp_config WHERE is_enabled = true ORDER BY id LIMIT 1"
+                select_sql(SMTP_CONFIG_TABLE, "*", "WHERE is_enabled = true ORDER BY id LIMIT 1")
             )
             return dict(row) if row else None
     except Exception as e:
@@ -212,6 +220,51 @@ async def test_smtp(to_email: str) -> Dict[str, Any]:
 
 # ── Telegram ─────────────────────────────────────────────────────
 
+async def _send_telegram_via_bot_callback(
+    chat_id: str,
+    title: str,
+    body: str,
+    topic_id: Optional[str] = None,
+    reply_markup: Optional[Dict[str, Any]] = None,
+) -> bool:
+    """Send Telegram notification via bot callback endpoint.
+
+    Calls the bot's /internal/telegram-send endpoint with INTERNAL_API_SECRET.
+    This is the preferred method as the bot controls its own token.
+    """
+    import os
+    callback_url = os.environ.get("BOT_TELEGRAM_SEND_URL", "http://bot:8080/internal/telegram-send")
+    internal_secret = os.environ.get("INTERNAL_API_SECRET", "")
+    if not internal_secret:
+        return False
+
+    payload: Dict[str, Any] = {
+        "chat_id": chat_id,
+        "title": title,
+        "body": body,
+    }
+    if topic_id and str(topic_id) != "0":
+        payload["topic_id"] = str(topic_id)
+    if reply_markup:
+        payload["reply_markup"] = reply_markup
+
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.post(
+                callback_url,
+                json=payload,
+                headers={"X-Internal-Api-Secret": internal_secret},
+            )
+            if resp.status_code == 200:
+                logger.debug("Bot callback sent to chat_id=%s", chat_id)
+                return True
+            logger.warning("Bot callback failed: %d %s", resp.status_code, resp.text[:200])
+            return False
+    except Exception as e:
+        logger.warning("Bot callback error: %s", e)
+        return False
+
+
 async def send_telegram(
     chat_id: str,
     title: str,
@@ -222,9 +275,16 @@ async def send_telegram(
 ) -> bool:
     """Send notification to Telegram chat/group.
 
-    Uses the provided bot_token, or falls back to the global BOT_TOKEN from settings.
+    Tries bot callback first (if INTERNAL_API_SECRET is configured), then
+    falls back to direct Telegram Bot API with the provided or global bot_token.
     ``reply_markup`` is an optional InlineKeyboardMarkup dict for quick action buttons.
     """
+    # Try bot callback first (preferred)
+    callback_ok = await _send_telegram_via_bot_callback(chat_id, title, body, topic_id, reply_markup)
+    if callback_ok:
+        NOTIFICATIONS_SENT.labels(channel="telegram").inc()
+        return True
+
     try:
         if not bot_token:
             from web.backend.core.config import get_web_settings
@@ -363,8 +423,7 @@ async def create_notification(
                 # Deduplication: skip if same group_key exists within last 5 min
                 if group_key:
                     existing = await conn.fetchval(
-                        "SELECT id FROM notifications WHERE admin_id = $1 AND group_key = $2 "
-                        "AND created_at > NOW() - INTERVAL '5 minutes'",
+                        select_sql(NOTIFICATIONS_TABLE, "id", "WHERE admin_id = $1 AND group_key = $2 AND created_at > NOW() - INTERVAL '5 minutes'"),
                         admin_id, group_key,
                     )
                     if existing:
@@ -372,8 +431,7 @@ async def create_notification(
                         return existing
 
                 notification_id = await conn.fetchval(
-                    "INSERT INTO notifications (admin_id, type, severity, title, body, link, source, source_id, group_key) "
-                    "VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id",
+                    insert_sql(NOTIFICATIONS_TABLE, ["admin_id", "type", "severity", "title", "body", "link", "source", "source_id", "group_key"], "RETURNING id"),
                     admin_id, type, severity, title, body, link, source, source_id, group_key,
                 )
                 if notification_id is not None:
@@ -382,15 +440,20 @@ async def create_notification(
             # Broadcast to all admins
             all_deduplicated = True
             async with db_service.acquire() as conn:
-                admin_ids = await conn.fetch("SELECT id FROM admin_accounts WHERE is_active = true")
+                admin_ids = await conn.fetch(
+                    select_sql(
+                        ADMIN_TABLE,
+                        "id",
+                        "WHERE is_active = true",
+                    ),
+                )
                 for row in admin_ids:
                     aid = row["id"]
 
                     # Deduplication: skip if same group_key exists within last 15 min
                     if group_key:
                         existing = await conn.fetchval(
-                            "SELECT id FROM notifications WHERE admin_id = $1 AND group_key = $2 "
-                            "AND created_at > NOW() - INTERVAL '15 minutes'",
+                            select_sql(NOTIFICATIONS_TABLE, "id", "WHERE admin_id = $1 AND group_key = $2 AND created_at > NOW() - INTERVAL '15 minutes'"),
                             aid, group_key,
                         )
                         if existing:
@@ -448,7 +511,13 @@ async def create_notification(
             # For broadcasts, dispatch to all admins' external channels
             try:
                 async with db_service.acquire() as conn:
-                    admin_ids_rows = await conn.fetch("SELECT id FROM admin_accounts WHERE is_active = true")
+                    admin_ids_rows = await conn.fetch(
+                        select_sql(
+                            ADMIN_TABLE,
+                            "id",
+                            "WHERE is_active = true",
+                        ),
+                    )
 
                 if admin_ids_rows:
                     logger.debug("Broadcasting external channels to %d admin accounts", len(admin_ids_rows))
@@ -528,8 +597,7 @@ async def _collect_telegram_chat_ids(admin_id: int) -> set:
         from shared.database import db_service
         async with db_service.acquire() as conn:
             rows = await conn.fetch(
-                "SELECT config FROM notification_channels "
-                "WHERE admin_id = $1 AND channel_type = 'telegram' AND is_enabled = true",
+                select_sql(NOTIFICATION_CHANNELS_TABLE, "config", "WHERE admin_id = $1 AND channel_type = 'telegram' AND is_enabled = true"),
                 admin_id,
             )
         chat_ids = set()
@@ -584,8 +652,7 @@ async def _dispatch_external(
         from shared.database import db_service
         async with db_service.acquire() as conn:
             channels = await conn.fetch(
-                "SELECT channel_type, config FROM notification_channels "
-                "WHERE admin_id = $1 AND is_enabled = true",
+                select_sql(NOTIFICATION_CHANNELS_TABLE, "channel_type, config", "WHERE admin_id = $1 AND is_enabled = true"),
                 admin_id,
             )
 

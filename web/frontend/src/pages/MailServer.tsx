@@ -780,7 +780,7 @@ function InboxTab({ canEdit, canDelete }: { canEdit: boolean; canDelete: boolean
                 <p><span className="text-muted-foreground">{t('mailServer.to')}:</span> <span className="text-dark-100">{detail.to_header || detail.rcpt_to}</span></p>
                 <p><span className="text-muted-foreground">{t('mailServer.date')}:</span> <span className="text-dark-100">{formatDate(detail.date_header)}</span></p>
                 {detail.remote_ip && (
-                  <p><span className="text-muted-foreground">IP:</span> <span className="text-dark-100">{detail.remote_ip}</span></p>
+                  <p><span className="text-muted-foreground">{t('mailServer.ip')}</span> <span className="text-dark-100">{detail.remote_ip}</span></p>
                 )}
               </div>
               <div className="border-t border-[var(--glass-border)] pt-3">

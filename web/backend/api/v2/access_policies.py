@@ -14,19 +14,20 @@ from pydantic import BaseModel, Field
 
 from web.backend.api.deps import AdminUser, require_permission, get_client_ip
 from web.backend.core.errors import api_error, E
-from web.backend.core.rbac import write_audit_log, invalidate_scope_cache
+from web.backend.core.audit import write_audit_log
+from web.backend.core.rbac import invalidate_scope_cache
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-VALID_RESOURCE_TYPES = {"node", "host", "squad"}
+VALID_RESOURCE_TYPES = {"node", "host", "squad", "user"}
 VALID_SCOPE_TYPES = {"uuid", "tag"}
 VALID_ACTIONS = {"view", "edit", "delete"}
 
 
 class RuleIn(BaseModel):
-    resource_type: str = Field(..., description="node | host | squad")
+    resource_type: str = Field(..., description="node | host | squad | user")
     scope_type: str = Field(..., description="uuid | tag")
     scope_value: str = Field(..., min_length=1, max_length=200)
     actions: List[str] = Field(default_factory=lambda: ["view"])

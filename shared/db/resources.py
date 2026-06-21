@@ -6,6 +6,12 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from shared.logger import logger
+from shared.db_schema import (
+    HOSTS_TABLE, CONFIG_PROFILES_TABLE, SYNC_METADATA_TABLE,
+    API_TOKENS_TABLE, TEMPLATES_TABLE, SNIPPETS_TABLE,
+    INTERNAL_SQUADS_TABLE, EXTERNAL_SQUADS_TABLE, NODES_TABLE,
+)
+from shared.db_query import select_sql, insert_sql, update_sql, delete_sql
 from shared.metrics import SYNC_RUNS
 from shared.db._base import _db_row_to_api_format, _parse_timestamp
 
@@ -19,7 +25,9 @@ class ResourcesMixin:
             return []
         
         async with self.acquire() as conn:
-            rows = await conn.fetch("SELECT * FROM hosts ORDER BY remark")
+            rows = await conn.fetch(
+                select_sql(HOSTS_TABLE, "*", "ORDER BY remark")
+            )
             return [_db_row_to_api_format(row) for row in rows]
     
     async def get_host_by_uuid(self, uuid: str) -> Optional[Dict[str, Any]]:
@@ -29,7 +37,7 @@ class ResourcesMixin:
         
         async with self.acquire() as conn:
             row = await conn.fetchrow(
-                "SELECT * FROM hosts WHERE uuid = $1",
+                select_sql(HOSTS_TABLE, "*", "WHERE uuid = $1"),
                 uuid
             )
             return _db_row_to_api_format(row) if row else None
@@ -44,13 +52,11 @@ class ResourcesMixin:
         
         async with self.acquire() as conn:
             row = await conn.fetchrow(
-                """
-                SELECT 
+                select_sql(HOSTS_TABLE, """
                     COUNT(*) as total,
                     COUNT(*) FILTER (WHERE NOT is_disabled) as enabled,
                     COUNT(*) FILTER (WHERE is_disabled) as disabled
-                FROM hosts
-                """
+                """)
             )
             return dict(row) if row else {"total": 0, "enabled": 0, "disabled": 0}
     
@@ -68,18 +74,18 @@ class ResourcesMixin:
         
         async with self.acquire() as conn:
             await conn.execute(
-                """
-                INSERT INTO hosts (
-                    uuid, remark, address, port, is_disabled, updated_at, raw_data
-                ) VALUES ($1, $2, $3, $4, $5, NOW(), $6)
-                ON CONFLICT (uuid) DO UPDATE SET
+                insert_sql(
+                    HOSTS_TABLE,
+                    ["uuid", "remark", "address", "port", "is_disabled", "updated_at", "raw_data"],
+                    values="$1, $2, $3, $4, $5, NOW(), $6",
+                    suffix="""ON CONFLICT (uuid) DO UPDATE SET
                     remark = EXCLUDED.remark,
                     address = EXCLUDED.address,
                     port = EXCLUDED.port,
                     is_disabled = EXCLUDED.is_disabled,
                     updated_at = NOW(),
-                    raw_data = EXCLUDED.raw_data
-                """,
+                    raw_data = EXCLUDED.raw_data""",
+                ),
                 uuid,
                 response.get("remark"),
                 response.get("address"),
@@ -112,7 +118,7 @@ class ResourcesMixin:
         
         async with self.acquire() as conn:
             result = await conn.execute(
-                "DELETE FROM hosts WHERE uuid = $1",
+                delete_sql(HOSTS_TABLE, "uuid = $1"),
                 uuid
             )
             return result == "DELETE 1"
@@ -125,7 +131,9 @@ class ResourcesMixin:
             return []
         
         async with self.acquire() as conn:
-            rows = await conn.fetch("SELECT * FROM config_profiles ORDER BY name")
+            rows = await conn.fetch(
+                select_sql(CONFIG_PROFILES_TABLE, "*", "ORDER BY name")
+            )
             return [_db_row_to_api_format(row) for row in rows]
     
     async def get_config_profile_by_uuid(self, uuid: str) -> Optional[Dict[str, Any]]:
@@ -135,7 +143,7 @@ class ResourcesMixin:
         
         async with self.acquire() as conn:
             row = await conn.fetchrow(
-                "SELECT * FROM config_profiles WHERE uuid = $1",
+                select_sql(CONFIG_PROFILES_TABLE, "*", "WHERE uuid = $1"),
                 uuid
             )
             return _db_row_to_api_format(row) if row else None
@@ -154,14 +162,15 @@ class ResourcesMixin:
         
         async with self.acquire() as conn:
             await conn.execute(
-                """
-                INSERT INTO config_profiles (uuid, name, updated_at, raw_data)
-                VALUES ($1, $2, NOW(), $3)
-                ON CONFLICT (uuid) DO UPDATE SET
+                insert_sql(
+                    CONFIG_PROFILES_TABLE,
+                    ["uuid", "name", "updated_at", "raw_data"],
+                    values="$1, $2, NOW(), $3",
+                    suffix="""ON CONFLICT (uuid) DO UPDATE SET
                     name = EXCLUDED.name,
                     updated_at = NOW(),
-                    raw_data = EXCLUDED.raw_data
-                """,
+                    raw_data = EXCLUDED.raw_data""",
+                ),
                 uuid,
                 response.get("name"),
                 json.dumps(response),
@@ -193,7 +202,7 @@ class ResourcesMixin:
         
         async with self.acquire() as conn:
             row = await conn.fetchrow(
-                "SELECT * FROM sync_metadata WHERE key = $1",
+                select_sql(SYNC_METADATA_TABLE, "*", "WHERE key = $1"),
                 key
             )
             return dict(row) if row else None
@@ -211,15 +220,16 @@ class ResourcesMixin:
 
         async with self.acquire() as conn:
             await conn.execute(
-                """
-                INSERT INTO sync_metadata (key, last_sync_at, sync_status, records_synced, error_message)
-                VALUES ($1, NOW(), $2, $3, $4)
-                ON CONFLICT (key) DO UPDATE SET
+                insert_sql(
+                    SYNC_METADATA_TABLE,
+                    ["key", "last_sync_at", "sync_status", "records_synced", "error_message"],
+                    values="$1, NOW(), $2, $3, $4",
+                    suffix="""ON CONFLICT (key) DO UPDATE SET
                     last_sync_at = NOW(),
                     sync_status = EXCLUDED.sync_status,
                     records_synced = EXCLUDED.records_synced,
-                    error_message = EXCLUDED.error_message
-                """,
+                    error_message = EXCLUDED.error_message""",
+                ),
                 key, status, records_synced, error_message
             )
 
@@ -252,15 +262,16 @@ class ResourcesMixin:
         
         async with self.acquire() as conn:
             await conn.execute(
-                """
-                INSERT INTO api_tokens (uuid, name, token_hash, created_at, updated_at, raw_data)
-                VALUES ($1, $2, $3, $4, NOW(), $5)
-                ON CONFLICT (uuid) DO UPDATE SET
+                insert_sql(
+                    API_TOKENS_TABLE,
+                    ["uuid", "name", "token_hash", "created_at", "updated_at", "raw_data"],
+                    values="$1, $2, $3, $4, NOW(), $5",
+                    suffix="""ON CONFLICT (uuid) DO UPDATE SET
                     name = EXCLUDED.name,
                     token_hash = EXCLUDED.token_hash,
                     updated_at = NOW(),
-                    raw_data = EXCLUDED.raw_data
-                """,
+                    raw_data = EXCLUDED.raw_data""",
+                ),
                 uuid,
                 token.get("name") or token.get("tokenName"),
                 token.get("token") or token.get("tokenHash"),
@@ -276,7 +287,7 @@ class ResourcesMixin:
         
         async with self.acquire() as conn:
             rows = await conn.fetch(
-                "SELECT * FROM api_tokens ORDER BY name"
+                select_sql(API_TOKENS_TABLE, "*", "ORDER BY name")
             )
             return [_db_row_to_api_format(row) for row in rows]
     
@@ -287,7 +298,7 @@ class ResourcesMixin:
         
         async with self.acquire() as conn:
             row = await conn.fetchrow(
-                "SELECT * FROM api_tokens WHERE uuid = $1",
+                select_sql(API_TOKENS_TABLE, "*", "WHERE uuid = $1"),
                 uuid
             )
             return _db_row_to_api_format(row) if row else None
@@ -299,7 +310,7 @@ class ResourcesMixin:
         
         async with self.acquire() as conn:
             result = await conn.execute(
-                "DELETE FROM api_tokens WHERE uuid = $1",
+                delete_sql(API_TOKENS_TABLE, "uuid = $1"),
                 uuid
             )
             return result == "DELETE 1"
@@ -310,7 +321,7 @@ class ResourcesMixin:
             return 0
         
         async with self.acquire() as conn:
-            result = await conn.execute("DELETE FROM api_tokens")
+            result = await conn.execute(delete_sql(API_TOKENS_TABLE, "TRUE"))
             try:
                 return int(result.split()[-1])
             except (IndexError, ValueError):
@@ -339,16 +350,17 @@ class ResourcesMixin:
         
         async with self.acquire() as conn:
             await conn.execute(
-                """
-                INSERT INTO templates (uuid, name, template_type, sort_order, created_at, updated_at, raw_data)
-                VALUES ($1, $2, $3, $4, $5, NOW(), $6)
-                ON CONFLICT (uuid) DO UPDATE SET
+                insert_sql(
+                    TEMPLATES_TABLE,
+                    ["uuid", "name", "template_type", "sort_order", "created_at", "updated_at", "raw_data"],
+                    values="$1, $2, $3, $4, $5, NOW(), $6",
+                    suffix="""ON CONFLICT (uuid) DO UPDATE SET
                     name = EXCLUDED.name,
                     template_type = EXCLUDED.template_type,
                     sort_order = EXCLUDED.sort_order,
                     updated_at = NOW(),
-                    raw_data = EXCLUDED.raw_data
-                """,
+                    raw_data = EXCLUDED.raw_data""",
+                ),
                 uuid,
                 tpl.get("name"),
                 tpl.get("type") or tpl.get("templateType"),
@@ -365,7 +377,7 @@ class ResourcesMixin:
         
         async with self.acquire() as conn:
             rows = await conn.fetch(
-                "SELECT * FROM templates ORDER BY sort_order, name"
+                select_sql(TEMPLATES_TABLE, "*", "ORDER BY sort_order, name")
             )
             return [_db_row_to_api_format(row) for row in rows]
     
@@ -376,7 +388,7 @@ class ResourcesMixin:
         
         async with self.acquire() as conn:
             row = await conn.fetchrow(
-                "SELECT * FROM templates WHERE uuid = $1",
+                select_sql(TEMPLATES_TABLE, "*", "WHERE uuid = $1"),
                 uuid
             )
             return _db_row_to_api_format(row) if row else None
@@ -388,7 +400,7 @@ class ResourcesMixin:
         
         async with self.acquire() as conn:
             result = await conn.execute(
-                "DELETE FROM templates WHERE uuid = $1",
+                delete_sql(TEMPLATES_TABLE, "uuid = $1"),
                 uuid
             )
             return result == "DELETE 1"
@@ -399,7 +411,7 @@ class ResourcesMixin:
             return 0
         
         async with self.acquire() as conn:
-            result = await conn.execute("DELETE FROM templates")
+            result = await conn.execute(delete_sql(TEMPLATES_TABLE, "TRUE"))
             try:
                 return int(result.split()[-1])
             except (IndexError, ValueError):
@@ -430,14 +442,15 @@ class ResourcesMixin:
         
         async with self.acquire() as conn:
             await conn.execute(
-                """
-                INSERT INTO snippets (name, snippet_data, created_at, updated_at, raw_data)
-                VALUES ($1, $2, $3, NOW(), $4)
-                ON CONFLICT (name) DO UPDATE SET
+                insert_sql(
+                    SNIPPETS_TABLE,
+                    ["name", "snippet_data", "created_at", "updated_at", "raw_data"],
+                    values="$1, $2, $3, NOW(), $4",
+                    suffix="""ON CONFLICT (name) DO UPDATE SET
                     snippet_data = EXCLUDED.snippet_data,
                     updated_at = NOW(),
-                    raw_data = EXCLUDED.raw_data
-                """,
+                    raw_data = EXCLUDED.raw_data""",
+                ),
                 name,
                 json.dumps(snippet.get("snippet", [])),
                 _parse_timestamp(snippet.get("createdAt")),
@@ -452,7 +465,7 @@ class ResourcesMixin:
         
         async with self.acquire() as conn:
             rows = await conn.fetch(
-                "SELECT * FROM snippets ORDER BY name"
+                select_sql(SNIPPETS_TABLE, "*", "ORDER BY name")
             )
             return [_db_row_to_api_format(row) for row in rows]
     
@@ -463,7 +476,7 @@ class ResourcesMixin:
         
         async with self.acquire() as conn:
             row = await conn.fetchrow(
-                "SELECT * FROM snippets WHERE name = $1",
+                select_sql(SNIPPETS_TABLE, "*", "WHERE name = $1"),
                 name
             )
             return _db_row_to_api_format(row) if row else None
@@ -475,7 +488,7 @@ class ResourcesMixin:
         
         async with self.acquire() as conn:
             result = await conn.execute(
-                "DELETE FROM snippets WHERE name = $1",
+                delete_sql(SNIPPETS_TABLE, "name = $1"),
                 name
             )
             return result == "DELETE 1"
@@ -486,7 +499,7 @@ class ResourcesMixin:
             return 0
         
         async with self.acquire() as conn:
-            result = await conn.execute("DELETE FROM snippets")
+            result = await conn.execute(delete_sql(SNIPPETS_TABLE, "TRUE"))
             try:
                 return int(result.split()[-1])
             except (IndexError, ValueError):
@@ -519,15 +532,16 @@ class ResourcesMixin:
 
         async with self.acquire() as conn:
             await conn.execute(
-                """
-                INSERT INTO internal_squads (uuid, name, description, updated_at, raw_data)
-                VALUES ($1, $2, $3, NOW(), $4)
-                ON CONFLICT (uuid) DO UPDATE SET
+                insert_sql(
+                    INTERNAL_SQUADS_TABLE,
+                    ["uuid", "name", "description", "updated_at", "raw_data"],
+                    values="$1, $2, $3, NOW(), $4",
+                    suffix="""ON CONFLICT (uuid) DO UPDATE SET
                     name = EXCLUDED.name,
                     description = EXCLUDED.description,
                     updated_at = NOW(),
-                    raw_data = EXCLUDED.raw_data
-                """,
+                    raw_data = EXCLUDED.raw_data""",
+                ),
                 uuid,
                 name,
                 squad.get("description"),
@@ -560,15 +574,16 @@ class ResourcesMixin:
 
         async with self.acquire() as conn:
             await conn.execute(
-                """
-                INSERT INTO external_squads (uuid, name, description, updated_at, raw_data)
-                VALUES ($1, $2, $3, NOW(), $4)
-                ON CONFLICT (uuid) DO UPDATE SET
+                insert_sql(
+                    EXTERNAL_SQUADS_TABLE,
+                    ["uuid", "name", "description", "updated_at", "raw_data"],
+                    values="$1, $2, $3, NOW(), $4",
+                    suffix="""ON CONFLICT (uuid) DO UPDATE SET
                     name = EXCLUDED.name,
                     description = EXCLUDED.description,
                     updated_at = NOW(),
-                    raw_data = EXCLUDED.raw_data
-                """,
+                    raw_data = EXCLUDED.raw_data""",
+                ),
                 uuid,
                 name,
                 squad.get("description"),
@@ -583,7 +598,7 @@ class ResourcesMixin:
         
         async with self.acquire() as conn:
             rows = await conn.fetch(
-                "SELECT * FROM internal_squads ORDER BY name"
+                select_sql(INTERNAL_SQUADS_TABLE, "*", "ORDER BY name")
             )
             return [_db_row_to_api_format(row) for row in rows]
     
@@ -594,7 +609,7 @@ class ResourcesMixin:
         
         async with self.acquire() as conn:
             rows = await conn.fetch(
-                "SELECT * FROM external_squads ORDER BY name"
+                select_sql(EXTERNAL_SQUADS_TABLE, "*", "ORDER BY name")
             )
             return [_db_row_to_api_format(row) for row in rows]
     
@@ -604,7 +619,9 @@ class ResourcesMixin:
             return 0
         
         async with self.acquire() as conn:
-            result = await conn.execute("DELETE FROM internal_squads")
+            result = await conn.execute(
+                delete_sql(INTERNAL_SQUADS_TABLE, "TRUE")
+            )
             try:
                 return int(result.split()[-1])
             except (IndexError, ValueError):
@@ -616,9 +633,10 @@ class ResourcesMixin:
             return 0
         
         async with self.acquire() as conn:
-            result = await conn.execute("DELETE FROM external_squads")
+            result = await conn.execute(
+                delete_sql(EXTERNAL_SQUADS_TABLE, "TRUE")
+            )
             try:
                 return int(result.split()[-1])
             except (IndexError, ValueError):
                 return 0
-    

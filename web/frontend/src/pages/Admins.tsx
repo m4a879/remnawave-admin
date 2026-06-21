@@ -26,14 +26,18 @@ import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent } from '@/components/ui/card'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog'
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from '@/components/ui/dropdown-menu'
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator,
+  DropdownMenuSub, DropdownMenuSubTrigger, DropdownMenuSubContent } from '@/components/ui/dropdown-menu'
 import { Label } from '@/components/ui/label'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { PermissionGate } from '@/components/PermissionGate'
 import { ConfirmDialog } from '@/components/ConfirmDialog'
 import { cn } from '@/lib/utils'
 import { useFormatters } from '@/lib/useFormatters'
+import { extractErrorDetail } from '@/lib/mutationToast'
 import AccessPoliciesTab from './AccessPoliciesTab'
 
 // ── Helpers ────────────────────────────────────────────────────
@@ -267,6 +271,9 @@ interface AdminFormData {
   max_traffic_gb: string
   max_nodes: string
   max_hosts: string
+  has_bot_access: boolean
+  unlimited_traffic_policy: string
+  unrestricted_user_access: boolean
 }
 
 const emptyForm: AdminFormData = {
@@ -278,12 +285,16 @@ const emptyForm: AdminFormData = {
   max_traffic_gb: '',
   max_nodes: '',
   max_hosts: '',
+  has_bot_access: false,
+  unlimited_traffic_policy: 'allowed',
+  unrestricted_user_access: false, // scoping ON по умолчанию для новых админов (изоляция multi-tenant)
 }
 
 function AdminFormDialog({
   open,
   onClose,
   onSave,
+  onLocalError,
   isPending,
   error,
   roles,
@@ -292,12 +303,14 @@ function AdminFormDialog({
   open: boolean
   onClose: () => void
   onSave: (data: AdminAccountCreate | AdminAccountUpdate) => void
+  onLocalError?: (msg: string) => void
   isPending: boolean
   error: string
   roles: Role[]
   editingAdmin: AdminAccount | null
 }) {
   const { t } = useTranslation()
+  const superadminRoleId = roles.find(r => r.name === 'superadmin')?.id
   const [form, setForm] = useState<AdminFormData>(() => {
     if (editingAdmin) {
       return {
@@ -309,6 +322,9 @@ function AdminFormDialog({
         max_traffic_gb: editingAdmin.max_traffic_gb?.toString() || '',
         max_nodes: editingAdmin.max_nodes?.toString() || '',
         max_hosts: editingAdmin.max_hosts?.toString() || '',
+        has_bot_access: editingAdmin.has_bot_access || false,
+        unlimited_traffic_policy: editingAdmin.unlimited_traffic_policy || 'allowed',
+        unrestricted_user_access: editingAdmin.unrestricted_user_access ?? true,
       }
     }
     return { ...emptyForm }
@@ -318,10 +334,14 @@ function AdminFormDialog({
     if (editingAdmin) {
       const update: AdminAccountUpdate = {}
       if (form.username && form.username !== editingAdmin.username) update.username = form.username
+      // Numeric fields: empty string = "clear" (send null to backend).
+      // Non-empty = parse to int. Only include the field if the parsed
+      // value differs from the existing one, so unchanged fields don't
+      // get re-sent (and accidentally clear via a null race).
       const tgId = form.telegram_id ? parseInt(form.telegram_id) : null
       if (tgId !== editingAdmin.telegram_id) update.telegram_id = tgId
-      const roleId = form.role_id ? parseInt(form.role_id) : undefined
-      if (roleId && roleId !== editingAdmin.role_id) update.role_id = roleId
+      const roleId = form.role_id ? parseInt(form.role_id) : null
+      if (roleId !== editingAdmin.role_id) update.role_id = roleId
       if (form.password) update.password = form.password
       const mu = form.max_users ? parseInt(form.max_users) : null
       if (mu !== editingAdmin.max_users) update.max_users = mu
@@ -331,14 +351,32 @@ function AdminFormDialog({
       if (mn !== editingAdmin.max_nodes) update.max_nodes = mn
       const mh = form.max_hosts ? parseInt(form.max_hosts) : null
       if (mh !== editingAdmin.max_hosts) update.max_hosts = mh
+      if (form.unlimited_traffic_policy !== (editingAdmin.unlimited_traffic_policy || 'allowed')) {
+        update.unlimited_traffic_policy = form.unlimited_traffic_policy
+      }
+      if (form.has_bot_access !== (editingAdmin.has_bot_access || false)) {
+        update.has_bot_access = form.has_bot_access
+      }
+      if (form.unrestricted_user_access !== (editingAdmin.unrestricted_user_access ?? true)) {
+        update.unrestricted_user_access = form.unrestricted_user_access
+      }
+      // If no fields changed, don't submit — avoid a misleading success toast.
+      if (Object.keys(update).length === 0) {
+        const msg = t('admins.errors.noChanges', { defaultValue: 'No changes to save.' })
+        onLocalError?.(msg)
+        return
+      }
       onSave(update)
     } else {
       const create: AdminAccountCreate = {
         username: form.username.trim(),
         role_id: parseInt(form.role_id),
+        unlimited_traffic_policy: form.unlimited_traffic_policy || 'allowed',
+        unrestricted_user_access: form.unrestricted_user_access,
       }
       if (form.telegram_id) create.telegram_id = parseInt(form.telegram_id)
       if (form.password) create.password = form.password
+      create.has_bot_access = form.has_bot_access
       if (form.max_users) create.max_users = parseInt(form.max_users)
       if (form.max_traffic_gb) create.max_traffic_gb = parseInt(form.max_traffic_gb)
       if (form.max_nodes) create.max_nodes = parseInt(form.max_nodes)
@@ -375,7 +413,7 @@ function AdminFormDialog({
           </div>
 
           <div>
-            <Label>Telegram ID</Label>
+            <Label>{t('admins.telegramId')}</Label>
             <Input
               type="number"
               value={form.telegram_id}
@@ -386,18 +424,41 @@ function AdminFormDialog({
             <p className="text-xs text-dark-300 mt-1">{t('admins.telegramIdHint')}</p>
           </div>
 
+          <div className="flex items-center gap-2">
+            <input
+              type="checkbox"
+              id="has_bot_access"
+              checked={form.has_bot_access}
+              onChange={(e) => setForm({ ...form, has_bot_access: e.target.checked })}
+              className="rounded border-[var(--glass-border)] bg-[var(--glass-bg)]"
+            />
+            <Label htmlFor="has_bot_access" className="cursor-pointer">{t('admins.hasBotAccess')}</Label>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <input
+              type="checkbox"
+              id="unrestricted_user_access"
+              checked={form.unrestricted_user_access}
+              onChange={(e) => setForm({ ...form, unrestricted_user_access: e.target.checked })}
+              className="rounded border-[var(--glass-border)] bg-[var(--glass-bg)]"
+            />
+            <Label htmlFor="unrestricted_user_access" className="cursor-pointer">{t('admins.unrestrictedUserAccess')}</Label>
+          </div>
+
           <div>
             <Label>{t('admins.role')} *</Label>
-            <select
-              value={form.role_id}
-              onChange={(e) => setForm({ ...form, role_id: e.target.value })}
-              className="flex h-10 w-full rounded-md border border-[var(--glass-border)] bg-[var(--glass-bg)] px-3 py-2 text-sm text-dark-50 mt-1.5"
-            >
-              <option value="">{t('admins.selectRole')}</option>
-              {roles.map((r) => (
-                <option key={r.id} value={r.id}>{r.display_name}</option>
-              ))}
-            </select>
+            <Select value={form.role_id} onValueChange={(value) => setForm({ ...form, role_id: value })}>
+              <SelectTrigger className="mt-1.5">
+                <SelectValue placeholder={t('admins.selectRole')} />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="superadmin">{t('admins.roles.superadmin')}</SelectItem>
+                {roles.filter((r) => r.name !== 'superadmin').map((r) => (
+                  <SelectItem key={r.id} value={String(r.id)}>{r.display_name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
 
           <div>
@@ -422,9 +483,12 @@ function AdminFormDialog({
               </div>
               <div>
                 <Label className="text-xs">{t('admins.maxTraffic')}</Label>
-                <Input type="number" min="0" value={form.max_traffic_gb}
+                <Input type="number" min="0"
+                  value={form.unlimited_traffic_policy !== 'disabled' ? '' : form.max_traffic_gb}
                   onChange={(e) => setForm({ ...form, max_traffic_gb: e.target.value })}
-                  placeholder={'\u221e'} className="mt-1" />
+                  placeholder={form.unlimited_traffic_policy !== 'disabled' ? '\u221e' : '\u221e'}
+                  disabled={form.unlimited_traffic_policy !== 'disabled'}
+                  className="mt-1" />
               </div>
               <div>
                 <Label className="text-xs">{t('admins.maxNodes')}</Label>
@@ -439,6 +503,26 @@ function AdminFormDialog({
                   placeholder={'\u221e'} className="mt-1" />
               </div>
             </div>
+
+            {String(superadminRoleId) !== form.role_id && (
+              <div className="mt-4">
+                <Label className="text-xs">{t('admins.unlimitedTrafficPolicy')}</Label>
+                <p className="text-[11px] text-dark-300 mt-0.5 mb-2">{t('admins.unlimitedTrafficPolicyHint')}</p>
+                <Select
+                  value={form.unlimited_traffic_policy}
+                  onValueChange={(value) => setForm({ ...form, unlimited_traffic_policy: value })}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="allowed">{t('admins.policyAllowed')}</SelectItem>
+                    <SelectItem value="disabled">{t('admins.policyDisabled')}</SelectItem>
+                    <SelectItem value="enforced">{t('admins.policyEnforced')}</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
           </div>
         </div>
 
@@ -562,8 +646,10 @@ function RoleFormDialog({
 
 // ── Admin actions dropdown ─────────────────────────────────────
 
-function AdminActions({ admin, onEdit, onToggle, onDelete }: {
-  admin: AdminAccount; onEdit: () => void; onToggle: () => void; onDelete: () => void
+type CounterKey = 'users_created' | 'nodes_created' | 'hosts_created' | 'traffic_used_bytes'
+
+function AdminActions({ admin, onEdit, onToggle, onDelete, onResetCounter }: {
+  admin: AdminAccount; onEdit: () => void; onToggle: () => void; onDelete: () => void; onResetCounter: (counter: CounterKey) => void
 }) {
   const { t } = useTranslation()
   return (
@@ -573,7 +659,7 @@ function AdminActions({ admin, onEdit, onToggle, onDelete }: {
           <MoreVertical className="w-4 h-4" />
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-44">
+      <DropdownMenuContent align="end" className="w-48">
         <PermissionGate resource="admins" action="edit">
           <DropdownMenuItem onClick={onEdit}>
             <Pencil className="w-4 h-4 mr-2" /> {t('common.edit')}
@@ -584,6 +670,25 @@ function AdminActions({ admin, onEdit, onToggle, onDelete }: {
               : <><UserCheck className="w-4 h-4 mr-2" /> {t('admins.enable')}</>
             }
           </DropdownMenuItem>
+          <DropdownMenuSub>
+            <DropdownMenuSubTrigger>
+              <RefreshCw className="w-4 h-4 mr-2" /> {t('admins.resetCounter')}
+            </DropdownMenuSubTrigger>
+            <DropdownMenuSubContent>
+              <DropdownMenuItem onClick={() => onResetCounter('users_created')}>
+                {t('admins.users')}
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => onResetCounter('nodes_created')}>
+                {t('admins.nodes')}
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => onResetCounter('hosts_created')}>
+                {t('admins.hosts')}
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => onResetCounter('traffic_used_bytes')}>
+                {t('admins.traffic')}
+              </DropdownMenuItem>
+            </DropdownMenuSubContent>
+          </DropdownMenuSub>
         </PermissionGate>
         <PermissionGate resource="admins" action="delete">
           <DropdownMenuSeparator />
@@ -606,18 +711,27 @@ function AdminsTab({ roles }: { roles: Role[] }) {
   const [editingAdmin, setEditingAdmin] = useState<AdminAccount | null>(null)
   const [formError, setFormError] = useState('')
   const [deleteConfirm, setDeleteConfirm] = useState<number | null>(null)
+  const [resetCounterConfirm, setResetCounterConfirm] = useState<{ admin: AdminAccount; counter: CounterKey } | null>(null)
 
   const { data: adminsData, isLoading, refetch } = useQuery({ queryKey: ['admins'], queryFn: adminsApi.list })
 
   const createMutation = useMutation({
     mutationFn: (data: AdminAccountCreate) => adminsApi.create(data),
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['admins'] }); setShowDialog(false); setFormError(''); toast.success(t('admins.adminCreated')) },
-    onError: (err: Error & { response?: { data?: { detail?: string } } }) => { setFormError(err.response?.data?.detail || err.message || t('common.error')); toast.error(err.response?.data?.detail || err.message || t('common.error')) },
+    onError: (err: unknown) => {
+      const message = extractErrorDetail(err) || t('common.error')
+      setFormError(message)
+      toast.error(message)
+    },
   })
   const updateMutation = useMutation({
     mutationFn: ({ id, data }: { id: number; data: AdminAccountUpdate }) => adminsApi.update(id, data),
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['admins'] }); setShowDialog(false); setEditingAdmin(null); setFormError(''); toast.success(t('admins.adminUpdated')) },
-    onError: (err: Error & { response?: { data?: { detail?: string } } }) => { setFormError(err.response?.data?.detail || err.message || t('common.error')); toast.error(err.response?.data?.detail || err.message || t('common.error')) },
+    onError: (err: unknown) => {
+      const message = extractErrorDetail(err) || t('common.error')
+      setFormError(message)
+      toast.error(message)
+    },
   })
   const deleteMutation = useMutation({
     mutationFn: (id: number) => adminsApi.delete(id),
@@ -629,8 +743,13 @@ function AdminsTab({ roles }: { roles: Role[] }) {
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['admins'] }); toast.success(t('admins.statusUpdated')) },
     onError: (err: Error & { response?: { data?: { detail?: string } } }) => { toast.error(err.response?.data?.detail || err.message || t('common.error')) },
   })
+  const resetCounterMutation = useMutation({
+    mutationFn: ({ id, counter }: { id: number; counter: CounterKey }) => adminsApi.resetCounter(id, counter),
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['admins'] }); toast.success(t('admins.counterReset')) },
+    onError: (err: Error & { response?: { data?: { detail?: string } } }) => { toast.error(err.response?.data?.detail || err.message || t('common.error')) },
+  })
 
-  const admins = adminsData?.items ?? []
+  const admins = Array.isArray(adminsData?.items) ? adminsData.items : []
 
   const handleSave = (data: AdminAccountCreate | AdminAccountUpdate) => {
     if (editingAdmin) updateMutation.mutate({ id: editingAdmin.id, data: data as AdminAccountUpdate })
@@ -677,7 +796,8 @@ function AdminsTab({ roles }: { roles: Role[] }) {
                     <AdminActions admin={admin}
                       onEdit={() => { setEditingAdmin(admin); setFormError(''); setShowDialog(true) }}
                       onToggle={() => toggleMutation.mutate({ id: admin.id, is_active: !admin.is_active })}
-                      onDelete={() => setDeleteConfirm(admin.id)} />
+                      onDelete={() => setDeleteConfirm(admin.id)}
+                      onResetCounter={(counter) => setResetCounterConfirm({ admin, counter })} />
                   </div>
                 </div>
                 <div className="mb-3"><RoleBadge name={admin.role_name} displayName={admin.role_display_name} /></div>
@@ -685,6 +805,14 @@ function AdminsTab({ roles }: { roles: Role[] }) {
                   <QuotaBar used={admin.users_created} limit={admin.max_users} label={t('admins.users')} />
                   <QuotaBar used={admin.nodes_created} limit={admin.max_nodes} label={t('admins.nodes')} />
                   <QuotaBar used={admin.hosts_created} limit={admin.max_hosts} label={t('admins.hosts')} />
+                  {admin.unlimited_traffic_policy === 'disabled' ? (
+                    <QuotaBar used={Math.round(admin.traffic_used_bytes / 1073741824 * 10) / 10} limit={admin.max_traffic_gb} label={t('admins.traffic')} />
+                  ) : (
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="text-dark-300">{t('admins.traffic')}</span>
+                      <span className="text-dark-100">{'\u221e'}</span>
+                    </div>
+                  )}
                 </div>
                 <p className="text-xs text-dark-300 mt-3">{t('admins.created')}: {admin.created_at ? formatDateShort(admin.created_at) : '\u2014'}</p>
               </CardContent>
@@ -705,6 +833,7 @@ function AdminsTab({ roles }: { roles: Role[] }) {
                 <th>{t('admins.users')}</th>
                 <th>{t('admins.nodes')}</th>
                 <th>{t('admins.hosts')}</th>
+                <th>{t('admins.traffic')}</th>
                 <th>{t('admins.created')}</th>
                 <th className="w-10"></th>
               </tr>
@@ -712,10 +841,10 @@ function AdminsTab({ roles }: { roles: Role[] }) {
             <tbody>
               {isLoading ? (
                 Array.from({ length: 3 }).map((_, i) => (
-                  <tr key={i}><td><Skeleton className="h-4 w-28" /></td><td><Skeleton className="h-5 w-24" /></td><td><Skeleton className="h-5 w-20" /></td><td><Skeleton className="h-4 w-16" /></td><td><Skeleton className="h-4 w-16" /></td><td><Skeleton className="h-4 w-16" /></td><td><Skeleton className="h-4 w-20" /></td><td></td></tr>
+                  <tr key={i}><td><Skeleton className="h-4 w-28" /></td><td><Skeleton className="h-5 w-24" /></td><td><Skeleton className="h-5 w-20" /></td><td><Skeleton className="h-4 w-16" /></td><td><Skeleton className="h-4 w-16" /></td><td><Skeleton className="h-4 w-16" /></td><td><Skeleton className="h-4 w-16" /></td><td><Skeleton className="h-4 w-20" /></td><td></td></tr>
                 ))
               ) : admins.length === 0 ? (
-                <tr><td colSpan={8} className="text-center py-8 text-muted-foreground">{t('admins.noAdmins')}</td></tr>
+                <tr><td colSpan={9} className="text-center py-8 text-muted-foreground">{t('admins.noAdmins')}</td></tr>
               ) : (
                 admins.map((admin) => (
                   <tr key={admin.id}>
@@ -730,12 +859,20 @@ function AdminsTab({ roles }: { roles: Role[] }) {
                     <td><div className="min-w-[100px]"><QuotaBar used={admin.users_created} limit={admin.max_users} label="" /></div></td>
                     <td><div className="min-w-[80px]"><QuotaBar used={admin.nodes_created} limit={admin.max_nodes} label="" /></div></td>
                     <td><div className="min-w-[80px]"><QuotaBar used={admin.hosts_created} limit={admin.max_hosts} label="" /></div></td>
+                    <td>
+                      {admin.unlimited_traffic_policy === 'disabled' ? (
+                        <div className="min-w-[80px]"><QuotaBar used={Math.round(admin.traffic_used_bytes / 1073741824 * 10) / 10} limit={admin.max_traffic_gb} label="" /></div>
+                      ) : (
+                        <span className="text-dark-300 text-sm">{'\u221e'}</span>
+                      )}
+                    </td>
                     <td className="text-dark-200 text-sm">{admin.created_at ? formatDateShort(admin.created_at) : '\u2014'}</td>
                     <td>
                       <AdminActions admin={admin}
                         onEdit={() => { setEditingAdmin(admin); setFormError(''); setShowDialog(true) }}
                         onToggle={() => toggleMutation.mutate({ id: admin.id, is_active: !admin.is_active })}
-                        onDelete={() => setDeleteConfirm(admin.id)} />
+                        onDelete={() => setDeleteConfirm(admin.id)}
+                        onResetCounter={(counter) => setResetCounterConfirm({ admin, counter })} />
                     </td>
                   </tr>
                 ))
@@ -746,9 +883,10 @@ function AdminsTab({ roles }: { roles: Role[] }) {
       </Card>
 
       {showDialog && (
-        <AdminFormDialog open={showDialog}
+        <AdminFormDialog key={editingAdmin?.id ?? 'new'} open={showDialog}
           onClose={() => { setShowDialog(false); setEditingAdmin(null); setFormError('') }}
           onSave={handleSave}
+          onLocalError={setFormError}
           isPending={createMutation.isPending || updateMutation.isPending}
           error={formError} roles={roles} editingAdmin={editingAdmin} />
       )}
@@ -764,6 +902,24 @@ function AdminsTab({ roles }: { roles: Role[] }) {
           if (deleteConfirm !== null) {
             deleteMutation.mutate(deleteConfirm)
             setDeleteConfirm(null)
+          }
+        }}
+      />
+
+      <ConfirmDialog
+        open={resetCounterConfirm !== null}
+        onOpenChange={(open) => { if (!open) setResetCounterConfirm(null) }}
+        title={t('admins.resetCounterConfirmTitle')}
+        description={resetCounterConfirm ? t('admins.resetCounterConfirmDescription', {
+          username: resetCounterConfirm.admin.username,
+          counter: t(`admins.${resetCounterConfirm.counter === 'traffic_used_bytes' ? 'traffic' : resetCounterConfirm.counter.replace('_created', '')}`),
+        }) : ''}
+        confirmLabel={t('admins.resetCounter')}
+        variant="destructive"
+        onConfirm={() => {
+          if (resetCounterConfirm) {
+            resetCounterMutation.mutate({ id: resetCounterConfirm.admin.id, counter: resetCounterConfirm.counter })
+            setResetCounterConfirm(null)
           }
         }}
       />

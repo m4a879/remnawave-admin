@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, memo, useCallback, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useUrlParam } from '@/lib/useUrlParam'
 import { useDeferredAction } from '@/lib/useDeferredAction'
-import { toastMutationError } from '@/lib/mutationToast'
+import { toastMutationError, translateBackendError } from '@/lib/mutationToast'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import { useTranslation } from 'react-i18next'
@@ -32,6 +32,9 @@ import {
   Infinity,
   Crosshair,
   ArrowUpRight,
+  ArrowLeftRight,
+  Gauge,
+  UserMinus,
 } from 'lucide-react'
 import client from '../api/client'
 import { EmptyState } from '@/components/EmptyState'
@@ -50,6 +53,7 @@ import { Switch } from '@/components/ui/switch'
 import { cn } from '@/lib/utils'
 import { toast } from 'sonner'
 import { useHasPermission } from '../components/PermissionGate'
+import { usePermissionStore } from '../store/permissionStore'
 import { ConfirmDialog } from '@/components/ConfirmDialog'
 import { ExportDropdown } from '@/components/ExportDropdown'
 import { SavedFiltersDropdown } from '@/components/SavedFiltersDropdown'
@@ -76,6 +80,7 @@ interface UserListItem {
   created_at: string | null
   updated_at: string | null
   online_at: string | null
+  created_by_admin_username: string | null
 }
 
 interface PaginatedResponse {
@@ -98,6 +103,7 @@ const fetchUsers = async (params: {
   traffic_usage?: string
   sort_by: string
   sort_order: string
+  admin_id?: string
 }): Promise<PaginatedResponse> => {
   const { data } = await client.get('/users', { params })
   return data
@@ -361,6 +367,9 @@ const MobileUserCard = memo(function MobileUserCard({
         <div className="flex items-center justify-between text-xs text-dark-200">
           <OnlineIndicator onlineAt={user.online_at} />
           <div className="flex items-center gap-3">
+            {user.created_by_admin_username && (
+              <span className="text-dark-400">{t('users.table.createdBy')}: {user.created_by_admin_username}</span>
+            )}
             <span title={t('users.hwidDevices')}>{user.hwid_device_count} / {user.hwid_device_limit || '\u221E'}</span>
             <span>{t('users.expires')}: {user.expire_at ? formatDateShort(user.expire_at) : '\u2014'}</span>
           </div>
@@ -391,6 +400,30 @@ interface CreateUserFormData {
   hwid_device_limit: string
   external_squad_uuid: string
   active_internal_squads: string[]
+}
+
+function RemainingTrafficIndicator() {
+  const { t } = useTranslation()
+  const maxGb = usePermissionStore((s) => s.maxTrafficGb)
+  const usedBytes = usePermissionStore((s) => s.trafficUsedBytes)
+  const policy = usePermissionStore((s) => s.unlimitedTrafficPolicy)
+  if (policy !== 'disabled' || maxGb == null) return null
+  const usedGb = Math.round(usedBytes / 1073741824 * 10) / 10
+  const remaining = Math.max(0, maxGb - usedGb)
+  return (
+    <div className="flex items-center justify-between">
+      <span className="text-sm text-dark-100 flex items-center gap-2">
+        <Gauge className="w-4 h-4 text-dark-300" />
+        {t('users.createModal.remainingTrafficQuota')}
+      </span>
+      <span className="text-sm text-dark-100">
+        {t('users.createModal.remainingTrafficValue', {
+          used: remaining.toFixed(1),
+          total: maxGb,
+        })}
+      </span>
+    </div>
+  )
 }
 
 function CreateUserModal({
@@ -440,6 +473,31 @@ function CreateUserModal({
     enabled: open,
   })
 
+  const unlimitedPolicy = usePermissionStore(s => s.unlimitedTrafficPolicy)
+
+  // Reset expire_at to today when modal opens
+  useEffect(() => {
+    if (!open) return
+    const now = new Date()
+    const local = new Date(now.getTime() - now.getTimezoneOffset() * 60000)
+      .toISOString()
+      .slice(0, 16)
+    setForm(prev => ({ ...prev, expire_at: local }))
+  }, [open])
+
+  // Sync form state with policy
+  useEffect(() => {
+    if (!unlimitedPolicy || unlimitedPolicy === 'allowed') return
+    setForm(prev => ({
+      ...prev,
+      is_unlimited: unlimitedPolicy === 'enforced',
+      traffic_limit_gb: unlimitedPolicy === 'enforced' ? '' : prev.traffic_limit_gb,
+    }))
+  }, [unlimitedPolicy])
+
+  const isUnlimitedLocked = unlimitedPolicy !== undefined && unlimitedPolicy !== 'allowed'
+  const effectiveIsUnlimited = unlimitedPolicy === 'enforced' ? true : unlimitedPolicy === 'disabled' ? false : form.is_unlimited
+
   const handleSubmit = () => {
     const createData: Record<string, unknown> = {}
     if (form.username.trim()) createData.username = form.username.trim()
@@ -453,7 +511,7 @@ function CreateUserModal({
     if (form.tag.trim()) createData.tag = form.tag.trim().toUpperCase()
     if (form.description.trim()) createData.description = form.description.trim()
 
-    if (!form.is_unlimited && form.traffic_limit_gb) {
+    if (!effectiveIsUnlimited && form.traffic_limit_gb) {
       const val = parseFloat(form.traffic_limit_gb)
       if (!isNaN(val) && val > 0) {
         createData.traffic_limit_bytes = Math.round(val * 1024 * 1024 * 1024)
@@ -480,6 +538,8 @@ function CreateUserModal({
     if (form.active_internal_squads.length > 0) {
       createData.active_internal_squads = form.active_internal_squads
     }
+
+    createData.created_at = new Date().toISOString()
 
     onSave(createData)
   }
@@ -591,16 +651,24 @@ function CreateUserModal({
                 {t('users.createModal.unlimitedTraffic')}
               </Label>
               <Switch
-                checked={form.is_unlimited}
-                onCheckedChange={(checked) => setForm({
-                  ...form,
-                  is_unlimited: checked,
-                  traffic_limit_gb: checked ? '' : form.traffic_limit_gb,
-                })}
+                checked={effectiveIsUnlimited}
+                disabled={isUnlimitedLocked}
+                onCheckedChange={(checked) => {
+                  if (isUnlimitedLocked) return
+                  setForm({
+                    ...form,
+                    is_unlimited: checked,
+                    traffic_limit_gb: checked ? '' : form.traffic_limit_gb,
+                  })
+                }}
               />
             </div>
 
-            {!form.is_unlimited && (
+            {!effectiveIsUnlimited && (
+              <RemainingTrafficIndicator />
+            )}
+
+            {!effectiveIsUnlimited && (
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 animate-fade-in">
                 <div>
                   <Label className="text-xs text-dark-200">{t('users.createModal.trafficLimit')}</Label>
@@ -641,6 +709,12 @@ function CreateUserModal({
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
                 <Label className="text-xs text-dark-200">{t('users.createModal.expireDate')}</Label>
+                <Input
+                  type="datetime-local"
+                  value={form.expire_at}
+                  onChange={(e) => setForm({ ...form, expire_at: e.target.value })}
+                  className="mt-1"
+                />
                 <div className="flex flex-wrap gap-1 mt-1">
                   {[
                     { label: '7d', days: 7 },
@@ -665,16 +739,10 @@ function CreateUserModal({
                         setForm({ ...form, expire_at: local })
                       }}
                     >
-                      {label === '2099' ? '♾️ 2099' : `+${label}`}
+                      {label === '2099' ? t('users.createModal.indefinite') : `+${label}`}
                     </Button>
                   ))}
                 </div>
-                <Input
-                  type="datetime-local"
-                  value={form.expire_at}
-                  onChange={(e) => setForm({ ...form, expire_at: e.target.value })}
-                  className="mt-1"
-                />
                 <p className="text-[10px] text-dark-300 mt-0.5">{t('users.createModal.expireHint')}</p>
               </div>
               <div>
@@ -780,6 +848,10 @@ export default function Users() {
   const queryClient = useQueryClient()
   const canCreate = useHasPermission('users', 'create')
   const canBulk = useHasPermission('users', 'bulk_operations')
+  const { role: currentRole, accountId, unrestrictedUserAccess } = usePermissionStore()
+  const isSuperadmin = currentRole === 'superadmin'
+  const canChooseAdmin = isSuperadmin || unrestrictedUserAccess
+  const isLockedToOwnAccount = !canChooseAdmin
 
   const { schedule: scheduleAction } = useDeferredAction()
   const [selectedUuids, setSelectedUuids] = useState<Set<string>>(new Set())
@@ -801,8 +873,16 @@ export default function Users() {
   const [trafficUsage, setTrafficUsage] = useUrlParam('traffic_usage', '')
   const [sortBy, setSortBy] = useUrlParam('sort_by', 'created_at')
   const [sortOrder, setSortOrder] = useUrlParam('sort_order', 'desc')
+  const [adminId, setAdminId] = useUrlParam('admin_id', '')
+  // Lock restricted admins to their own account
+  // Unrestricted non-superadmins default to "any admin" (like superadmin)
+  useEffect(() => {
+    if (isLockedToOwnAccount && accountId) {
+      setAdminId(String(accountId))
+    }
+  }, [isLockedToOwnAccount, isSuperadmin, unrestrictedUserAccess, accountId, adminId])
   const hasAnyFilterInUrl =
-    !!status || !!trafficType || !!expireFilter || !!onlineFilter || !!trafficUsage
+    !!status || !!trafficType || !!expireFilter || !!onlineFilter || !!trafficUsage || (canChooseAdmin && !!adminId)
   const [showFilters, setShowFilters] = useState(hasAnyFilterInUrl)
 
   const activeFilterCount = useMemo(
@@ -844,7 +924,8 @@ export default function Users() {
     ...(expireFilter && { expireFilter }),
     ...(onlineFilter && { onlineFilter }),
     ...(trafficUsage && { trafficUsage }),
-  }), [status, trafficType, expireFilter, onlineFilter, trafficUsage])
+    ...(adminId && { adminId }),
+  }), [status, trafficType, expireFilter, onlineFilter, trafficUsage, adminId])
   const hasActiveFilters = activeFilterCount > 0
   const handleLoadFilter = useCallback((filters: Record<string, unknown>) => {
     setStatus((filters.status as string) || '')
@@ -852,6 +933,7 @@ export default function Users() {
     setExpireFilter((filters.expireFilter as string) || '')
     setOnlineFilter((filters.onlineFilter as string) || '')
     setTrafficUsage((filters.trafficUsage as string) || '')
+    setAdminId((filters.adminId as string) || '')
     setShowFilters(true)
     setPage(1)
   }, [])
@@ -880,10 +962,10 @@ export default function Users() {
   })
 
   // Fetch users
-  const { data, isLoading, isError, error, refetch } = useQuery({
-    queryKey: ['users', page, perPage, debouncedSearch, status, trafficType, expireFilter, onlineFilter, trafficUsage, sortBy, sortOrder],
-    queryFn: () =>
-      fetchUsers({
+  const { data, isLoading, isFetching, isError, error, refetch } = useQuery({
+    queryKey: ['users', page, perPage, debouncedSearch, status, trafficType, expireFilter, onlineFilter, trafficUsage, sortBy, sortOrder, adminId],
+    queryFn: () => {
+      const p: Record<string, unknown> = {
         page,
         per_page: perPage,
         search: debouncedSearch || undefined,
@@ -894,16 +976,31 @@ export default function Users() {
         traffic_usage: trafficUsage || undefined,
         sort_by: sortBy,
         sort_order: sortOrder,
-      }),
+      }
+      if (adminId && adminId !== '_all') {
+        p.admin_id = adminId
+      }
+      return fetchUsers(p as Parameters<typeof fetchUsers>[0])
+    },
     retry: 2,
     refetchInterval: 120_000,
   })
+
+  // Fetch admins for admin filter dropdown (superadmin / unrestricted admins)
+  const { data: adminsData } = useQuery({
+    queryKey: ['admins', 'filter'],
+    queryFn: () => client.get('/admins/me').then(r => r.data),
+    staleTime: 60000,
+    enabled: canChooseAdmin,
+  })
+  const admins: { id: number; username: string }[] = Array.isArray(adminsData?.items) ? adminsData.items : []
 
   // Mutations
   const enableUser = useMutation({
     mutationFn: (uuid: string) => client.post(`/users/${uuid}/enable`),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['users'] })
+      queryClient.invalidateQueries({ queryKey: ['admins'] })
       toast.success(t('users.toasts.userEnabled'))
     },
     onError: (err, uuid) => {
@@ -915,6 +1012,7 @@ export default function Users() {
     mutationFn: (uuid: string) => client.post(`/users/${uuid}/disable`),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['users'] })
+      queryClient.invalidateQueries({ queryKey: ['admins'] })
       toast.success(t('users.toasts.userDisabled'))
     },
     onError: (err, uuid) => {
@@ -926,6 +1024,7 @@ export default function Users() {
     mutationFn: (uuid: string) => client.delete(`/users/${uuid}`),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['users'] })
+      queryClient.invalidateQueries({ queryKey: ['admins'] })
       toast.success(t('users.toasts.userDeleted'))
     },
     onError: (err: Error & { response?: { data?: { detail?: string } } }) => {
@@ -935,15 +1034,20 @@ export default function Users() {
 
   const createUser = useMutation({
     mutationFn: (data: Record<string, unknown>) => client.post('/users', data),
-    onSuccess: () => {
+    onSuccess: async () => {
       queryClient.invalidateQueries({ queryKey: ['users'] })
+      queryClient.invalidateQueries({ queryKey: ['admins'] })
+      // Refresh the current admin's quota counters so the RemainingTrafficIndicator updates
+      await usePermissionStore.getState().refreshAdmin()
       setShowCreateModal(false)
       setCreateError('')
       toast.success(t('users.toasts.userCreated'))
     },
     onError: (err: Error & { response?: { data?: { detail?: string } } }) => {
-      setCreateError(err.response?.data?.detail || err.message || t('users.toasts.createError'))
-      toast.error(err.response?.data?.detail || err.message || t('users.toasts.createError'))
+      const detail = err.response?.data?.detail
+      const message = detail ? translateBackendError(detail) : (err.message || t('users.toasts.createError'))
+      setCreateError(message)
+      toast.error(message)
     },
   })
 
@@ -997,38 +1101,86 @@ export default function Users() {
   const retryLabel = t('common.retry', { defaultValue: 'Повторить' })
   const bulkEnable = useMutation({
     mutationFn: (uuids: string[]) => client.post('/users/bulk/enable', { uuids }),
-    onSuccess: (res) => {
+    onSuccess: async (res) => {
       const d = res.data
       toast.success(t('users.toasts.bulkEnabled', { success: d.success, failed: d.failed || 0 }))
       queryClient.invalidateQueries({ queryKey: ['users'] })
+      queryClient.invalidateQueries({ queryKey: ['admins'] })
+      // Counter may shift if reassign moves ownership; refresh to be safe.
+      await usePermissionStore.getState().refreshAdmin()
       clearSelection()
     },
     onError: (err, uuids) => toastMutationError(err, t('users.toasts.error'), () => bulkEnable.mutate(uuids), retryLabel),
   })
   const bulkDisable = useMutation({
     mutationFn: (uuids: string[]) => client.post('/users/bulk/disable', { uuids }),
-    onSuccess: (res) => {
+    onSuccess: async (res) => {
       const d = res.data
       toast.success(t('users.toasts.bulkDisabled', { success: d.success, failed: d.failed || 0 }))
       queryClient.invalidateQueries({ queryKey: ['users'] })
+      queryClient.invalidateQueries({ queryKey: ['admins'] })
+      await usePermissionStore.getState().refreshAdmin()
       clearSelection()
     },
     onError: (err, uuids) => toastMutationError(err, t('users.toasts.error'), () => bulkDisable.mutate(uuids), retryLabel),
   })
   const bulkDelete = useMutation({
     mutationFn: (uuids: string[]) => client.post('/users/bulk/delete', { uuids }),
-    onSuccess: (res) => {
+    onSuccess: async (res) => {
       const d = res.data
       toast.success(t('users.toasts.bulkDeleted', { success: d.success, failed: d.failed || 0 }))
       queryClient.invalidateQueries({ queryKey: ['users'] })
+      queryClient.invalidateQueries({ queryKey: ['admins'] })
+      // Refresh the current admin's quota counters so the RemainingTrafficIndicator updates
+      await usePermissionStore.getState().refreshAdmin()
       clearSelection()
     },
     onError: (err, uuids) => toastMutationError(err, t('users.toasts.error'), () => bulkDelete.mutate(uuids), retryLabel),
   })
 
+  const [bulkReassignDialogOpen, setBulkReassignDialogOpen] = useState(false)
+  const [bulkReassignAdminId, setBulkReassignAdminId] = useState('')
+  const [bulkUnassignConfirmOpen, setBulkUnassignConfirmOpen] = useState(false)
+  const { data: allAdminsData } = useQuery({
+    queryKey: ['admins'],
+    queryFn: () => client.get('/admins').then(r => r.data),
+    staleTime: 60000,
+    enabled: isSuperadmin,
+  })
+  const allAdmins: { id: number; username: string }[] = Array.isArray(allAdminsData?.items) ? allAdminsData.items : []
+  const bulkReassignMutation = useMutation({
+    mutationFn: (params: { uuids: string[]; new_admin_id: number }) =>
+      client.post('/users/bulk/reassign', params),
+    onSuccess: (res) => {
+      const d = res.data
+      toast.success(t('users.toasts.bulkReassigned', { success: d.success, failed: d.failed || 0 }))
+      queryClient.invalidateQueries({ queryKey: ['users'] })
+      queryClient.invalidateQueries({ queryKey: ['admins'] })
+      setBulkReassignDialogOpen(false)
+      clearSelection()
+    },
+    onError: (err: Error & { response?: { data?: { detail?: string } } }) => {
+      toast.error(err.response?.data?.detail || err.message || t('users.toasts.error'))
+    },
+  })
+  const bulkUnassignMutation = useMutation({
+    mutationFn: (uuids: string[]) => client.post('/users/bulk/unassign-admin', { uuids }),
+    onSuccess: (res) => {
+      const d = res.data
+      toast.success(t('users.toasts.bulkUnassigned', { success: d.success, failed: d.failed || 0 }))
+      queryClient.invalidateQueries({ queryKey: ['users'] })
+      queryClient.invalidateQueries({ queryKey: ['admins'] })
+      setBulkUnassignConfirmOpen(false)
+      clearSelection()
+    },
+    onError: (err: Error & { response?: { data?: { detail?: string } } }) => {
+      toast.error(err.response?.data?.detail || err.message || t('users.toasts.error'))
+    },
+  })
+
   const hasAnyFilter = activeFilterCount > 0 || debouncedSearch
 
-  const users = data?.items ?? []
+  const users = Array.isArray(data?.items) ? data.items : []
   const total = data?.total ?? 0
   const pages = data?.pages ?? 1
 
@@ -1168,7 +1320,7 @@ export default function Users() {
                 title={t('users.refresh')}
                 aria-label={t('common.refresh')}
               >
-                <RefreshCw className={cn("w-5 h-5", isLoading && "animate-spin")} />
+                <RefreshCw className={cn("w-5 h-5", isFetching && "animate-spin")} />
               </Button>
 
               <ExportDropdown
@@ -1267,6 +1419,25 @@ export default function Users() {
                   </div>
 
                   <div>
+                    <Label className="text-[11px] uppercase tracking-wider text-dark-300">{t('users.filters.admin')}</Label>
+                    <Select
+                      value={canChooseAdmin ? adminId || '_all' : (accountId ? String(accountId) : '_all')}
+                      onValueChange={(v) => { if (canChooseAdmin) { setAdminId(v === '_all' ? '' : v); setPage(1) } }}
+                      disabled={!canChooseAdmin}
+                    >
+                      <SelectTrigger className="mt-1">
+                        <SelectValue placeholder={t('users.filters.anyAdmin')} />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="_all">{t('users.filters.anyAdmin')}</SelectItem>
+                        {admins.map((a) => (
+                          <SelectItem key={a.id} value={String(a.id)}>{a.username}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div>
                     <Label className="text-[11px] uppercase tracking-wider text-dark-300">{t('users.filters.perPage')}</Label>
                     <Select value={String(perPage)} onValueChange={(v) => { setPerPage(Number(v)); setPage(1) }}>
                       <SelectTrigger className="mt-1">
@@ -1330,6 +1501,12 @@ export default function Users() {
                   <FilterChip
                     label={`${t('users.filters.activity')}: ${({ online_24h: t('users.filters.online24h'), online_7d: t('users.filters.online7d'), online_30d: t('users.filters.online30d'), never: t('users.filters.neverConnected') } as Record<string, string>)[onlineFilter] || onlineFilter}`}
                     onRemove={() => { setOnlineFilter(''); setPage(1) }}
+                  />
+                )}
+                {canChooseAdmin && adminId && (
+                  <FilterChip
+                    label={`${t('users.filters.admin')}: ${admins.find(a => String(a.id) === adminId)?.username || adminId}`}
+                    onRemove={() => { setAdminId(''); setPage(1) }}
                   />
                 )}
                 <button onClick={resetFilters} className="text-[11px] text-dark-300 hover:text-primary-400 ml-1">
@@ -1403,8 +1580,8 @@ export default function Users() {
 
       {/* Bulk action toolbar */}
       {selectedUuids.size > 0 && canBulk && (
-        <div className="sticky bottom-4 z-30 mx-auto max-w-3xl animate-fade-in-up pb-safe">
-          <div className="flex items-center gap-3 px-4 py-3 rounded-xl border border-[var(--glass-border)] bg-[var(--glass-bg)]/95 backdrop-blur-xl shadow-deep">
+        <div className="sticky bottom-4 z-30 mx-auto w-full max-w-5xl px-2 animate-fade-in-up pb-safe">
+          <div className="flex flex-wrap items-center justify-center gap-2 px-3 py-2.5 rounded-xl border border-[var(--glass-border)] bg-[var(--glass-bg)]/95 backdrop-blur-xl shadow-deep">
             <span className="text-sm text-white font-medium">
               {t('users.bulkSelected', { count: selectedUuids.size })}
               {(() => {
@@ -1462,6 +1639,30 @@ export default function Users() {
               <Trash2 className="w-3.5 h-3.5" />
               {t('users.bulkDelete')}
             </Button>
+            {isSuperadmin && (
+              <>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => { setBulkReassignAdminId(''); setBulkReassignDialogOpen(true) }}
+                  disabled={bulkReassignMutation.isPending}
+                  className="text-primary-400 border-primary-500/30 hover:bg-primary-500/10 gap-1.5"
+                >
+                  <ArrowLeftRight className="w-3.5 h-3.5" />
+                  {t('users.bulkReassign')}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setBulkUnassignConfirmOpen(true)}
+                  disabled={bulkUnassignMutation.isPending}
+                  className="text-primary-400 border-primary-500/30 hover:bg-primary-500/10 gap-1.5"
+                >
+                  <UserMinus className="w-3.5 h-3.5" />
+                  {t('users.bulkUnassign')}
+                </Button>
+              </>
+            )}
             <Button
               size="sm"
               variant="outline"
@@ -1500,6 +1701,7 @@ export default function Users() {
                 <th><SortHeader label={t('users.table.activity')} field="online_at" currentSort={sortBy} currentOrder={sortOrder} onSort={handleSort} /></th>
                 <th><SortHeader label={t('users.table.expires')} field="expire_at" currentSort={sortBy} currentOrder={sortOrder} onSort={handleSort} /></th>
                 <th><SortHeader label={t('users.table.created')} field="created_at" currentSort={sortBy} currentOrder={sortOrder} onSort={handleSort} /></th>
+                <th className="hidden md:table-cell"><SortHeader label={t('users.table.createdBy')} field="created_by_admin_username" currentSort={sortBy} currentOrder={sortOrder} onSort={handleSort} /></th>
                 <th className="w-10"></th>
               </tr>
             </thead>
@@ -1576,6 +1778,7 @@ export default function Users() {
                         <td><OnlineIndicator onlineAt={user.online_at} /></td>
                         <td className="text-dark-200 text-sm tabular-nums">{user.expire_at ? formatDateShort(user.expire_at) : '\u2014'}</td>
                         <td className="text-dark-200 text-sm tabular-nums">{user.created_at ? formatDateShort(user.created_at) : '\u2014'}</td>
+                        <td className="hidden md:table-cell text-dark-300 text-sm">{user.created_by_admin_username || '\u2014'}</td>
                         <td onClick={(e) => e.stopPropagation()}>
                           <UserActions
                             user={user}
@@ -1639,6 +1842,7 @@ export default function Users() {
                     <td><OnlineIndicator onlineAt={user.online_at} /></td>
                     <td className="text-dark-200 text-sm">{user.expire_at ? formatDateShort(user.expire_at) : '\u2014'}</td>
                     <td className="text-dark-200 text-sm">{user.created_at ? formatDateShort(user.created_at) : '\u2014'}</td>
+                    <td className="hidden md:table-cell text-dark-300 text-sm">{user.created_by_admin_username || '\u2014'}</td>
                     <td onClick={(e) => e.stopPropagation()}>
                       <UserActions
                         user={user}
@@ -1713,6 +1917,60 @@ export default function Users() {
           bulkDelete.mutate(uuids)
         }}
       />
+
+      <ConfirmDialog
+        open={bulkUnassignConfirmOpen}
+        onOpenChange={setBulkUnassignConfirmOpen}
+        title={t('users.bulkUnassignConfirm.title', { count: selectedUuids.size })}
+        description={t('users.bulkUnassignConfirm.description')}
+        confirmLabel={t('users.bulkUnassignConfirm.confirm', { count: selectedUuids.size })}
+        variant="destructive"
+        onConfirm={() => {
+          const uuids = [...selectedUuids]
+          setBulkUnassignConfirmOpen(false)
+          clearSelection()
+          bulkUnassignMutation.mutate(uuids)
+        }}
+      />
+
+      {/* Bulk reassign dialog */}
+      <Dialog open={bulkReassignDialogOpen} onOpenChange={setBulkReassignDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{t('users.bulkReassignConfirm.title')}</DialogTitle>
+            <DialogDescription>{t('users.bulkReassignConfirm.description', { count: selectedUuids.size })}</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <Label>{t('users.bulkReassignConfirm.selectAdmin')}</Label>
+            <Select value={bulkReassignAdminId} onValueChange={setBulkReassignAdminId}>
+              <SelectTrigger>
+                <SelectValue placeholder={t('users.bulkReassignConfirm.selectAdmin')} />
+              </SelectTrigger>
+              <SelectContent>
+                {allAdmins.map((a) => (
+                  <SelectItem key={a.id} value={String(a.id)}>{a.username}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setBulkReassignDialogOpen(false)}>
+              {t('users.cancel')}
+            </Button>
+            <Button
+              onClick={() => {
+                if (bulkReassignAdminId) {
+                  const uuids = [...selectedUuids]
+                  bulkReassignMutation.mutate({ uuids, new_admin_id: Number(bulkReassignAdminId) })
+                }
+              }}
+              disabled={!bulkReassignAdminId || bulkReassignMutation.isPending}
+            >
+              {bulkReassignMutation.isPending ? t('users.bulkReassignConfirm.saving') : t('users.bulkReassignConfirm.confirm')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Disable confirm dialog */}
       <ConfirmDialog

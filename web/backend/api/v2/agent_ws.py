@@ -13,6 +13,9 @@ from datetime import datetime
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query
 
+from shared.db_schema import NODES_TABLE, NODE_COMMAND_LOG_TABLE
+from shared.db_query import select_sql, update_sql
+
 from web.backend.core.agent_manager import agent_manager
 
 logger = logging.getLogger(__name__)
@@ -27,7 +30,7 @@ async def _verify_agent(token: str, node_uuid: str) -> bool:
             return False
         async with db_service.acquire() as conn:
             row = await conn.fetchrow(
-                "SELECT agent_token FROM nodes WHERE uuid = $1",
+                select_sql(NODES_TABLE, "agent_token", "WHERE uuid = $1"),
                 node_uuid,
             )
             if not row or not row["agent_token"]:
@@ -47,12 +50,12 @@ async def _set_agent_v2_status(node_uuid: str, connected: bool) -> None:
         async with db_service.acquire() as conn:
             if connected:
                 await conn.execute(
-                    "UPDATE nodes SET agent_v2_connected = true, agent_v2_last_ping = NOW() WHERE uuid = $1",
+                    update_sql(NODES_TABLE, "agent_v2_connected = true, agent_v2_last_ping = NOW()", "uuid = $1"),
                     node_uuid,
                 )
             else:
                 await conn.execute(
-                    "UPDATE nodes SET agent_v2_connected = false WHERE uuid = $1",
+                    update_sql(NODES_TABLE, "agent_v2_connected = false", "uuid = $1"),
                     node_uuid,
                 )
     except Exception as e:
@@ -143,7 +146,7 @@ async def agent_websocket(
                         if db_service.is_connected:
                             async with db_service.acquire() as conn:
                                 await conn.execute(
-                                    "UPDATE nodes SET agent_v2_last_ping = NOW() WHERE uuid = $1",
+                                    update_sql(NODES_TABLE, "agent_v2_last_ping = NOW()", "uuid = $1"),
                                     node_uuid,
                                 )
                     except Exception as e:
@@ -194,13 +197,9 @@ async def _handle_command_result(node_uuid: str, msg: dict) -> None:
 
         async with db_service.acquire() as conn:
             await conn.execute(
-                """
-                UPDATE node_command_log
-                SET status = $1, output = $2, exit_code = $3,
-                    finished_at = NOW(),
-                    duration_ms = EXTRACT(EPOCH FROM (NOW() - started_at))::INTEGER * 1000
-                WHERE id = $4 AND node_uuid = $5
-                """,
+                update_sql(NODE_COMMAND_LOG_TABLE,
+                    "status = $1, output = $2, exit_code = $3, finished_at = NOW(), duration_ms = EXTRACT(EPOCH FROM (NOW() - started_at))::INTEGER * 1000",
+                    "id = $4 AND node_uuid = $5"),
                 msg.get("status", "completed"),
                 msg.get("output", ""),
                 msg.get("exit_code"),

@@ -945,8 +945,8 @@ function BillingAnalyticsTab() {
                   <tr className="border-b border-[var(--glass-border)]">
                     <th className="text-left text-xs text-muted-foreground py-2">{t('billing.analytics.nodeName')}</th>
                     <th className="text-left text-xs text-muted-foreground py-2">{t('billing.analytics.provider')}</th>
-                    <th className="text-center text-xs text-muted-foreground py-2">CPU</th>
-                    <th className="text-center text-xs text-muted-foreground py-2">RAM</th>
+                    <th className="text-center text-xs text-muted-foreground py-2">{t('billing.analytics.cpu')}</th>
+                    <th className="text-center text-xs text-muted-foreground py-2">{t('billing.analytics.ram')}</th>
                     <th className="text-right text-xs text-muted-foreground py-2">{t('billing.analytics.usersOnline')}</th>
                   </tr>
                 </thead>

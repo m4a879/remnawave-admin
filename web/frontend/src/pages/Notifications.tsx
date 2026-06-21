@@ -273,9 +273,9 @@ function NotificationsTab() {
                 <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">{t('common.all')}</SelectItem>
-                  <SelectItem value="info">Info</SelectItem>
-                  <SelectItem value="warning">Warning</SelectItem>
-                  <SelectItem value="critical">Critical</SelectItem>
+                  <SelectItem value="info">{t('notifications.filters.severityInfo')}</SelectItem>
+                  <SelectItem value="warning">{t('notifications.filters.severityWarning')}</SelectItem>
+                  <SelectItem value="critical">{t('notifications.filters.severityCritical')}</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -751,7 +751,7 @@ function AlertRuleDialog({ rule, open, onClose }: { rule: AlertRule | null; open
                   <SelectItem value="service">{t('notifications.alerts.topicService', 'Service')}</SelectItem>
                   <SelectItem value="violations">{t('notifications.alerts.topicViolations', 'Violations')}</SelectItem>
                   <SelectItem value="errors">{t('notifications.alerts.topicErrors', 'Errors')}</SelectItem>
-                  <SelectItem value="hwid">HWID</SelectItem>
+                  <SelectItem value="hwid">{t('notifications.alerts.topicHwid')}</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -1156,9 +1156,9 @@ function AddChannelDialog({ open, onClose }: { open: boolean; onClose: () => voi
             <Select value={type} onValueChange={(v) => { setType(v); setConfig({}) }}>
               <SelectTrigger><SelectValue /></SelectTrigger>
               <SelectContent>
-                <SelectItem value="telegram">Telegram</SelectItem>
-                <SelectItem value="webhook">Webhook</SelectItem>
-                <SelectItem value="email">Email</SelectItem>
+                <SelectItem value="telegram">{t('notifications.channels.telegram')}</SelectItem>
+                <SelectItem value="webhook">{t('notifications.channels.webhook')}</SelectItem>
+                <SelectItem value="email">{t('notifications.channels.email')}</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -1166,7 +1166,7 @@ function AddChannelDialog({ open, onClose }: { open: boolean; onClose: () => voi
           {type === 'telegram' && (
             <>
               <div>
-                <Label>Chat ID</Label>
+                <Label>{t('notifications.channels.chatId')}</Label>
                 <Input
                   value={config.chat_id || ''}
                   onChange={(e) => setConfig({ ...config, chat_id: e.target.value })}
@@ -1186,7 +1186,7 @@ function AddChannelDialog({ open, onClose }: { open: boolean; onClose: () => voi
 
           {type === 'webhook' && (
             <div>
-              <Label>Webhook URL</Label>
+              <Label>{t('notifications.channels.webhookUrl')}</Label>
               <Input
                 value={config.url || ''}
                 onChange={(e) => setConfig({ ...config, url: e.target.value })}
@@ -1198,7 +1198,7 @@ function AddChannelDialog({ open, onClose }: { open: boolean; onClose: () => voi
 
           {type === 'email' && (
             <div>
-              <Label>Email</Label>
+              <Label>{t('notifications.channels.emailLabel')}</Label>
               <Input
                 type="email"
                 value={config.email || ''}
@@ -1360,14 +1360,14 @@ function SmtpConfigSection() {
                 checked={form.use_tls ?? true}
                 onCheckedChange={(v) => setForm({ ...form, use_tls: v, use_ssl: v ? false : form.use_ssl })}
               />
-              <Label>TLS (STARTTLS)</Label>
+              <Label>{t('notifications.channels.tlsStarttls')}</Label>
             </div>
             <div className="flex items-center gap-2">
               <Switch
                 checked={form.use_ssl ?? false}
                 onCheckedChange={(v) => setForm({ ...form, use_ssl: v, use_tls: v ? false : form.use_tls })}
               />
-              <Label>SSL</Label>
+              <Label>{t('notifications.channels.ssl')}</Label>
             </div>
             <div className="flex items-center gap-2">
               <Switch

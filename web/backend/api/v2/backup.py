@@ -13,6 +13,17 @@ from pydantic import BaseModel
 
 from web.backend.api.deps import AdminUser, require_permission
 from web.backend.core.errors import api_error, E
+from shared.db_schema import (
+    ADMIN_PERMISSIONS_TABLE,
+    ROLES_TABLE,
+    ALERT_RULES_TABLE,
+    AUTOMATION_RULES_TABLE,
+    NODE_SCRIPTS_TABLE,
+    SETTINGS_TABLE,
+    NOTIFICATION_CHANNEL_CONFIGS_TABLE,
+    SCHEDULED_TASKS_TABLE,
+)
+from shared.db_query import select_sql, insert_sql
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -343,35 +354,44 @@ async def export_full_config(
 
     async with db_service.acquire() as conn:
         # Roles
-        rows = await conn.fetch("SELECT * FROM roles ORDER BY id")
+        rows = await conn.fetch(select_sql(ROLES_TABLE, "*", "ORDER BY id"))
         sections["roles"] = [dict(r) for r in rows]
 
         # Permissions
-        rows = await conn.fetch("SELECT * FROM admin_permissions ORDER BY role_id, resource")
+        rows = await conn.fetch(
+            select_sql(
+                ADMIN_PERMISSIONS_TABLE,
+                "*",
+                "ORDER BY role_id, resource",
+            ),
+        )
         sections["permissions"] = [dict(r) for r in rows]
 
         # Automation rules
-        rows = await conn.fetch("SELECT * FROM automation_rules ORDER BY id")
+        rows = await conn.fetch(select_sql(AUTOMATION_RULES_TABLE, "*", "ORDER BY id"))
         sections["automation_rules"] = [dict(r) for r in rows]
 
         # Alert rules
-        rows = await conn.fetch("SELECT * FROM alert_rules ORDER BY id")
+        rows = await conn.fetch(select_sql(ALERT_RULES_TABLE, "*", "ORDER BY id"))
         sections["alert_rules"] = [dict(r) for r in rows]
 
         # Scripts
         rows = await conn.fetch(
-            "SELECT id, name, display_name, description, category, script_content, "
-            "timeout_seconds, requires_root, is_builtin, source_url "
-            "FROM node_scripts ORDER BY id"
+            select_sql(
+                NODE_SCRIPTS_TABLE,
+                "id, name, display_name, description, category, script_content, "
+                "timeout_seconds, requires_root, is_builtin, source_url",
+                "ORDER BY id",
+            ),
         )
         sections["scripts"] = [dict(r) for r in rows]
 
         # Settings
-        rows = await conn.fetch("SELECT key, value, category FROM settings ORDER BY key")
+        rows = await conn.fetch(select_sql(SETTINGS_TABLE, "key, value, category", "ORDER BY key"))
         sections["settings"] = [dict(r) for r in rows]
 
         # Notification channels (mask secrets)
-        rows = await conn.fetch("SELECT * FROM notification_channel_configs ORDER BY id")
+        rows = await conn.fetch(select_sql(NOTIFICATION_CHANNEL_CONFIGS_TABLE, "*", "ORDER BY id"))
         channels = []
         for r in rows:
             d = dict(r)
@@ -385,7 +405,7 @@ async def export_full_config(
 
         # Scheduled tasks
         try:
-            rows = await conn.fetch("SELECT * FROM scheduled_tasks ORDER BY id")
+            rows = await conn.fetch(select_sql(SCHEDULED_TASKS_TABLE, "*", "ORDER BY id"))
             sections["scheduled_tasks"] = [dict(r) for r in rows]
         except Exception:
             sections["scheduled_tasks"] = []
@@ -445,13 +465,12 @@ async def import_full_config(
                     value = s.get("value")
                     if not key:
                         continue
-                    existing = await conn.fetchrow("SELECT key FROM settings WHERE key = $1", key)
+                    existing = await conn.fetchrow(select_sql(SETTINGS_TABLE, "key", "WHERE key = $1"), key)
                     if existing and strategy == "skip":
                         skipped += 1
                         continue
                     await conn.execute(
-                        "INSERT INTO settings (key, value, category) VALUES ($1, $2, $3) "
-                        "ON CONFLICT (key) DO UPDATE SET value = $2",
+                        insert_sql(SETTINGS_TABLE, ["key", "value", "category"], "ON CONFLICT (key) DO UPDATE SET value = $2"),
                         key, value, s.get("category", "general"),
                     )
                     imported += 1
@@ -465,7 +484,7 @@ async def import_full_config(
                     name = r.get("name")
                     if not name:
                         continue
-                    existing = await conn.fetchrow("SELECT id FROM roles WHERE name = $1", name)
+                    existing = await conn.fetchrow(select_sql(ROLES_TABLE, "id", "WHERE name = $1"), name)
                     if existing and strategy == "skip":
                         skipped += 1
                         continue
@@ -491,7 +510,7 @@ async def import_full_config(
                     name = s.get("name")
                     if not name:
                         continue
-                    existing = await conn.fetchrow("SELECT id FROM node_scripts WHERE name = $1", name)
+                    existing = await conn.fetchrow(select_sql(NODE_SCRIPTS_TABLE, "id", "WHERE name = $1"), name)
                     if existing and strategy == "skip":
                         skipped += 1
                         continue
@@ -524,7 +543,7 @@ async def import_full_config(
                     name = r.get("name")
                     if not name:
                         continue
-                    existing = await conn.fetchrow("SELECT id FROM alert_rules WHERE name = $1", name)
+                    existing = await conn.fetchrow(select_sql(ALERT_RULES_TABLE, "id", "WHERE name = $1"), name)
                     if existing and strategy == "skip":
                         skipped += 1
                         continue

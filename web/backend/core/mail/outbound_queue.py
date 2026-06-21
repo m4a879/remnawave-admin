@@ -8,6 +8,9 @@ from email.message import EmailMessage
 from email.utils import formataddr, formatdate, make_msgid
 from typing import Any, Dict, List, Optional
 
+from shared.db_schema import EMAIL_QUEUE_TABLE, DOMAIN_CONFIG_TABLE
+from shared.db_query import select_sql, insert_sql, update_sql
+
 logger = logging.getLogger(__name__)
 
 # Notice appended to auto-generated mail sent from a noreply mailbox.
@@ -89,7 +92,8 @@ class OutboundMailQueue:
                     sender_domain = from_email.split("@")[-1] if "@" in from_email else None
                     if sender_domain:
                         domain_id = await conn.fetchval(
-                            "SELECT id FROM domain_config WHERE domain = $1 AND is_active = true",
+                            select_sql(DOMAIN_CONFIG_TABLE, "id",
+                                "WHERE domain = $1 AND is_active = true"),
                             sender_domain,
                         )
 
@@ -101,11 +105,11 @@ class OutboundMailQueue:
                         return None
 
                 row_id = await conn.fetchval(
-                    "INSERT INTO email_queue "
-                    "(domain_id, from_email, from_name, to_email, subject, body_text, body_html, "
-                    " category, priority, status, next_attempt_at) "
-                    "VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'pending', NOW()) "
-                    "RETURNING id",
+                    insert_sql(EMAIL_QUEUE_TABLE,
+                        ["domain_id", "from_email", "from_name", "to_email", "subject",
+                         "body_text", "body_html", "category", "priority", "status", "next_attempt_at"],
+                        values="$1, $2, $3, $4, $5, $6, $7, $8, $9, 'pending', NOW()",
+                        returning="id"),
                     domain_id, from_email, from_name, to_email, subject,
                     body_text, body_html, category, priority,
                 )
@@ -137,16 +141,18 @@ class OutboundMailQueue:
 
             async with db_service.acquire() as conn:
                 rows = await conn.fetch(
-                    "SELECT eq.*, dc.domain, dc.dkim_selector, dc.dkim_private_key, "
-                    "  dc.outbound_enabled "
-                    "FROM email_queue eq "
-                    "LEFT JOIN domain_config dc ON dc.id = eq.domain_id "
-                    "WHERE eq.status IN ('pending', 'failed') "
-                    "  AND eq.next_attempt_at <= NOW() "
-                    "  AND eq.attempts < eq.max_attempts "
-                    "ORDER BY eq.priority DESC, eq.created_at ASC "
-                    "LIMIT $1 "
-                    "FOR UPDATE OF eq SKIP LOCKED",
+                    f"""
+                    SELECT eq.*, dc.domain, dc.dkim_selector, dc.dkim_private_key,
+                      dc.outbound_enabled
+                    FROM {EMAIL_QUEUE_TABLE} eq
+                    LEFT JOIN {DOMAIN_CONFIG_TABLE} dc ON dc.id = eq.domain_id
+                    WHERE eq.status IN ('pending', 'failed')
+                      AND eq.next_attempt_at <= NOW()
+                      AND eq.attempts < eq.max_attempts
+                    ORDER BY eq.priority DESC, eq.created_at ASC
+                    LIMIT $1
+                    FOR UPDATE OF eq SKIP LOCKED
+                    """,
                     self.BATCH_SIZE,
                 )
 
@@ -170,8 +176,9 @@ class OutboundMailQueue:
         # Mark as sending
         async with db_service.acquire() as conn:
             await conn.execute(
-                "UPDATE email_queue SET status = 'sending', attempts = attempts + 1, "
-                "last_attempt_at = NOW() WHERE id = $1",
+                update_sql(EMAIL_QUEUE_TABLE,
+                    "status = 'sending', attempts = attempts + 1, last_attempt_at = NOW()",
+                    "id = $1"),
                 queue_id,
             )
 
@@ -201,8 +208,9 @@ class OutboundMailQueue:
             # Success
             async with db_service.acquire() as conn:
                 await conn.execute(
-                    "UPDATE email_queue SET status = 'sent', sent_at = NOW(), "
-                    "smtp_response = $1, message_id = $2 WHERE id = $3",
+                    update_sql(EMAIL_QUEUE_TABLE,
+                        "status = 'sent', sent_at = NOW(), smtp_response = $1, message_id = $2",
+                        "id = $3"),
                     smtp_response, msg["Message-ID"], queue_id,
                 )
             logger.info("Email sent: id=%s to=%s", queue_id, to_email)
@@ -223,8 +231,9 @@ class OutboundMailQueue:
 
             async with db_service.acquire() as conn:
                 await conn.execute(
-                    "UPDATE email_queue SET status = $1, last_error = $2, next_attempt_at = $3 "
-                    "WHERE id = $4",
+                    update_sql(EMAIL_QUEUE_TABLE,
+                        "status = $1, last_error = $2, next_attempt_at = $3",
+                        "id = $4"),
                     new_status, error_msg, next_attempt, queue_id,
                 )
             logger.warning("Email delivery failed: id=%s err=%s (attempt %d/%d)",
@@ -351,14 +360,14 @@ class OutboundMailQueue:
     async def _check_rate_limit(self, conn, domain_id: int) -> bool:
         """Check if the domain is within its hourly send limit."""
         row = await conn.fetchrow(
-            "SELECT max_send_per_hour FROM domain_config WHERE id = $1", domain_id,
+            select_sql(DOMAIN_CONFIG_TABLE, "max_send_per_hour", "WHERE id = $1"), domain_id,
         )
         if not row or not row["max_send_per_hour"]:
             return True
 
         sent_count = await conn.fetchval(
-            "SELECT COUNT(*) FROM email_queue "
-            "WHERE domain_id = $1 AND created_at > NOW() - INTERVAL '1 hour'",
+            select_sql(EMAIL_QUEUE_TABLE, "COUNT(*)",
+                "WHERE domain_id = $1 AND created_at > NOW() - INTERVAL '1 hour'"),
             domain_id,
         )
         return (sent_count or 0) < row["max_send_per_hour"]

@@ -122,9 +122,11 @@ class Settings(BaseSettings):
         import logging
         _logger = logging.getLogger(__name__)
         if not self.bot_token:
-            _logger.warning("BOT_TOKEN is not set")
+            _logger.error("BOT_TOKEN is not set - bot cannot start")
+            raise ValueError("BOT_TOKEN is required")
         if not self.api_token:
-            _logger.warning("API_TOKEN is not set — API calls will fail")
+            _logger.error("API_TOKEN is not set — API calls will fail")
+            raise ValueError("API_TOKEN is required")
         return self
 
     model_config = SettingsConfigDict(
@@ -147,8 +149,9 @@ class Settings(BaseSettings):
                 continue
             try:
                 admin_id = int(part)
-                if admin_id > 0:
-                    admins.append(admin_id)
+                if admin_id <= 0:
+                    continue
+                admins.append(admin_id)
             except ValueError:
                 continue
         return admins

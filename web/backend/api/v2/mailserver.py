@@ -6,6 +6,9 @@ from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 
+from shared.db_schema import DOMAIN_CONFIG_TABLE, EMAIL_QUEUE_TABLE, EMAIL_INBOX_TABLE, SMTP_CREDENTIALS_TABLE
+from shared.db_query import select_sql, insert_sql, update_sql, delete_sql
+
 from web.backend.core.errors import api_error, E
 
 
@@ -25,7 +28,7 @@ def _decode_subject(raw: str | None) -> str:
     except Exception:
         return raw
 from web.backend.api.deps import AdminUser, get_client_ip, require_permission
-from web.backend.core.rbac import write_audit_log
+from web.backend.core.audit import write_audit_log
 from web.backend.schemas.mailserver import (
     ComposeEmail,
     DnsCheckResult,
@@ -66,12 +69,11 @@ async def create_domain(
         from shared.database import db_service
         async with db_service.acquire() as conn:
             await conn.execute(
-                "UPDATE domain_config SET inbound_enabled = $1, outbound_enabled = $2, "
-                "max_send_per_hour = $3, from_name = $4 WHERE id = $5",
+                update_sql(DOMAIN_CONFIG_TABLE, "inbound_enabled = $1, outbound_enabled = $2, max_send_per_hour = $3, from_name = $4", "id = $5"),
                 payload.inbound_enabled, payload.outbound_enabled,
                 payload.max_send_per_hour, payload.from_name, row["id"],
             )
-            updated = await conn.fetchrow("SELECT * FROM domain_config WHERE id = $1", row["id"])
+            updated = await conn.fetchrow(select_sql(DOMAIN_CONFIG_TABLE, "*", "WHERE id = $1"), row["id"])
         await write_audit_log(
             admin_id=admin.account_id, admin_username=admin.username,
             action="mailserver.create_domain", resource="mailserver",
@@ -92,7 +94,7 @@ async def list_domains(
     """List all configured mail domains."""
     from shared.database import db_service
     async with db_service.acquire() as conn:
-        rows = await conn.fetch("SELECT * FROM domain_config ORDER BY id")
+        rows = await conn.fetch(select_sql(DOMAIN_CONFIG_TABLE, "*", "ORDER BY id"))
     return [dict(r) for r in rows]
 
 
@@ -104,7 +106,7 @@ async def get_domain(
     """Get domain details."""
     from shared.database import db_service
     async with db_service.acquire() as conn:
-        row = await conn.fetchrow("SELECT * FROM domain_config WHERE id = $1", domain_id)
+        row = await conn.fetchrow(select_sql(DOMAIN_CONFIG_TABLE, "*", "WHERE id = $1"), domain_id)
     if not row:
         raise api_error(404, E.DOMAIN_NOT_FOUND)
     return dict(row)
@@ -134,7 +136,7 @@ async def update_domain(
     set_clauses.append(f"updated_at = NOW()")
     values.append(domain_id)
 
-    query = f"UPDATE domain_config SET {', '.join(set_clauses)} WHERE id = ${idx} RETURNING *"
+    query = update_sql(DOMAIN_CONFIG_TABLE, ', '.join(set_clauses), f"id = ${idx}", returning="*")
     async with db_service.acquire() as conn:
         row = await conn.fetchrow(query, *values)
     if not row:
@@ -158,7 +160,7 @@ async def delete_domain(
     """Delete a domain and its DKIM keys."""
     from shared.database import db_service
     async with db_service.acquire() as conn:
-        deleted = await conn.execute("DELETE FROM domain_config WHERE id = $1", domain_id)
+        deleted = await conn.execute(delete_sql(DOMAIN_CONFIG_TABLE, "id = $1"), domain_id)
     await write_audit_log(
         admin_id=admin.account_id, admin_username=admin.username,
         action="mailserver.delete_domain", resource="mailserver",
@@ -224,11 +226,9 @@ async def list_queue(
     where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
     params.extend([limit, offset])
 
-    query = (
-        f"SELECT id, from_email, to_email, subject, status, category, priority, "
-        f"attempts, max_attempts, last_error, message_id, created_at, sent_at "
-        f"FROM email_queue {where} ORDER BY created_at DESC LIMIT ${idx} OFFSET ${idx + 1}"
-    )
+    query = select_sql(EMAIL_QUEUE_TABLE,
+        "id, from_email, to_email, subject, status, category, priority, attempts, max_attempts, last_error, message_id, created_at, sent_at",
+        f"{where} ORDER BY created_at DESC LIMIT ${idx} OFFSET ${idx + 1}")
 
     async with db_service.acquire() as conn:
         rows = await conn.fetch(query, *params)
@@ -248,13 +248,12 @@ async def get_queue_stats(
     from shared.database import db_service
     async with db_service.acquire() as conn:
         row = await conn.fetchrow(
-            "SELECT "
-            "  COUNT(*) FILTER (WHERE status = 'pending') AS pending, "
-            "  COUNT(*) FILTER (WHERE status = 'sending') AS sending, "
-            "  COUNT(*) FILTER (WHERE status = 'sent') AS sent, "
-            "  COUNT(*) FILTER (WHERE status = 'failed' AND attempts >= max_attempts) AS failed, "
-            "  COUNT(*) AS total "
-            "FROM email_queue"
+            select_sql(EMAIL_QUEUE_TABLE,
+                "COUNT(*) FILTER (WHERE status = 'pending') AS pending, "
+                "COUNT(*) FILTER (WHERE status = 'sending') AS sending, "
+                "COUNT(*) FILTER (WHERE status = 'sent') AS sent, "
+                "COUNT(*) FILTER (WHERE status = 'failed' AND attempts >= max_attempts) AS failed, "
+                "COUNT(*) AS total")
         )
     return dict(row)
 
@@ -267,7 +266,7 @@ async def get_queue_item(
     """Get queue item details."""
     from shared.database import db_service
     async with db_service.acquire() as conn:
-        row = await conn.fetchrow("SELECT * FROM email_queue WHERE id = $1", item_id)
+        row = await conn.fetchrow(select_sql(EMAIL_QUEUE_TABLE, "*", "WHERE id = $1"), item_id)
     if not row:
         raise api_error(404, E.QUEUE_ITEM_NOT_FOUND)
     d = dict(row)
@@ -284,8 +283,7 @@ async def retry_queue_item(
     from shared.database import db_service
     async with db_service.acquire() as conn:
         result = await conn.execute(
-            "UPDATE email_queue SET status = 'pending', attempts = 0, "
-            "next_attempt_at = NOW(), last_error = NULL WHERE id = $1 AND status = 'failed'",
+            update_sql(EMAIL_QUEUE_TABLE, "status = 'pending', attempts = 0, next_attempt_at = NOW(), last_error = NULL", "id = $1 AND status = 'failed'"),
             item_id,
         )
     return {"ok": True}
@@ -300,7 +298,7 @@ async def cancel_queue_item(
     from shared.database import db_service
     async with db_service.acquire() as conn:
         await conn.execute(
-            "UPDATE email_queue SET status = 'cancelled' WHERE id = $1 AND status IN ('pending', 'failed')",
+            update_sql(EMAIL_QUEUE_TABLE, "status = 'cancelled'", "id = $1 AND status IN ('pending', 'failed')"),
             item_id,
         )
     return {"ok": True}
@@ -315,7 +313,7 @@ async def clear_old_queue(
     from shared.database import db_service
     async with db_service.acquire() as conn:
         result = await conn.execute(
-            "DELETE FROM email_queue WHERE created_at < NOW() - ($1 || ' days')::INTERVAL",
+            delete_sql(EMAIL_QUEUE_TABLE, "created_at < NOW() - ($1 || ' days')::INTERVAL"),
             str(days),
         )
     return {"ok": True, "deleted": result}
@@ -345,11 +343,9 @@ async def list_inbox(
     where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
     params.extend([limit, offset])
 
-    query = (
-        f"SELECT id, mail_from, rcpt_to, from_header, subject, date_header, "
-        f"is_read, is_spam, has_attachments, attachment_count, created_at "
-        f"FROM email_inbox {where} ORDER BY created_at DESC LIMIT ${idx} OFFSET ${idx + 1}"
-    )
+    query = select_sql(EMAIL_INBOX_TABLE,
+        "id, mail_from, rcpt_to, from_header, subject, date_header, is_read, is_spam, has_attachments, attachment_count, created_at",
+        f"{where} ORDER BY created_at DESC LIMIT ${idx} OFFSET ${idx + 1}")
 
     async with db_service.acquire() as conn:
         rows = await conn.fetch(query, *params)
@@ -369,7 +365,7 @@ async def get_inbox_item(
     """Get full inbox message."""
     from shared.database import db_service
     async with db_service.acquire() as conn:
-        row = await conn.fetchrow("SELECT * FROM email_inbox WHERE id = $1", item_id)
+        row = await conn.fetchrow(select_sql(EMAIL_INBOX_TABLE, "*", "WHERE id = $1"), item_id)
     if not row:
         raise api_error(404, E.MESSAGE_NOT_FOUND)
     d = dict(row)
@@ -387,11 +383,11 @@ async def mark_inbox_read(
     async with db_service.acquire() as conn:
         if payload.ids:
             await conn.execute(
-                "UPDATE email_inbox SET is_read = true WHERE id = ANY($1::bigint[])",
+                update_sql(EMAIL_INBOX_TABLE, "is_read = true", "id = ANY($1::bigint[])"),
                 payload.ids,
             )
         else:
-            await conn.execute("UPDATE email_inbox SET is_read = true WHERE is_read = false")
+            await conn.execute(update_sql(EMAIL_INBOX_TABLE, "is_read = true", "is_read = false"))
     return {"ok": True}
 
 
@@ -403,7 +399,7 @@ async def delete_inbox_item(
     """Delete an inbox message."""
     from shared.database import db_service
     async with db_service.acquire() as conn:
-        await conn.execute("DELETE FROM email_inbox WHERE id = $1", item_id)
+        await conn.execute(delete_sql(EMAIL_INBOX_TABLE, "id = $1"), item_id)
     return {"ok": True}
 
 
@@ -480,9 +476,9 @@ async def create_smtp_credential(
     try:
         async with db_service.acquire() as conn:
             row = await conn.fetchrow(
-                "INSERT INTO smtp_credentials (username, password_hash, description, "
-                "allowed_from_domains, max_send_per_hour) "
-                "VALUES ($1, $2, $3, $4, $5) RETURNING *",
+                insert_sql(SMTP_CREDENTIALS_TABLE,
+                    ["username", "password_hash", "description", "allowed_from_domains", "max_send_per_hour"],
+                    returning="*"),
                 payload.username, password_hash, payload.description,
                 payload.allowed_from_domains, payload.max_send_per_hour,
             )
@@ -509,9 +505,9 @@ async def list_smtp_credentials(
     from shared.database import db_service
     async with db_service.acquire() as conn:
         rows = await conn.fetch(
-            "SELECT id, username, description, is_active, allowed_from_domains, "
-            "max_send_per_hour, last_login_at, last_login_ip, created_at, updated_at "
-            "FROM smtp_credentials ORDER BY id"
+            select_sql(SMTP_CREDENTIALS_TABLE,
+                "id, username, description, is_active, allowed_from_domains, max_send_per_hour, last_login_at, last_login_ip, created_at, updated_at",
+                "ORDER BY id")
         )
     return [dict(r) for r in rows]
 
@@ -525,9 +521,9 @@ async def get_smtp_credential(
     from shared.database import db_service
     async with db_service.acquire() as conn:
         row = await conn.fetchrow(
-            "SELECT id, username, description, is_active, allowed_from_domains, "
-            "max_send_per_hour, last_login_at, last_login_ip, created_at, updated_at "
-            "FROM smtp_credentials WHERE id = $1", cred_id,
+            select_sql(SMTP_CREDENTIALS_TABLE,
+                "id, username, description, is_active, allowed_from_domains, max_send_per_hour, last_login_at, last_login_ip, created_at, updated_at",
+                "WHERE id = $1"), cred_id,
         )
     if not row:
         raise api_error(404, E.SMTP_CREDENTIAL_NOT_FOUND)
@@ -563,11 +559,7 @@ async def update_smtp_credential(
     set_clauses.append("updated_at = NOW()")
     values.append(cred_id)
 
-    query = (
-        f"UPDATE smtp_credentials SET {', '.join(set_clauses)} WHERE id = ${idx} "
-        "RETURNING id, username, description, is_active, allowed_from_domains, "
-        "max_send_per_hour, last_login_at, last_login_ip, created_at, updated_at"
-    )
+    query = update_sql(SMTP_CREDENTIALS_TABLE, ', '.join(set_clauses), f"id = ${idx}", returning="id, username, description, is_active, allowed_from_domains, max_send_per_hour, last_login_at, last_login_ip, created_at, updated_at")
     async with db_service.acquire() as conn:
         row = await conn.fetchrow(query, *values)
     if not row:
@@ -593,7 +585,7 @@ async def delete_smtp_credential(
     """Delete an SMTP credential."""
     from shared.database import db_service
     async with db_service.acquire() as conn:
-        await conn.execute("DELETE FROM smtp_credentials WHERE id = $1", cred_id)
+        await conn.execute(delete_sql(SMTP_CREDENTIALS_TABLE, "id = $1"), cred_id)
     from web.backend.core.mail.mail_service import mail_service
     await mail_service.refresh_smtp_credentials()
     await write_audit_log(

@@ -1,14 +1,17 @@
 import { useState, useRef, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Bell, Search, Menu, Globe, Check, ExternalLink } from 'lucide-react'
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { Bell, Search, Menu, Globe, Check, ExternalLink, RefreshCw, RotateCcw } from 'lucide-react'
+import { useQuery, useMutation, useQueryClient, useIsFetching } from '@tanstack/react-query'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { AppearancePanel } from '../AppearancePanel'
 import { useTranslation } from 'react-i18next'
+import { usePermissionStore } from '@/store/permissionStore'
 import { notificationsApi, type Notification } from '@/api/notifications'
 import { cn } from '@/lib/utils'
+import client from '@/api/client'
+import { toast } from 'sonner'
 
 interface HeaderProps {
   onMenuToggle?: () => void
@@ -65,6 +68,42 @@ export default function Header({ onMenuToggle, onSearchClick }: HeaderProps) {
     },
   })
 
+  const fetchingCount = useIsFetching()
+  // /auth/me is a direct axios call (no useQuery), so useIsFetching()
+  // can't see it — track it locally to keep the spinner honest while
+  // the admin quota is being refreshed.
+  const [refreshingQuota, setRefreshingQuota] = useState(false)
+  const isRefreshing = fetchingCount > 0 || refreshingQuota
+
+  const handleRefreshAll = async () => {
+    // Invalidate every React Query cache (lists, stats, settings, etc.)
+    // AND re-fetch the current admin's quota counters from the Zustand
+    // store. The store is populated from a direct axios call, not a
+    // useQuery, so `invalidateQueries()` alone would never refresh it —
+    // leaving the dashboard quota card and the "Remaining traffic"
+    // indicator stale until the next user mutation or page reload.
+    queryClient.invalidateQueries()
+    setRefreshingQuota(true)
+    try {
+      await usePermissionStore.getState().refreshAdmin()
+    } catch {
+      // Silent — the store keeps its previous values if /auth/me fails.
+    } finally {
+      setRefreshingQuota(false)
+    }
+  }
+
+  const syncAll = useMutation({
+    mutationFn: () => client.post('/settings/sync/all'),
+    onSuccess: async () => {
+      await handleRefreshAll()
+      toast.success(t('dashboard.syncSuccess'))
+    },
+    onError: (err: Error) => {
+      toast.error(err.message || t('dashboard.syncError'))
+    },
+  })
+
   // Click outside or Escape to close
   useEffect(() => {
     if (!dropdownOpen) return
@@ -84,7 +123,7 @@ export default function Header({ onMenuToggle, onSearchClick }: HeaderProps) {
     }
   }, [dropdownOpen])
 
-  const notifications = recentData?.items || []
+  const notifications = Array.isArray(recentData?.items) ? recentData.items : []
 
   return (
     <header
@@ -134,6 +173,37 @@ export default function Header({ onMenuToggle, onSearchClick }: HeaderProps) {
 
       {/* Right side */}
       <div className="flex items-center gap-2 md:gap-4">
+        <div className="flex items-center gap-1">
+          {/* Refresh */}
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleRefreshAll}
+            disabled={isRefreshing}
+            className="gap-2 backdrop-blur-sm"
+            aria-label={t('dashboard.refresh')}
+          >
+            <RefreshCw className={cn("w-3.5 h-3.5", isRefreshing && "animate-spin")} />
+            <span className="hidden sm:inline">{t('dashboard.refresh')}</span>
+          </Button>
+
+          {usePermissionStore((s) => s.hasPermission)('settings', 'edit') && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => syncAll.mutate()}
+              disabled={syncAll.isPending}
+              className="gap-2 backdrop-blur-sm"
+              aria-label={t('dashboard.sync')}
+            >
+              <RotateCcw className={cn("w-3.5 h-3.5", syncAll.isPending && "animate-spin")} />
+              <span className="hidden sm:inline">{t('dashboard.sync')}</span>
+            </Button>
+          )}
+        </div>
+
+        <div className="w-px h-6 bg-[var(--glass-border)]" />
+
         {/* Appearance settings */}
         <AppearancePanel />
 

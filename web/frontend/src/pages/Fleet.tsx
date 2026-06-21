@@ -179,7 +179,7 @@ function NodeDetailPanel({
             </div>
             <div className="flex items-center gap-2 min-w-0">
               <Zap className="w-3.5 h-3.5 text-yellow-400 shrink-0" />
-              <span className="text-dark-200 shrink-0">Xray</span>
+              <span className="text-dark-200 shrink-0">{t('fleet.detail.xray')}</span>
               <span className="text-white ml-auto font-mono text-xs">{node.xray_version || '-'}</span>
             </div>
             <div className="flex items-center gap-2 min-w-0">
@@ -217,7 +217,7 @@ function NodeDetailPanel({
           <div className="space-y-2 text-sm">
             <div className="flex items-center gap-2">
               <Cpu className="w-3.5 h-3.5 text-orange-400 shrink-0" />
-              <span className="text-dark-200">CPU</span>
+              <span className="text-dark-200">{t('fleet.detail.cpu')}</span>
               <span className={cn('ml-auto font-mono', getCpuColor(node.cpu_usage))}>
                 {node.cpu_usage != null ? `${node.cpu_usage.toFixed(1)}%` : '-'}
               </span>
@@ -235,7 +235,7 @@ function NodeDetailPanel({
             )}
             <div className="flex items-center gap-2">
               <MemoryStick className="w-3.5 h-3.5 text-pink-400 shrink-0" />
-              <span className="text-dark-200">RAM</span>
+              <span className="text-dark-200">{t('fleet.detail.ram')}</span>
               <span className={cn('ml-auto font-mono', getRamColor(node.memory_usage))}>
                 {node.memory_usage != null ? `${node.memory_usage.toFixed(1)}%` : '-'}
                 {node.memory_total_bytes != null && (
@@ -307,7 +307,7 @@ function NodeDetailPanel({
             </div>
             <div className="flex items-center gap-2">
               <Clock className="w-3.5 h-3.5 text-green-400 shrink-0" />
-              <span className="text-dark-200">Uptime</span>
+              <span className="text-dark-200">{t('fleet.detail.uptime')}</span>
               <span className="text-white ml-auto font-mono text-xs">{formatUptime(node.uptime_seconds)}</span>
             </div>
           </div>
@@ -1100,9 +1100,9 @@ function BulkNodeOpsTab() {
     },
     onSuccess: (data) => {
       setResult(data)
-      toast.success(`Generated ${data.success} tokens`)
+      toast.success(t('fleet.toast.generatedTokens', { count: data.success }))
     },
-    onError: () => toast.error('Failed'),
+    onError: () => toast.error(t('fleet.toast.error')),
   })
 
   const installMutation = useMutation({
@@ -1112,9 +1112,9 @@ function BulkNodeOpsTab() {
     },
     onSuccess: (data) => {
       setResult(data)
-      toast.success(`Generated ${data.success} install commands`)
+      toast.success(t('fleet.toast.generatedCommands', { count: data.success }))
     },
-    onError: () => toast.error('Failed'),
+    onError: () => toast.error(t('fleet.toast.error')),
   })
 
   const revokeMutation = useMutation({
@@ -1124,9 +1124,9 @@ function BulkNodeOpsTab() {
     },
     onSuccess: (data) => {
       setResult(data)
-      toast.success(`Revoked ${data.success} tokens`)
+      toast.success(t('fleet.toast.revokedTokens', { count: data.success }))
     },
-    onError: () => toast.error('Failed'),
+    onError: () => toast.error(t('fleet.toast.error')),
   })
 
   return (

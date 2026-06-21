@@ -20,6 +20,8 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from shared.database import db_service
+from shared.db_schema import NODES_TABLE
+from shared.db_query import select_sql
 from shared.connection_monitor import ConnectionMonitor
 from shared.violation_detector import IntelligentViolationDetector, ViolationAction
 from shared.agent_tokens import get_node_by_token
@@ -273,7 +275,7 @@ async def verify_agent_token(
         try:
             async with db_service.acquire() as conn:
                 row = await conn.fetchrow(
-                    "SELECT name, address FROM nodes WHERE address LIKE $1 LIMIT 1",
+                    select_sql(NODES_TABLE, "name, address", "WHERE address LIKE $1 LIMIT 1"),
                     f"%{client_ip}%",
                 )
                 if row:
@@ -1140,20 +1142,47 @@ async def collector_webhook(request: Request):
         logger.warning("Webhook sync failed for %s: %s", event, e)
 
     # 2. Forward to bot for Telegram notifications (fire-and-forget)
-    bot_webhook_url = os.environ.get("BOT_WEBHOOK_URL", "http://bot:8080/webhook")
-    try:
-        async with httpx.AsyncClient(timeout=5) as client:
-            resp = await client.post(
-                bot_webhook_url,
-                content=body,
-                headers={
-                    "content-type": "application/json",
-                    "x-remnawave-signature": request.headers.get("x-remnawave-signature", ""),
-                },
-            )
-            if resp.status_code != 200:
-                logger.warning("Bot webhook forward failed: %d", resp.status_code)
-    except Exception as e:
-        logger.warning("Bot webhook forward error: %s", e)
+    # Uses INTERNAL_API_SECRET instead of X-Remnawave-Signature
+    bot_callback_url = os.environ.get("BOT_CALLBACK_URL", "http://bot:8080/internal/panel-event")
+    internal_secret = os.environ.get("INTERNAL_API_SECRET", "")
+    if internal_secret:
+        try:
+            async with httpx.AsyncClient(timeout=5) as client:
+                resp = await client.post(
+                    bot_callback_url,
+                    content=body,
+                    headers={
+                        "content-type": "application/json",
+                        "X-Internal-Api-Secret": internal_secret,
+                    },
+                )
+                if resp.status_code != 200:
+                    logger.warning("Bot callback forward failed: %d", resp.status_code)
+        except Exception as e:
+            logger.warning("Bot callback forward error: %s", e)
+    else:
+        # Fallback: forward raw webhook to legacy bot webhook (deprecated)
+        logger.warning(
+            "DEPRECATED: INTERNAL_API_SECRET is not set. "
+            "Falling back to legacy BOT_WEBHOOK_URL (%s). "
+            "Set INTERNAL_API_SECRET in .env and remove BOT_WEBHOOK_URL to use the new "
+            "internal API proxy (adds RBAC, quota enforcement, and audit logging).",
+            os.environ.get("BOT_WEBHOOK_URL", "http://bot:8080/webhook"),
+        )
+        bot_webhook_url = os.environ.get("BOT_WEBHOOK_URL", "http://bot:8080/webhook")
+        try:
+            async with httpx.AsyncClient(timeout=5) as client:
+                resp = await client.post(
+                    bot_webhook_url,
+                    content=body,
+                    headers={
+                        "content-type": "application/json",
+                        "x-remnawave-signature": request.headers.get("x-remnawave-signature", ""),
+                    },
+                )
+                if resp.status_code != 200:
+                    logger.warning("Bot webhook forward failed: %d", resp.status_code)
+        except Exception as e:
+            logger.warning("Bot webhook forward error: %s", e)
 
     return JSONResponse(status_code=200, content={"status": "ok", "event": event})

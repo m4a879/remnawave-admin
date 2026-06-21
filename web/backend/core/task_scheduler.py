@@ -4,6 +4,9 @@ import json
 import logging
 from datetime import datetime, timezone
 
+from shared.db_schema import NODES_TABLE, NODE_SCRIPTS_TABLE, NODE_COMMAND_LOG_TABLE, SCHEDULED_TASKS_TABLE
+from shared.db_query import select_sql, insert_sql, update_sql
+
 logger = logging.getLogger(__name__)
 
 
@@ -21,12 +24,12 @@ async def task_scheduler_loop():
 
             async with db_service.acquire() as conn:
                 tasks = await conn.fetch(
-                    """
+                    f"""
                     SELECT st.id, st.script_id, st.node_uuid::text, st.cron_expression,
                            st.env_vars, ns.script_content, ns.name AS script_name,
                            ns.timeout_seconds, ns.requires_root
-                    FROM scheduled_tasks st
-                    JOIN node_scripts ns ON ns.id = st.script_id
+                    FROM {SCHEDULED_TASKS_TABLE} st
+                    JOIN {NODE_SCRIPTS_TABLE} ns ON ns.id = st.script_id
                     WHERE st.is_enabled = true
                     """
                 )
@@ -58,7 +61,7 @@ async def task_scheduler_loop():
                         agent_token = None
                         async with db_service.acquire() as conn:
                             row = await conn.fetchrow(
-                                "SELECT agent_token FROM nodes WHERE uuid = $1", node_uuid
+                                select_sql(NODES_TABLE, "agent_token", "WHERE uuid = $1"), node_uuid
                             )
                             if row:
                                 agent_token = row["agent_token"]
@@ -95,13 +98,11 @@ async def task_scheduler_loop():
                         # Log command for result tracking (agent sends command_result by command_id)
                         async with db_service.acquire() as conn:
                             cmd_row = await conn.fetchrow(
-                                """
-                                INSERT INTO node_command_log
-                                    (node_uuid, admin_id, admin_username, command_type,
-                                     command_data, status)
-                                VALUES ($1, NULL, 'scheduler', 'exec_script', $2, 'running')
-                                RETURNING id
-                                """,
+                                insert_sql(NODE_COMMAND_LOG_TABLE,
+                                    ["node_uuid", "admin_id", "admin_username", "command_type",
+                                     "command_data", "status"],
+                                    values="$1, NULL, 'scheduler', 'exec_script', $2, 'running'",
+                                    returning="id"),
                                 node_uuid,
                                 f"script={script_name} task_id={task_id}" + (
                                     f" env={list(env_vars.keys())}" if env_vars else ""
@@ -143,12 +144,9 @@ async def _update_task_status(db_service, task_id: int, status: str):
     try:
         async with db_service.acquire() as conn:
             await conn.execute(
-                """
-                UPDATE scheduled_tasks
-                SET last_run_at = NOW(), last_status = $2,
-                    run_count = run_count + 1, updated_at = NOW()
-                WHERE id = $1
-                """,
+                update_sql(SCHEDULED_TASKS_TABLE,
+                    "last_run_at = NOW(), last_status = $2, run_count = run_count + 1, updated_at = NOW()",
+                    "id = $1"),
                 task_id, status,
             )
     except Exception as e:

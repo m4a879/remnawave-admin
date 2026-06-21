@@ -31,6 +31,8 @@ from web.backend.schemas.notification import (
     SmtpConfigUpdate,
     SmtpTestRequest,
 )
+from shared.db_schema import ADMIN_TABLE, ADMIN_ROLES_TABLE, NOTIFICATIONS_TABLE, NOTIFICATION_CHANNELS_TABLE, SMTP_CONFIG_TABLE, ALERT_RULES_TABLE, ALERT_RULE_LOG_TABLE
+from shared.db_query import select_sql, insert_sql, update_sql
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -58,12 +60,20 @@ async def _require_account_id(admin: AdminUser) -> int:
             row = None
             if admin.telegram_id:
                 row = await conn.fetchrow(
-                    "SELECT id FROM admin_accounts WHERE telegram_id = $1",
+                    select_sql(
+                        ADMIN_TABLE,
+                        "id",
+                        "WHERE telegram_id = $1",
+                    ),
                     admin.telegram_id,
                 )
             if not row and admin.username:
                 row = await conn.fetchrow(
-                    "SELECT id FROM admin_accounts WHERE username = $1",
+                    select_sql(
+                        ADMIN_TABLE,
+                        "id",
+                        "WHERE username = $1",
+                    ),
                     admin.username,
                 )
             if row:
@@ -71,14 +81,21 @@ async def _require_account_id(admin: AdminUser) -> int:
 
             # Auto-create account for legacy admin
             role_row = await conn.fetchrow(
-                "SELECT id FROM admin_roles WHERE name = 'superadmin'"
+                select_sql(
+                    ADMIN_ROLES_TABLE,
+                    "id",
+                    "WHERE name = 'superadmin'",
+                ),
             )
             role_id = role_row["id"] if role_row else None
             new_row = await conn.fetchrow(
-                "INSERT INTO admin_accounts (username, telegram_id, role_id, is_active) "
-                "VALUES ($1, $2, $3, true) "
-                "ON CONFLICT (username) DO UPDATE SET updated_at = NOW() "
-                "RETURNING id",
+                insert_sql(
+                    ADMIN_TABLE,
+                    ["username", "telegram_id", "role_id", "is_active"],
+                    values="$1, $2, $3, true",
+                    suffix="ON CONFLICT (username) DO UPDATE SET updated_at = NOW()",
+                    returning="id",
+                ),
                 admin.username or f"admin_{admin.telegram_id}",
                 admin.telegram_id,
                 role_id,
@@ -139,10 +156,9 @@ async def list_notifications(
     where = " AND ".join(conditions)
 
     async with db_service.acquire() as conn:
-        total = await conn.fetchval(f"SELECT COUNT(*) FROM notifications WHERE {where}", *params)
+        total = await conn.fetchval(select_sql(NOTIFICATIONS_TABLE, "COUNT(*)", f"WHERE {where}"), *params)
         rows = await conn.fetch(
-            f"SELECT * FROM notifications WHERE {where} ORDER BY created_at DESC "
-            f"LIMIT ${idx} OFFSET ${idx + 1}",
+            select_sql(NOTIFICATIONS_TABLE, "*", f"WHERE {where} ORDER BY created_at DESC LIMIT ${idx} OFFSET ${idx + 1}"),
             *params, per_page, (page - 1) * per_page,
         )
 
@@ -163,12 +179,12 @@ async def get_unread_count(
     async with db_service.acquire() as conn:
         if aid is not None:
             count = await conn.fetchval(
-                "SELECT COUNT(*) FROM notifications WHERE (admin_id = $1 OR admin_id IS NULL) AND is_read = false",
+                select_sql(NOTIFICATIONS_TABLE, "COUNT(*)", "WHERE (admin_id = $1 OR admin_id IS NULL) AND is_read = false"),
                 aid,
             )
         else:
             count = await conn.fetchval(
-                "SELECT COUNT(*) FROM notifications WHERE admin_id IS NULL AND is_read = false",
+                select_sql(NOTIFICATIONS_TABLE, "COUNT(*)", "WHERE admin_id IS NULL AND is_read = false"),
             )
 
     return NotificationUnreadCount(count=count or 0)
@@ -298,7 +314,7 @@ async def list_channels(
     aid = await _require_account_id(admin)
     async with db_service.acquire() as conn:
         rows = await conn.fetch(
-            "SELECT * FROM notification_channels WHERE admin_id = $1 ORDER BY channel_type",
+            select_sql(NOTIFICATION_CHANNELS_TABLE, "*", "WHERE admin_id = $1 ORDER BY channel_type"),
             aid,
         )
 
@@ -323,11 +339,7 @@ async def create_channel(
     config_json = json.dumps(data.config)
     async with db_service.acquire() as conn:
         row = await conn.fetchrow(
-            "INSERT INTO notification_channels (admin_id, channel_type, is_enabled, config) "
-            "VALUES ($1, $2, $3, $4::jsonb) "
-            "ON CONFLICT (admin_id, channel_type) DO UPDATE SET "
-            "is_enabled = $3, config = $4::jsonb, updated_at = NOW() "
-            "RETURNING *",
+            insert_sql(NOTIFICATION_CHANNELS_TABLE, ["admin_id", "channel_type", "is_enabled", "config"], "ON CONFLICT (admin_id, channel_type) DO UPDATE SET is_enabled = $3, config = $4::jsonb, updated_at = NOW() RETURNING *"),
             aid, data.channel_type, data.is_enabled, config_json,
         )
 
@@ -414,7 +426,7 @@ async def get_smtp_config(
     from shared.database import db_service
 
     async with db_service.acquire() as conn:
-        row = await conn.fetchrow("SELECT * FROM smtp_config ORDER BY id LIMIT 1")
+        row = await conn.fetchrow(select_sql(SMTP_CONFIG_TABLE, "*", "ORDER BY id LIMIT 1"))
 
     if not row:
         raise api_error(404, E.SMTP_NOT_CONFIGURED)
@@ -447,15 +459,14 @@ async def update_smtp_config(
 
     async with db_service.acquire() as conn:
         # Ensure a row exists
-        exists = await conn.fetchval("SELECT id FROM smtp_config ORDER BY id LIMIT 1")
+        exists = await conn.fetchval(select_sql(SMTP_CONFIG_TABLE, "id", "ORDER BY id LIMIT 1"))
         if not exists:
             await conn.execute(
-                "INSERT INTO smtp_config (host, port, from_email) VALUES ('localhost', 587, 'admin@remnawave.local')"
+                insert_sql(SMTP_CONFIG_TABLE, ["host", "port", "from_email"], "VALUES ('localhost', 587, 'admin@remnawave.local')"),
             )
 
         row = await conn.fetchrow(
-            f"UPDATE smtp_config SET {', '.join(updates)} "
-            f"WHERE id = (SELECT id FROM smtp_config ORDER BY id LIMIT 1) RETURNING *",
+            update_sql(SMTP_CONFIG_TABLE, ", ".join(updates), "WHERE id = (SELECT id FROM smtp_config ORDER BY id LIMIT 1) RETURNING *"),
             *params,
         )
 
@@ -594,7 +605,7 @@ async def list_alert_templates(
     if db_service.is_connected:
         async with db_service.acquire() as conn:
             rows = await conn.fetch(
-                "SELECT metric, operator, threshold FROM alert_rules"
+                select_sql(ALERT_RULES_TABLE, "metric, operator, threshold"),
             )
             for r in rows:
                 key = f"{r['metric']}_{r['operator']}_{r['threshold']}"
@@ -622,18 +633,14 @@ async def activate_alert_template(
     channels_json = json.dumps(template["channels"])
     async with db_service.acquire() as conn:
         row = await conn.fetchrow(
-            "INSERT INTO alert_rules "
-            "(name, description, is_enabled, rule_type, metric, operator, threshold, "
-            "duration_minutes, channels, severity, cooldown_minutes, created_by, group_key, "
-            "title_template, body_template) "
-            "VALUES ($1, $2, TRUE, 'threshold', $3, $4, $5, $6, $7::jsonb, $8, $9, $10, $11, $12, $13) "
-            "RETURNING *",
-            template["name"], template["description"],
-            template["metric"], template["operator"], template["threshold"],
-            template.get("duration_minutes", 0), channels_json,
-            template["severity"], template["cooldown_minutes"],
-            admin.account_id, f"alert_{template['metric']}",
-            template["title_template"], template["body_template"],
+            insert_sql(ALERT_RULES_TABLE, [
+                "name", "description", "is_enabled", "rule_type", "metric", "operator", "threshold",
+                "duration_minutes", "channels", "severity", "cooldown_minutes", "created_by", "group_key",
+                "title_template", "body_template"
+            ]),
+            template["name"], template["description"], True, "threshold", template["metric"], template["operator"], template["threshold"],
+            template["duration_minutes"], channels_json, template["severity"], template["cooldown_minutes"], aid,
+            template["id"], template["title_template"], template["body_template"],
         )
 
     d = dict(row)
@@ -654,7 +661,7 @@ async def list_alert_rules(
     from shared.database import db_service
 
     async with db_service.acquire() as conn:
-        rows = await conn.fetch("SELECT * FROM alert_rules ORDER BY created_at DESC")
+        rows = await conn.fetch(select_sql(ALERT_RULES_TABLE, "*", "ORDER BY created_at DESC"))
 
     items = []
     for r in rows:
@@ -676,14 +683,12 @@ async def create_alert_rule(
     channels_json = json.dumps(data.channels)
     async with db_service.acquire() as conn:
         row = await conn.fetchrow(
-            "INSERT INTO alert_rules "
-            "(name, description, is_enabled, rule_type, metric, operator, threshold, "
-            "duration_minutes, channels, severity, cooldown_minutes, "
-            "escalation_admin_id, escalation_minutes, created_by, group_key, "
-            "title_template, body_template, topic_type) "
-            "VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10, $11, $12, $13, $14, $15, "
-            "$16, $17, $18) "
-            "RETURNING *",
+            insert_sql(ALERT_RULES_TABLE, [
+                "name", "description", "is_enabled", "rule_type", "metric", "operator", "threshold",
+                "duration_minutes", "channels", "severity", "cooldown_minutes",
+                "escalation_admin_id", "escalation_minutes", "created_by", "group_key",
+                "title_template", "body_template", "topic_type"
+            ]),
             data.name, data.description, data.is_enabled, data.rule_type,
             data.metric, data.operator, data.threshold,
             data.duration_minutes, channels_json, data.severity,
@@ -815,10 +820,9 @@ async def list_alert_logs(
     where = " AND ".join(conditions)
 
     async with db_service.acquire() as conn:
-        total = await conn.fetchval(f"SELECT COUNT(*) FROM alert_rule_log WHERE {where}", *params)
+        total = await conn.fetchval(select_sql(ALERT_RULE_LOG_TABLE, "COUNT(*)", f"WHERE {where}"), *params)
         rows = await conn.fetch(
-            f"SELECT * FROM alert_rule_log WHERE {where} ORDER BY created_at DESC "
-            f"LIMIT ${idx} OFFSET ${idx + 1}",
+            select_sql(ALERT_RULE_LOG_TABLE, "*", f"WHERE {where} ORDER BY created_at DESC LIMIT ${idx} OFFSET ${idx + 1}"),
             *params, per_page, (page - 1) * per_page,
         )
 
@@ -845,8 +849,7 @@ async def acknowledge_alerts(
     async with db_service.acquire() as conn:
         if data.ids:
             await conn.execute(
-                "UPDATE alert_rule_log SET acknowledged = true, acknowledged_by = $1, "
-                "acknowledged_at = NOW() WHERE id = ANY($2::bigint[])",
+                update_sql(ALERT_RULE_LOG_TABLE, "acknowledged = true, acknowledged_by = $1, acknowledged_at = NOW()", "WHERE id = ANY($2::bigint[])"),
                 aid, data.ids,
             )
         else:

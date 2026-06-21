@@ -493,6 +493,7 @@ def _db_row_to_api_format(row) -> Dict[str, Any]:
         'uptime_seconds', 'metrics_updated_at',
         'agent_v2_connected', 'agent_v2_last_ping',
     )
+    _INTERNAL_FIELDS = ("created_by_admin_id",)
 
     if raw_data:
         # Use raw_data if available (contains full API response)
@@ -514,6 +515,10 @@ def _db_row_to_api_format(row) -> Dict[str, Any]:
                         result[field] = val.isoformat()
                     else:
                         result[field] = val
+            for field in _INTERNAL_FIELDS:
+                val = row_dict.get(field)
+                if val is not None:
+                    result["createdByAdminId"] = val
             return result
 
     # Fallback: build from row fields (convert snake_case to camelCase)
@@ -539,6 +544,7 @@ def _db_row_to_api_format(row) -> Dict[str, Any]:
         "is_disabled": "isDisabled",
         "is_connected": "isConnected",
         "remark": "remark",
+        "created_by_admin_id": "createdByAdminId",
     }
 
     for db_field, api_field in field_mapping.items():

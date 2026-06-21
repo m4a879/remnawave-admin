@@ -45,6 +45,9 @@ import sys
 from pathlib import Path
 from typing import Tuple
 
+from shared.db_schema import ADMIN_TABLE, ADMIN_ROLES_TABLE
+from shared.db_query import select_sql, update_sql, insert_sql
+
 # ── Bootstrap project paths ──────────────────────────────────────
 script_dir = Path(__file__).resolve().parent
 project_root = script_dir.parent
@@ -162,7 +165,11 @@ async def _connect() -> asyncpg.Connection:
 async def _get_superadmin_role_id(conn: asyncpg.Connection) -> int:
     """Return the 'superadmin' role ID, or exit with error."""
     row = await conn.fetchrow(
-        "SELECT id FROM admin_roles WHERE name = 'superadmin'"
+        select_sql(
+            ADMIN_ROLES_TABLE,
+            "id",
+            "WHERE name = 'superadmin'",
+        )
     )
     if not row:
         print(_red("Ошибка: роль 'superadmin' не найдена в admin_roles."))
@@ -180,8 +187,11 @@ async def cmd_reset_password(args: argparse.Namespace) -> None:
 
     try:
         account = await conn.fetchrow(
-            "SELECT id, username, is_active FROM admin_accounts "
-            "WHERE LOWER(username) = LOWER($1)",
+            select_sql(
+                ADMIN_TABLE,
+                "id, username, is_active",
+                "WHERE LOWER(username) = LOWER($1)",
+            ),
             username,
         )
 
@@ -190,7 +200,11 @@ async def cmd_reset_password(args: argparse.Namespace) -> None:
             print()
             # Show available admins
             rows = await conn.fetch(
-                "SELECT username, is_active FROM admin_accounts ORDER BY id"
+                select_sql(
+                    ADMIN_TABLE,
+                    "username, is_active",
+                    "ORDER BY id",
+                )
             )
             if rows:
                 print("Доступные аккаунты:")
@@ -222,9 +236,11 @@ async def cmd_reset_password(args: argparse.Namespace) -> None:
         actual_username = account["username"]
 
         await conn.execute(
-            "UPDATE admin_accounts SET password_hash = $1, "
-            "is_generated_password = $2, updated_at = NOW() "
-            "WHERE id = $3",
+            update_sql(
+                ADMIN_TABLE,
+                "password_hash = $1, is_generated_password = $2, updated_at = NOW()",
+                "id = $3",
+            ),
             pw_hash,
             generated,
             account["id"],
@@ -254,7 +270,11 @@ async def cmd_create_superadmin(args: argparse.Namespace) -> None:
     try:
         # Check if username already exists
         existing = await conn.fetchrow(
-            "SELECT id FROM admin_accounts WHERE LOWER(username) = LOWER($1)",
+            select_sql(
+                ADMIN_TABLE,
+                "id",
+                "WHERE LOWER(username) = LOWER($1)",
+            ),
             username,
         )
         if existing:
@@ -288,11 +308,11 @@ async def cmd_create_superadmin(args: argparse.Namespace) -> None:
 
         # Insert into admin_accounts
         await conn.execute(
-            """
-            INSERT INTO admin_accounts
-                (username, password_hash, role_id, is_active, is_generated_password)
-            VALUES ($1, $2, $3, true, $4)
-            """,
+            insert_sql(
+                ADMIN_TABLE,
+                ["username", "password_hash", "role_id", "is_active", "is_generated_password"],
+                "$1, $2, $3, true, $4",
+            ),
             username,
             pw_hash,
             role_id,
@@ -322,20 +342,13 @@ async def cmd_list_admins(_args: argparse.Namespace) -> None:
 
     try:
         rows = await conn.fetch(
-            """
-            SELECT
-                a.id,
-                a.username,
-                a.telegram_id,
-                r.name as role_name,
-                r.display_name as role_display,
-                a.is_active,
-                a.is_generated_password,
-                a.created_at
-            FROM admin_accounts a
-            LEFT JOIN admin_roles r ON r.id = a.role_id
-            ORDER BY a.id
-            """
+            select_sql(
+                f"{ADMIN_TABLE} a",
+                "a.id, a.username, a.telegram_id, r.name as role_name, "
+                "r.display_name as role_display, a.is_active, "
+                "a.is_generated_password, a.created_at",
+                f"LEFT JOIN {ADMIN_ROLES_TABLE} r ON r.id = a.role_id ORDER BY a.id",
+            )
         )
 
         if not rows:

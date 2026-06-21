@@ -2,6 +2,7 @@ import { useState, useCallback } from 'react';
 import { produce } from 'immer';
 import type { ValidationError } from '../utils/validator';
 import { toast } from 'sonner';
+import i18next from 'i18next';
 
 interface UseXrayEditorOptions<T> {
     data: T;
@@ -54,7 +55,7 @@ export const useXrayEditor = <T extends Record<string, any>>({
         const validationErrors = validate(local);
         if (validationErrors.length > 0) {
             setErrors(validationErrors);
-            toast.error("Please fix validation errors before saving");
+            toast.error(i18next.t('xray.fixValidationBeforeSaving'));
             return;
         }
         onSave(local);

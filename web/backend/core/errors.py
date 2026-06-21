@@ -49,6 +49,37 @@ class ErrorCode(str, Enum):
     # ── Users ─────────────────────────────────────────────────
     USER_NOT_FOUND = "USER_NOT_FOUND"
     SYNC_FAILED = "SYNC_FAILED"
+    TRAFFIC_LIMIT_BELOW_USAGE = "TRAFFIC_LIMIT_BELOW_USAGE"
+
+    # User creation / update — quota errors
+    USERS_QUOTA_EXCEEDED = "USERS_QUOTA_EXCEEDED"
+    TRAFFIC_QUOTA_EXCEEDED = "TRAFFIC_QUOTA_EXCEEDED"
+    NODES_QUOTA_EXCEEDED = "NODES_QUOTA_EXCEEDED"
+    HOSTS_QUOTA_EXCEEDED = "HOSTS_QUOTA_EXCEEDED"
+
+    # User creation / update — validation errors
+    USERNAME_REQUIRED = "USERNAME_REQUIRED"
+    USERNAME_TOO_LONG = "USERNAME_TOO_LONG"
+    USERNAME_INVALID_FORMAT = "USERNAME_INVALID_FORMAT"
+    USERNAME_ALREADY_EXISTS = "USERNAME_ALREADY_EXISTS"
+    TRAFFIC_LIMIT_REQUIRED = "TRAFFIC_LIMIT_REQUIRED"
+    TRAFFIC_LIMIT_NEGATIVE = "TRAFFIC_LIMIT_NEGATIVE"
+    TRAFFIC_LIMIT_TOO_SMALL = "TRAFFIC_LIMIT_TOO_SMALL"
+    INVALID_EMAIL_FORMAT = "INVALID_EMAIL_FORMAT"
+    INVALID_TELEGRAM_ID = "INVALID_TELEGRAM_ID"
+    INVALID_HWID_DEVICE_LIMIT = "INVALID_HWID_DEVICE_LIMIT"
+    INVALID_EXPIRE_DATE = "INVALID_EXPIRE_DATE"
+    TAG_TOO_LONG = "TAG_TOO_LONG"
+    DESCRIPTION_TOO_LONG = "DESCRIPTION_TOO_LONG"
+
+    # User creation — Panel API side
+    PANEL_REJECTED_USERNAME = "PANEL_REJECTED_USERNAME"
+    PANEL_REJECTED_TRAFFIC_STRATEGY = "PANEL_REJECTED_TRAFFIC_STRATEGY"
+    PANEL_REJECTED_STATUS = "PANEL_REJECTED_STATUS"
+    PANEL_REJECTED_SQUAD = "PANEL_REJECTED_SQUAD"
+    PANEL_REJECTED_TAG = "PANEL_REJECTED_TAG"
+    PANEL_REJECTED_GENERIC = "PANEL_REJECTED_GENERIC"
+    PANEL_USER_ALREADY_EXISTS = "PANEL_USER_ALREADY_EXISTS"
 
     # ── Nodes ─────────────────────────────────────────────────
     NODE_NOT_FOUND = "NODE_NOT_FOUND"
@@ -126,10 +157,15 @@ class ErrorCode(str, Enum):
     BLOCKED_IP_ADD_FAILED = "BLOCKED_IP_ADD_FAILED"
 
     # ── Generic ───────────────────────────────────────────────
+    QUOTA_EXCEEDED = "QUOTA_EXCEEDED"
     NO_FIELDS_TO_UPDATE = "NO_FIELDS_TO_UPDATE"
     API_SERVICE_UNAVAILABLE = "API_SERVICE_UNAVAILABLE"
     DB_UNAVAILABLE = "DB_UNAVAILABLE"
     INTERNAL_ERROR = "INTERNAL_ERROR"
+    INVALID_INPUT = "INVALID_INPUT"
+    VALIDATION = "VALIDATION"
+    ALREADY_EXISTS = "ALREADY_EXISTS"
+    NOT_FOUND = "NOT_FOUND"
 
 
 # Shorthand alias
@@ -142,6 +178,31 @@ _DEFAULT_MESSAGES: dict[str, str] = {
     E.ROLE_NOT_FOUND: "Role not found",
     E.CANNOT_MODIFY_SELF: "Cannot modify your own account",
     E.USER_NOT_FOUND: "User not found",
+    E.TRAFFIC_LIMIT_BELOW_USAGE: "Cannot set traffic limit below current usage.",
+    E.USERS_QUOTA_EXCEEDED: "You have reached the maximum number of users allowed for your account.",
+    E.TRAFFIC_QUOTA_EXCEEDED: "Traffic limit exceeds your quota.",
+    E.NODES_QUOTA_EXCEEDED: "You have reached the maximum number of nodes allowed for your account.",
+    E.HOSTS_QUOTA_EXCEEDED: "You have reached the maximum number of hosts allowed for your account.",
+    E.USERNAME_REQUIRED: "Username is required.",
+    E.USERNAME_TOO_LONG: "Username is too long.",
+    E.USERNAME_INVALID_FORMAT: "Username contains invalid characters. Use 1-100 letters, digits, underscores, or hyphens.",
+    E.USERNAME_ALREADY_EXISTS: "A user with this username already exists.",
+    E.TRAFFIC_LIMIT_REQUIRED: "Traffic limit is required. Unlimited traffic is disabled for your role.",
+    E.TRAFFIC_LIMIT_NEGATIVE: "Traffic limit cannot be negative.",
+    E.TRAFFIC_LIMIT_TOO_SMALL: "Traffic limit is too small. Minimum is 1 MB.",
+    E.INVALID_EMAIL_FORMAT: "Email address is not valid.",
+    E.INVALID_TELEGRAM_ID: "Telegram ID is not valid.",
+    E.INVALID_HWID_DEVICE_LIMIT: "HWID device limit must be 0 (unlimited) or a positive integer.",
+    E.INVALID_EXPIRE_DATE: "Expiration date must be in the future.",
+    E.TAG_TOO_LONG: "Tag is too long.",
+    E.DESCRIPTION_TOO_LONG: "Description is too long.",
+    E.PANEL_REJECTED_USERNAME: "Panel rejected the username.",
+    E.PANEL_REJECTED_TRAFFIC_STRATEGY: "Panel rejected the traffic limit strategy.",
+    E.PANEL_REJECTED_STATUS: "Panel rejected the status value.",
+    E.PANEL_REJECTED_SQUAD: "Panel rejected the squad reference.",
+    E.PANEL_REJECTED_TAG: "Panel rejected the tag value.",
+    E.PANEL_REJECTED_GENERIC: "Panel rejected the request.",
+    E.PANEL_USER_ALREADY_EXISTS: "A user with this username already exists in the panel.",
     E.NODE_NOT_FOUND: "Node not found",
     E.HOST_NOT_FOUND: "Host not found",
     E.VIOLATION_NOT_FOUND: "Violation not found",
@@ -165,11 +226,16 @@ _DEFAULT_MESSAGES: dict[str, str] = {
     E.BACKUP_DELETE_FAILED: "Failed to delete backup",
     E.IMPORT_FAILED: "Import failed",
     E.INVALID_FILENAME: "Invalid filename",
+    E.QUOTA_EXCEEDED: "Resource quota exceeded",
     E.API_SERVICE_UNAVAILABLE: "API service not available",
     E.DB_UNAVAILABLE: "Database not available",
     E.INTERNAL_ERROR: "Internal error",
     E.NO_FIELDS_TO_UPDATE: "No fields to update",
     E.FORBIDDEN: "Access denied",
+    E.INVALID_INPUT: "Invalid input",
+    E.VALIDATION: "Validation error",
+    E.ALREADY_EXISTS: "Resource already exists",
+    E.NOT_FOUND: "Resource not found",
 }
 
 

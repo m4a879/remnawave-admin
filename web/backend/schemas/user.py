@@ -35,6 +35,8 @@ class UserListItem(UserBase):
     online_at: Optional[datetime] = None
     last_triggered_threshold: Optional[int] = None
     raw_used_traffic_bytes: Optional[int] = None
+    created_by_admin_id: Optional[int] = None
+    created_by_admin_username: Optional[str] = None
 
     @model_validator(mode='before')
     @classmethod

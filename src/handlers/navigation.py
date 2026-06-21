@@ -30,7 +30,7 @@ from src.keyboards.main_menu import (
 )
 from src.keyboards.navigation import NavTarget, nav_keyboard, nav_row
 from src.keyboards.providers_menu import providers_menu_keyboard
-from shared.api_client import ApiClientError, NotFoundError, UnauthorizedError, api_client
+from shared.internal_api import ApiClientError, NotFoundError, UnauthorizedError, internal_api_client
 from src.services import data_access
 from shared.database import db_service
 from shared.logger import logger
@@ -42,7 +42,8 @@ from src.handlers.nodes import _fetch_nodes_text
 from src.handlers.resources import _fetch_configs_text, _fetch_snippets_text, _send_templates, _show_tokens
 from src.handlers.users import _format_user_choice, _send_user_summary, _show_user_search_results, _start_user_search_flow
 from src.keyboards.subscription_actions import subscription_keyboard
-from src.utils.formatters import build_subscription_summary
+from src.utils.auth import BotAdmin
+from src.utils.formatters import build_quota_text, build_subscription_summary
 
 async def _fetch_main_menu_text(force_refresh: bool = False) -> str:
     """Получает текст для главного меню с краткой статистикой с кэшированием."""
@@ -66,9 +67,9 @@ async def _fetch_main_menu_text(force_refresh: bool = False) -> str:
     try:
         # Пытаемся получить health checker из контекста диспетчера
         # Это работает только если бот уже запущен
-        from shared.api_client import ApiClientError
+        from shared.internal_api import ApiClientError
         try:
-            await api_client.get_health()
+            await internal_api_client.get_health()
             panel_status = "🟢"
         except ApiClientError:
             panel_status = "🔴"
@@ -79,7 +80,7 @@ async def _fetch_main_menu_text(force_refresh: bool = False) -> str:
     
     try:
         # Получаем основную статистику системы
-        data = await api_client.get_stats()
+        data = await internal_api_client.get_stats()
         res = data.get("response", {})
         users = res.get("users", {})
         online = res.get("onlineStats", {})
@@ -95,7 +96,7 @@ async def _fetch_main_menu_text(force_refresh: bool = False) -> str:
                 total_hosts = hosts_stats.get("total", 0)
                 enabled_hosts = hosts_stats.get("enabled", 0)
             else:
-                hosts_data = await api_client.get_hosts()
+                hosts_data = await internal_api_client.get_hosts()
                 hosts = hosts_data.get("response", [])
                 total_hosts = len(hosts)
                 enabled_hosts = sum(1 for h in hosts if not h.get("isDisabled"))
@@ -111,13 +112,13 @@ async def _fetch_main_menu_text(force_refresh: bool = False) -> str:
                 enabled_nodes = nodes_stats.get("enabled", 0)
                 # Для online нужен API
                 try:
-                    nodes_data = await api_client.get_nodes()
+                    nodes_data = await internal_api_client.get_nodes()
                     nodes_list = nodes_data.get("response", [])
                     nodes_online = sum(1 for n in nodes_list if n.get("isConnected"))
                 except Exception:
                     nodes_online = nodes_stats.get("connected", 0)
             else:
-                nodes_data = await api_client.get_nodes()
+                nodes_data = await internal_api_client.get_nodes()
                 nodes_list = nodes_data.get("response", [])
                 total_nodes = len(nodes_list)
                 enabled_nodes = sum(1 for n in nodes_list if not n.get("isDisabled"))
@@ -219,10 +220,15 @@ def _pop_navigation_history(user_id: int | None) -> str | None:
     return None
 
 
-async def _send_subscriptions_page(target: Message | CallbackQuery, page: int = 0) -> None:
+async def _send_subscriptions_page(target: Message | CallbackQuery, page: int = 0, admin: BotAdmin | None = None) -> None:
     """Отправляет страницу со списком подписок с поддержкой фильтрации (из БД, fallback на API)."""
     user_id = _get_target_user_id(target)
     page = max(page, 0)
+    
+    # Определяем admin_id для фильтрации на бэкенде
+    admin_id_for_api = None
+    if admin and admin.account_id and not admin.is_superadmin and not admin.unrestricted_user_access:
+        admin_id_for_api = admin.account_id
     
     # Получаем текущий фильтр
     current_filter = SUBS_FILTER_BY_USER.get(user_id) if user_id else None
@@ -235,32 +241,30 @@ async def _send_subscriptions_page(target: Message | CallbackQuery, page: int = 
         if db_service.is_connected:
             try:
                 if current_filter:
-                    # С фильтром - получаем все с нужным статусом
-                    all_users = await db_service.get_all_users(
-                        limit=500,
-                        offset=0,
+                    # С фильтром - используем пагинированный запрос с поддержкой admin_id
+                    users, total = await db_service.get_users_paginated(
+                        page=page + 1,  # get_users_paginated использует 1-based page
+                        per_page=SUBS_PAGE_SIZE,
                         status=current_filter,
-                        order_by="username"
+                        sort_by="created_at",
+                        sort_order="desc",
+                        admin_id=admin_id_for_api,
                     )
-                    total = len(all_users)
                     total_pages = max(ceil(total / SUBS_PAGE_SIZE), 1)
                     page = min(page, total_pages - 1)
-                    start = page * SUBS_PAGE_SIZE
-                    end = start + SUBS_PAGE_SIZE
-                    users = all_users[start:end]
-                    logger.debug("Fetched %d users from DB with filter %s", len(users), current_filter)
+                    logger.debug("Fetched %d users from DB with filter %s (admin_id=%s)", len(users), current_filter, admin_id_for_api)
                 else:
-                    # Без фильтра - пагинация из БД
-                    total = await db_service.get_users_count()
+                    # Без фильтра - пагинация из БД с поддержкой admin_id
+                    users, total = await db_service.get_users_paginated(
+                        page=page + 1,
+                        per_page=SUBS_PAGE_SIZE,
+                        sort_by="created_at",
+                        sort_order="desc",
+                        admin_id=admin_id_for_api,
+                    )
                     total_pages = max(ceil(total / SUBS_PAGE_SIZE), 1)
                     page = min(page, total_pages - 1)
-                    start = page * SUBS_PAGE_SIZE
-                    users = await db_service.get_all_users(
-                        limit=SUBS_PAGE_SIZE,
-                        offset=start,
-                        order_by="username"
-                    )
-                    logger.debug("Fetched %d users from DB (page %d)", len(users), page)
+                    logger.debug("Fetched %d users from DB (page %d, admin_id=%s)", len(users), page, admin_id_for_api)
             except Exception as e:
                 logger.warning("DB fetch failed, fallback to API: %s", e)
                 users = []
@@ -269,7 +273,7 @@ async def _send_subscriptions_page(target: Message | CallbackQuery, page: int = 
         if not users and not db_service.is_connected:
             if current_filter:
                 # При фильтрации получаем больше данных
-                data = await api_client.get_users(start=0, size=500)
+                data = await internal_api_client.get_users(start=0, size=500, admin_id=admin_id_for_api)
                 payload = data.get("response", data)
                 all_users = payload.get("users") or []
                 
@@ -290,14 +294,14 @@ async def _send_subscriptions_page(target: Message | CallbackQuery, page: int = 
             else:
                 # Без фильтра используем пагинацию API
                 start = page * SUBS_PAGE_SIZE
-                data = await api_client.get_users(start=start, size=SUBS_PAGE_SIZE)
+                data = await internal_api_client.get_users(start=start, size=SUBS_PAGE_SIZE, admin_id=admin_id_for_api)
                 payload = data.get("response", data)
                 total = payload.get("total", 0) or 0
                 total_pages = max(ceil(total / SUBS_PAGE_SIZE), 1)
                 page = min(page, total_pages - 1)
                 if page != start // SUBS_PAGE_SIZE:
                     start = page * SUBS_PAGE_SIZE
-                    data = await api_client.get_users(start=start, size=SUBS_PAGE_SIZE)
+                    data = await internal_api_client.get_users(start=start, size=SUBS_PAGE_SIZE, admin_id=admin_id_for_api)
                     payload = data.get("response", data)
                 users = payload.get("users") or []
     except UnauthorizedError:
@@ -362,7 +366,7 @@ async def _send_subscriptions_page(target: Message | CallbackQuery, page: int = 
     await _send_clean_message(target, title, reply_markup=keyboard)
 
 
-async def _navigate(target: Message | CallbackQuery, destination: str, is_back: bool = False) -> None:
+async def _navigate(target: Message | CallbackQuery, destination: str, is_back: bool = False, admin: BotAdmin | None = None) -> None:
     """Навигация между меню."""
     user_id = _get_target_user_id(target)
     
@@ -376,10 +380,13 @@ async def _navigate(target: Message | CallbackQuery, destination: str, is_back: 
 
     if destination == NavTarget.MAIN_MENU:
         menu_text = await _fetch_main_menu_text()
-        await _send_clean_message(target, menu_text, reply_markup=main_menu_keyboard(), parse_mode="HTML")
+        quota_text = build_quota_text(admin) if admin else ""
+        if quota_text:
+            menu_text = f"{menu_text}\n\n{quota_text}"
+        await _send_clean_message(target, menu_text, reply_markup=main_menu_keyboard(admin=admin), parse_mode="HTML")
         return
     if destination == NavTarget.USERS_MENU:
-        await _send_clean_message(target, _("bot.menu"), reply_markup=users_menu_keyboard())
+        await _send_clean_message(target, _("bot.menu"), reply_markup=users_menu_keyboard(admin=admin))
         return
     if destination == NavTarget.USER_SEARCH_PROMPT:
         await _start_user_search_flow(target)
@@ -394,7 +401,7 @@ async def _navigate(target: Message | CallbackQuery, destination: str, is_back: 
             await _start_user_search_flow(target)
         return
     if destination == NavTarget.NODES_MENU:
-        await _send_clean_message(target, _("bot.menu"), reply_markup=nodes_menu_keyboard())
+        await _send_clean_message(target, _("bot.menu"), reply_markup=nodes_menu_keyboard(admin=admin))
         return
     if destination == NavTarget.NODES_LIST:
         from src.handlers.nodes import _fetch_nodes_with_keyboard, _get_nodes_page
@@ -407,28 +414,28 @@ async def _navigate(target: Message | CallbackQuery, destination: str, is_back: 
         from src.handlers.hosts import _fetch_hosts_with_keyboard, _get_hosts_page
         user_id = _get_target_user_id(target)
         page = _get_hosts_page(user_id)
-        text, keyboard = await _fetch_hosts_with_keyboard(user_id=user_id, page=page)
+        text, keyboard = await _fetch_hosts_with_keyboard(user_id=user_id, page=page, admin=admin)
         await _send_clean_message(target, text, reply_markup=keyboard)
         return
     if destination == NavTarget.CONFIGS_MENU:
         text = await _fetch_configs_text()
-        await _send_clean_message(target, text, reply_markup=nodes_menu_keyboard())
+        await _send_clean_message(target, text, reply_markup=nodes_menu_keyboard(admin=admin))
         return
     if destination == NavTarget.RESOURCES_MENU:
-        await _send_clean_message(target, _("bot.menu"), reply_markup=resources_menu_keyboard())
+        await _send_clean_message(target, _("bot.menu"), reply_markup=resources_menu_keyboard(admin=admin))
         return
     if destination == NavTarget.TOKENS_MENU:
-        await _show_tokens(target, reply_markup=resources_menu_keyboard())
+        await _show_tokens(target, reply_markup=resources_menu_keyboard(admin=admin))
         return
     if destination == NavTarget.TEMPLATES_MENU:
         await _send_templates(target)
         return
     if destination == NavTarget.SNIPPETS_MENU:
         text = await _fetch_snippets_text()
-        await _send_clean_message(target, text, reply_markup=resources_menu_keyboard())
+        await _send_clean_message(target, text, reply_markup=resources_menu_keyboard(admin=admin))
         return
     if destination == NavTarget.BILLING_OVERVIEW:
-        await _send_clean_message(target, _("bot.menu"), reply_markup=billing_overview_keyboard())
+        await _send_clean_message(target, _("bot.menu"), reply_markup=billing_overview_keyboard(admin=admin))
         return
     if destination == NavTarget.BILLING_MENU:
         text = await _fetch_billing_text()
@@ -443,10 +450,10 @@ async def _navigate(target: Message | CallbackQuery, destination: str, is_back: 
         await _send_clean_message(target, text, reply_markup=providers_menu_keyboard())
         return
     if destination == NavTarget.BULK_MENU:
-        await _send_clean_message(target, _("bot.menu"), reply_markup=bulk_menu_keyboard())
+        await _send_clean_message(target, _("bot.menu"), reply_markup=bulk_menu_keyboard(admin=admin))
         return
     if destination == NavTarget.SYSTEM_MENU:
-        await _send_clean_message(target, _("bot.menu"), reply_markup=system_menu_keyboard())
+        await _send_clean_message(target, _("bot.menu"), reply_markup=system_menu_keyboard(admin=admin))
         return
     if destination == NavTarget.STATS_MENU:
         from src.keyboards.stats_menu import stats_menu_keyboard
@@ -454,7 +461,7 @@ async def _navigate(target: Message | CallbackQuery, destination: str, is_back: 
         await _send_clean_message(target, text, reply_markup=stats_menu_keyboard(), parse_mode="HTML")
         return
     if destination == NavTarget.SUBS_LIST:
-        await _send_subscriptions_page(target, page=_get_subs_page(user_id))
+        await _send_subscriptions_page(target, page=_get_subs_page(user_id), admin=admin)
         return
     
     # Обработка специальных случаев навигации (например, user:{uuid})
@@ -470,10 +477,10 @@ async def _navigate(target: Message | CallbackQuery, destination: str, is_back: 
             await _send_user_summary(target, user, back_to=back_to)
         except Exception:
             logger.exception("Failed to navigate to user profile user_uuid=%s", user_uuid)
-            await _send_clean_message(target, _("errors.generic"), reply_markup=main_menu_keyboard())
+            await _send_clean_message(target, _("errors.generic"), reply_markup=main_menu_keyboard(admin=admin))
         return
 
-    await _send_clean_message(target, _("bot.menu"), reply_markup=main_menu_keyboard())
+    await _send_clean_message(target, _("bot.menu"), reply_markup=main_menu_keyboard(admin=admin))
     
     # После успешной навигации добавляем пункт назначения в историю (если не назад)
     if not is_back:
@@ -481,26 +488,29 @@ async def _navigate(target: Message | CallbackQuery, destination: str, is_back: 
 
 
 @router.callback_query(F.data == "nav:home")
-async def cb_nav_home(callback: CallbackQuery) -> None:
+async def cb_nav_home(callback: CallbackQuery, admin: BotAdmin) -> None:
     """Обработчик кнопки 'Главное меню'."""
     if await _not_admin(callback):
         return
     await callback.answer()
-    await _navigate(callback, NavTarget.MAIN_MENU)
+    await _navigate(callback, NavTarget.MAIN_MENU, admin=admin)
 
 
 @router.callback_query(F.data == "menu:refresh")
-async def cb_menu_refresh(callback: CallbackQuery) -> None:
+async def cb_menu_refresh(callback: CallbackQuery, admin: BotAdmin) -> None:
     """Обработчик кнопки 'Обновить' в главном меню."""
     if await _not_admin(callback):
         return
     await callback.answer(_("node.list_updated"), show_alert=False)
     menu_text = await _fetch_main_menu_text(force_refresh=True)
-    await _edit_text_safe(callback.message, menu_text, reply_markup=main_menu_keyboard(), parse_mode="HTML")
+    quota_text = build_quota_text(admin) if admin else ""
+    if quota_text:
+        menu_text = f"{menu_text}\n\n{quota_text}"
+    await _edit_text_safe(callback.message, menu_text, reply_markup=main_menu_keyboard(admin=admin), parse_mode="HTML")
 
 
 @router.callback_query(F.data.startswith("nav:back:"))
-async def cb_nav_back(callback: CallbackQuery) -> None:
+async def cb_nav_back(callback: CallbackQuery, admin: BotAdmin) -> None:
     """Обработчик кнопки 'Назад'."""
     if await _not_admin(callback):
         return
@@ -513,87 +523,87 @@ async def cb_nav_back(callback: CallbackQuery) -> None:
     if len(parts) > 2:
         explicit_target = parts[2]
         # Используем явное целевое меню, если оно указано
-        await _navigate(callback, explicit_target, is_back=True)
+        await _navigate(callback, explicit_target, is_back=True, admin=admin)
     else:
         # Используем историю навигации
         back_target = _get_navigation_back_target(user_id)
-        await _navigate(callback, back_target, is_back=True)
+        await _navigate(callback, back_target, is_back=True, admin=admin)
 
 
 @router.callback_query(F.data == "menu:back")
-async def cb_back(callback: CallbackQuery) -> None:
+async def cb_back(callback: CallbackQuery, admin: BotAdmin) -> None:
     """Обработчик кнопки 'Назад' в меню."""
     if await _not_admin(callback):
         return
     await callback.answer()
-    await _navigate(callback, NavTarget.MAIN_MENU)
+    await _navigate(callback, NavTarget.MAIN_MENU, admin=admin)
 
 
 @router.callback_query(F.data == "menu:section:users")
-async def cb_section_users(callback: CallbackQuery) -> None:
+async def cb_section_users(callback: CallbackQuery, admin: BotAdmin) -> None:
     """Обработчик кнопки 'Пользователи' в главном меню."""
     if await _not_admin(callback):
         return
     await callback.answer()
-    await _navigate(callback, NavTarget.USERS_MENU)
+    await _navigate(callback, NavTarget.USERS_MENU, admin=admin)
 
 
 @router.callback_query(F.data == "menu:section:nodes")
-async def cb_section_nodes(callback: CallbackQuery) -> None:
+async def cb_section_nodes(callback: CallbackQuery, admin: BotAdmin) -> None:
     """Обработчик кнопки 'Ноды/Хосты/Профили' в главном меню."""
     if await _not_admin(callback):
         return
     await callback.answer()
-    await _navigate(callback, NavTarget.NODES_MENU)
+    await _navigate(callback, NavTarget.NODES_MENU, admin=admin)
 
 
 @router.callback_query(F.data == "menu:section:resources")
-async def cb_section_resources(callback: CallbackQuery) -> None:
+async def cb_section_resources(callback: CallbackQuery, admin: BotAdmin) -> None:
     """Обработчик кнопки 'Ресурсы' в главном меню."""
     if await _not_admin(callback):
         return
     await callback.answer()
-    await _navigate(callback, NavTarget.RESOURCES_MENU)
+    await _navigate(callback, NavTarget.RESOURCES_MENU, admin=admin)
 
 
 @router.callback_query(F.data == "menu:section:billing")
-async def cb_section_billing(callback: CallbackQuery) -> None:
+async def cb_section_billing(callback: CallbackQuery, admin: BotAdmin) -> None:
     """Обработчик кнопки 'Биллинг' в главном меню."""
     if await _not_admin(callback):
         return
     await callback.answer()
-    await _navigate(callback, NavTarget.BILLING_OVERVIEW)
+    await _navigate(callback, NavTarget.BILLING_OVERVIEW, admin=admin)
 
 
 @router.callback_query(F.data == "menu:section:bulk")
-async def cb_section_bulk(callback: CallbackQuery) -> None:
+async def cb_section_bulk(callback: CallbackQuery, admin: BotAdmin) -> None:
     """Обработчик кнопки 'Массовые операции' в главном меню."""
     if await _not_admin(callback):
         return
     await callback.answer()
-    await _navigate(callback, NavTarget.BULK_MENU)
+    await _navigate(callback, NavTarget.BULK_MENU, admin=admin)
 
 
 @router.callback_query(F.data == "menu:section:system")
-async def cb_section_system(callback: CallbackQuery) -> None:
+async def cb_section_system(callback: CallbackQuery, admin: BotAdmin) -> None:
     """Обработчик кнопки 'Система' в главном меню."""
     if await _not_admin(callback):
         return
     await callback.answer()
-    await _navigate(callback, NavTarget.SYSTEM_MENU)
+    await _navigate(callback, NavTarget.SYSTEM_MENU, admin=admin)
 
 
 @router.callback_query(F.data == "menu:subs")
-async def cb_subs(callback: CallbackQuery) -> None:
+async def cb_subs(callback: CallbackQuery, admin: BotAdmin) -> None:
     """Обработчик кнопки 'Подписки' в меню пользователей."""
     if await _not_admin(callback):
         return
     await callback.answer()
-    await _navigate(callback, NavTarget.SUBS_LIST)
+    await _navigate(callback, NavTarget.SUBS_LIST, admin=admin)
 
 
 @router.callback_query(F.data == "subs:search")
-async def cb_subs_search(callback: CallbackQuery) -> None:
+async def cb_subs_search(callback: CallbackQuery, admin: BotAdmin) -> None:
     """Обработчик кнопки 'Поиск' в списке подписок."""
     if await _not_admin(callback):
         return
@@ -614,7 +624,7 @@ async def cb_subs_search(callback: CallbackQuery) -> None:
     )
 
 
-async def _handle_subs_search_input(message: Message, ctx: dict) -> None:
+async def _handle_subs_search_input(message: Message, ctx: dict, admin: BotAdmin | None = None) -> None:
     """Обрабатывает ввод поискового запроса для подписок."""
     from src.handlers.users import _search_users, _send_user_summary, _format_user_choice
     from src.handlers.state import MAX_SEARCH_RESULTS, PENDING_INPUT
@@ -636,7 +646,7 @@ async def _handle_subs_search_input(message: Message, ctx: dict) -> None:
     
     # Выполняем поиск пользователей (подписки - это те же пользователи)
     try:
-        matches = await _search_users(query)
+        matches = await _search_users(query, admin=admin)
     except UnauthorizedError:
         await _send_clean_message(message, _("errors.unauthorized"), reply_markup=nav_keyboard(NavTarget.SUBS_LIST))
         asyncio.create_task(_cleanup_message(message, delay=0.5))
@@ -658,7 +668,7 @@ async def _handle_subs_search_input(message: Message, ctx: dict) -> None:
     
     if len(matches) == 1:
         # Если найден один пользователь, показываем его подписку
-        await _send_user_summary(message, matches[0], back_to=NavTarget.SUBS_LIST)
+        await _send_user_summary(message, matches[0], back_to=NavTarget.SUBS_LIST, admin=admin)
         asyncio.create_task(_cleanup_message(message, delay=0.5))
         return
     
@@ -687,7 +697,7 @@ async def _handle_subs_search_input(message: Message, ctx: dict) -> None:
 
 
 @router.callback_query(F.data.startswith("subs:page:"))
-async def cb_subs_page(callback: CallbackQuery) -> None:
+async def cb_subs_page(callback: CallbackQuery, admin: BotAdmin) -> None:
     """Обработчик пагинации списка подписок."""
     if await _not_admin(callback):
         return
@@ -696,11 +706,11 @@ async def cb_subs_page(callback: CallbackQuery) -> None:
         page = int(callback.data.split(":", 2)[2])
     except ValueError:
         page = 0
-    await _send_subscriptions_page(callback, page=max(page, 0))
+    await _send_subscriptions_page(callback, page=max(page, 0), admin=admin)
 
 
 @router.callback_query(F.data.startswith("subs:view:"))
-async def cb_subs_view(callback: CallbackQuery) -> None:
+async def cb_subs_view(callback: CallbackQuery, admin: BotAdmin) -> None:
     """Обработчик просмотра пользователя из списка подписок (из БД, fallback на API)."""
     if await _not_admin(callback):
         return
@@ -742,31 +752,31 @@ async def cb_subs_view(callback: CallbackQuery) -> None:
     await _send_user_summary(callback, user, back_to=back_to)
 
 
-async def _send_subscription_detail(target: Message | CallbackQuery, short_uuid: str) -> None:
+async def _send_subscription_detail(target: Message | CallbackQuery, short_uuid: str, admin: BotAdmin | None = None) -> None:
     """Отправляет детальную информацию о подписке."""
     try:
-        sub = await api_client.get_subscription_info(short_uuid)
+        sub = await internal_api_client.get_subscription_info(short_uuid)
     except UnauthorizedError:
         text = _("errors.unauthorized")
         if isinstance(target, CallbackQuery):
-            await target.message.edit_text(text, reply_markup=main_menu_keyboard())
+            await target.message.edit_text(text, reply_markup=main_menu_keyboard(admin=admin))
         else:
-            await _send_clean_message(target, text, reply_markup=main_menu_keyboard())
+            await _send_clean_message(target, text, reply_markup=main_menu_keyboard(admin=admin))
         return
     except NotFoundError:
         text = _("sub.not_found")
         if isinstance(target, CallbackQuery):
-            await target.message.edit_text(text, reply_markup=main_menu_keyboard())
+            await target.message.edit_text(text, reply_markup=main_menu_keyboard(admin=admin))
         else:
-            await _send_clean_message(target, text, reply_markup=main_menu_keyboard())
+            await _send_clean_message(target, text, reply_markup=main_menu_keyboard(admin=admin))
         return
     except ApiClientError:
         logger.exception("⚠️ API client error while fetching subscription short_uuid=%s", short_uuid)
         text = _("errors.generic")
         if isinstance(target, CallbackQuery):
-            await target.message.edit_text(text, reply_markup=main_menu_keyboard())
+            await target.message.edit_text(text, reply_markup=main_menu_keyboard(admin=admin))
         else:
-            await _send_clean_message(target, text, reply_markup=main_menu_keyboard())
+            await _send_clean_message(target, text, reply_markup=main_menu_keyboard(admin=admin))
         return
 
     summary = build_subscription_summary(sub, _)

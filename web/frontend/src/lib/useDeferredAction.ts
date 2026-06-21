@@ -1,10 +1,9 @@
 import { useCallback, useEffect, useRef } from 'react'
 import { toast } from 'sonner'
+import i18next from 'i18next'
 
 export interface ScheduleOptions {
-  /** Message shown in the undo toast */
   message: string
-  /** Undo button label (default: "Отменить") */
   undoLabel?: string
   /** Delay before commit, in ms (default: 5000) */
   delay?: number
@@ -49,7 +48,7 @@ export function useDeferredAction() {
     }
 
     const delay = opts.delay ?? 5000
-    const undoLabel = opts.undoLabel ?? 'Отменить'
+    const undoLabel = opts.undoLabel ?? i18next.t('common.undo')
 
     const toastId = toast(opts.message, {
       duration: delay,

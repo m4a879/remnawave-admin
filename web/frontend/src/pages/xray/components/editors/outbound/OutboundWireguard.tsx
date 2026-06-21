@@ -4,6 +4,7 @@ import { Button } from '../../ui/Button';
 import { Icon } from '../../ui/Icon';
 import { Help } from '../../ui/Help';
 import { toast } from 'sonner';
+import i18next from 'i18next';
 import { Switch } from '../../ui/Switch';
 import { Select } from '../../ui/Select';
 import { FormField } from '../../ui/FormField';
@@ -53,10 +54,10 @@ export const OutboundWireguard = ({ outbound, onChange, errors = {} as any }: an
                     keepAlive: 15
                 }]
             });
-            toast.success("WARP account generated successfully");
+            toast.success(i18next.t('xray.warpAccountGenerated'));
         } catch (e) {
-            toast.error("Failed to generate WARP account", {
-                description: "CORS error or proxy is down. Check your settings."
+            toast.error(i18next.t('xray.warpAccountFailed'), {
+                description: i18next.t('xray.warpAccountFailedDesc')
             });
         } finally {
             setLoading(false);

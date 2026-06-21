@@ -13,7 +13,7 @@ from web.backend.api.deps import (
     require_permission,
     get_client_ip,
 )
-from web.backend.core.rbac import write_audit_log
+from web.backend.core.audit import write_audit_log
 from web.backend.core.automation import (
     list_automation_rules,
     get_automation_rule_by_id,

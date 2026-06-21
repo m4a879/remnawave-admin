@@ -9,6 +9,8 @@ from typing import Optional
 
 from shared.database import DatabaseService
 from shared.logger import logger
+from shared.db_schema import NODES_TABLE
+from shared.db_query import select_sql, update_sql
 
 
 def generate_agent_token() -> str:
@@ -31,7 +33,11 @@ async def get_node_by_token(db: DatabaseService, token: str) -> Optional[str]:
     try:
         async with db.acquire() as conn:
             row = await conn.fetchrow(
-                "SELECT uuid FROM nodes WHERE agent_token = $1",
+                select_sql(
+                    NODES_TABLE,
+                    "uuid",
+                    "WHERE agent_token = $1",
+                ),
                 token
             )
             if row:
@@ -62,7 +68,11 @@ async def set_node_agent_token(
     try:
         async with db.acquire() as conn:
             await conn.execute(
-                "UPDATE nodes SET agent_token = $1 WHERE uuid = $2",
+                update_sql(
+                    NODES_TABLE,
+                    "agent_token = $1",
+                    "uuid = $2",
+                ),
                 token,
                 node_uuid
             )
@@ -83,7 +93,11 @@ async def revoke_node_agent_token(db: DatabaseService, node_uuid: str) -> bool:
     try:
         async with db.acquire() as conn:
             await conn.execute(
-                "UPDATE nodes SET agent_token = NULL WHERE uuid = $1",
+                update_sql(
+                    NODES_TABLE,
+                    "agent_token = NULL",
+                    "uuid = $1",
+                ),
                 node_uuid
             )
             logger.info("Agent token revoked for node %s", node_uuid)

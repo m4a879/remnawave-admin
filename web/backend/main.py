@@ -60,6 +60,7 @@ from web.backend.api.v2 import webhooks as webhooks_api
 from web.backend.api.v2 import squads as squads_api
 from web.backend.api.v2.bedolaga import router as bedolaga_router
 from web.backend.api.v2 import plugins as plugins_api
+from web.backend.api.v2 import internal as internal_api
 from web.backend.core import plugins as plugin_loader
 from web.backend.api.v3 import public as public_api_v3
 
@@ -974,6 +975,7 @@ def create_app() -> FastAPI:
         app.include_router(bedolaga_router, prefix="/api/v2/bedolaga", tags=["bedolaga"])
 
         app.include_router(plugins_api.router, prefix="/api/v2/plugins", tags=["plugins"])
+        app.include_router(internal_api.router, prefix="/api/v2/internal", tags=["internal"])
 
         from web.backend.api.v2 import admin_plugins as admin_plugins_api
         app.include_router(

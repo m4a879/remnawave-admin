@@ -2,12 +2,11 @@ import { useState, useMemo, useEffect, useRef, memo, Fragment } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { useUserLinkProps } from '@/lib/useOpenUser'
-import { useQuery, useQueryClient, useIsFetching } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   Users,
   Server,
   ShieldAlert,
-  RefreshCw,
   ExternalLink,
   Settings,
   TrendingUp,
@@ -1306,25 +1305,25 @@ function UpdateCheckerCard() {
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm">
           {deps?.python && (
             <div className="flex items-center justify-between bg-[var(--glass-bg)] rounded px-3 py-1.5">
-              <span className="text-dark-300">Python</span>
+              <span className="text-dark-300">{t('dashboard.dependencies.python')}</span>
               <span className="text-white font-mono text-xs">{deps.python}</span>
             </div>
           )}
           {deps?.postgresql && (
             <div className="flex items-center justify-between bg-[var(--glass-bg)] rounded px-3 py-1.5">
-              <span className="text-dark-300">PostgreSQL</span>
+              <span className="text-dark-300">{t('dashboard.dependencies.postgresql')}</span>
               <span className="text-white font-mono text-xs">{deps.postgresql}</span>
             </div>
           )}
           {deps?.fastapi && (
             <div className="flex items-center justify-between bg-[var(--glass-bg)] rounded px-3 py-1.5">
-              <span className="text-dark-300">FastAPI</span>
+              <span className="text-dark-300">{t('dashboard.dependencies.fastapi')}</span>
               <span className="text-white font-mono text-xs">{deps.fastapi}</span>
             </div>
           )}
           {uniqueXray.length > 0 && (
             <div className="flex items-center justify-between bg-[var(--glass-bg)] rounded px-3 py-1.5">
-              <span className="text-dark-300">Xray</span>
+              <span className="text-dark-300">{t('dashboard.dependencies.xray')}</span>
               <span className="text-white font-mono text-xs">{uniqueXray.join(', ')}</span>
             </div>
           )}
@@ -1712,6 +1711,168 @@ const TrafficAnomalyCard = memo(function TrafficAnomalyCard({
 })
 
 
+// ── Admin Quota Card ─────────────────────────────────────────────
+
+/**
+ * Compact card showing the current admin's quota usage vs. their limits.
+ * Pulled from usePermissionStore so it updates automatically when
+ * loadPermissions() / refreshAdmin() fire (e.g. after creating a user).
+ *
+ * Counter semantics (also explained in the card footer):
+ * - hosts / users / nodes — **lifetime change count**. Increments on
+ *   every create AND on every delete (one tick per "change you've
+ *   made"). The number only ever grows.
+ * - traffic — **total commitment, partially recoverable**. The
+ *   counter equals `sum of (limit + used)` of every quota event to
+ *   date: the limits you've allocated plus the traffic your users
+ *   have consumed (which is irrecoverable). Creating a user with
+ *   limit L adds L. Resetting a user adds the consumed traffic to
+ *   the counter (the user just got a fresh quota). Editing a user
+ *   down (when used < new limit) returns the decrease. Deleting a
+ *   user returns only the unused portion; the consumed portion
+ *   stays on the tab forever.
+ *
+ * Hidden for superadmins (no quotas apply to them).
+ */
+function AdminQuotaCard() {
+  const { t } = useTranslation()
+  const role = usePermissionStore((s) => s.role)
+  const maxUsers = usePermissionStore((s) => s.maxUsers)
+  const maxNodes = usePermissionStore((s) => s.maxNodes)
+  const maxHosts = usePermissionStore((s) => s.maxHosts)
+  const maxTrafficGb = usePermissionStore((s) => s.maxTrafficGb)
+  const usersCreated = usePermissionStore((s) => s.usersCreated)
+  const nodesCreated = usePermissionStore((s) => s.nodesCreated)
+  const hostsCreated = usePermissionStore((s) => s.hostsCreated)
+  const trafficUsedBytes = usePermissionStore((s) => s.trafficUsedBytes)
+
+  // Suppress for superadmin (no limits apply) — they get a different UX in /admins.
+  if (role === 'superadmin') return null
+
+  const unlimited = t('dashboard.unlimited')
+
+  return (
+    <Card className="animate-fade-in-up" style={{ animationDelay: '0.05s' }}>
+      <CardHeader className="pb-2">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <CardTitle className="text-base md:text-lg">{t('dashboard.yourQuota')}</CardTitle>
+            <InfoTooltip text={t('dashboard.yourQuotaFootnote')} side="right" />
+          </div>
+        </div>
+      </CardHeader>
+      <CardContent>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <QuotaRow
+            label={t('dashboard.usersQuota')}
+            used={usersCreated}
+            limit={maxUsers}
+            unlimitedLabel={unlimited}
+            semantic={t('dashboard.lifetimeEventCount')}
+          />
+          <QuotaRow
+            label={t('dashboard.nodesQuota')}
+            used={nodesCreated}
+            limit={maxNodes}
+            unlimitedLabel={unlimited}
+            semantic={t('dashboard.lifetimeEventCount')}
+          />
+          <QuotaRow
+            label={t('dashboard.hostsQuota')}
+            used={hostsCreated}
+            limit={maxHosts}
+            unlimitedLabel={unlimited}
+            semantic={t('dashboard.lifetimeEventCount')}
+          />
+          <QuotaRow
+            label={t('dashboard.trafficQuota')}
+            used={trafficUsedBytes / 1073741824}
+            limit={maxTrafficGb}
+            unlimitedLabel={unlimited}
+            unit="GB"
+            decimals={1}
+            semantic={t('dashboard.committedAllocated')}
+          />
+        </div>
+        <p
+          className="mt-4 text-[11px] leading-relaxed text-dark-300 border-t border-[var(--glass-border)] pt-3"
+          data-testid="quota-card-footnote"
+        >
+          {t('dashboard.yourQuotaFootnote')}
+        </p>
+      </CardContent>
+    </Card>
+  )
+}
+
+function QuotaRow({
+  label,
+  used,
+  limit,
+  unlimitedLabel,
+  unit,
+  decimals = 0,
+  semantic,
+}: {
+  label: string
+  used: number
+  limit: number | null
+  unlimitedLabel: string
+  unit?: string
+  decimals?: number
+  /** Short label for what the counter actually measures (lifetime vs allocated). */
+  semantic?: string
+}) {
+  const { t } = useTranslation()
+  const isUnlimited = limit == null
+  const formattedUsed = decimals > 0 ? used.toFixed(decimals) : Math.round(used).toString()
+  const formattedLimit = limit == null
+    ? unlimitedLabel
+    : decimals > 0
+      ? `${limit}${unit ?? ''}`
+      : limit.toString()
+
+  // For limited rows, show "<used> of <limit>". For unlimited rows, the
+  // limit is null so we show "<used> used" (or "0 used") — the value is
+  // still useful as a usage indicator even when the cap is gone.
+  const valueText = isUnlimited
+    ? t('dashboard.usedOnly', { used: `${formattedUsed}${unit ?? ''}` })
+    : t('dashboard.used', { used: `${formattedUsed}${unit ?? ''}`, limit: formattedLimit })
+
+  // Progress bar: only meaningful against a cap. For unlimited rows we
+  // draw a thin "no cap" track so the row still has the same visual
+  // rhythm, but we suppress the colored fill.
+  const hasCap = !isUnlimited && limit != null && limit > 0
+  const pct = hasCap ? Math.min(100, Math.round((used / (limit as number)) * 100)) : 0
+  const barColor = !hasCap
+    ? 'bg-emerald-500/30'
+    : pct >= 90
+      ? 'bg-red-500'
+      : pct >= 70
+        ? 'bg-amber-500'
+        : 'bg-primary'
+
+  return (
+    <div className="space-y-1.5" data-testid="quota-row">
+      <div className="flex items-center justify-between text-xs">
+        <span className="text-dark-200 font-medium">{label}</span>
+        <span className="text-dark-300 tabular-nums">{valueText}</span>
+      </div>
+      <div
+        className="h-1.5 rounded-full bg-[var(--glass-bg)] overflow-hidden"
+        title={semantic}
+        aria-label={semantic}
+      >
+        <div
+          className={`h-full ${barColor} transition-all duration-500`}
+          style={{ width: hasCap ? `${Math.max(2, pct)}%` : '100%' }}
+        />
+      </div>
+    </div>
+  )
+}
+
+
 // ── Main Dashboard Component ─────────────────────────────────────
 
 export default function Dashboard() {
@@ -1873,25 +2034,7 @@ export default function Dashboard() {
     enabled: canViewUsers,
   })
 
-  // ── Refresh ──────────────────────────────────────────────────
-
-  const fetchingCount = useIsFetching()
-  const isRefreshing = fetchingCount > 0
-
-  const handleRefreshAll = () => {
-    queryClient.invalidateQueries({ queryKey: ['overview'] })
-    queryClient.invalidateQueries({ queryKey: ['violationStats'] })
-    queryClient.invalidateQueries({ queryKey: ['trafficStats'] })
-    queryClient.invalidateQueries({ queryKey: ['timeseries'] })
-    queryClient.invalidateQueries({ queryKey: ['systemComponents'] })
-    queryClient.invalidateQueries({ queryKey: ['billingSummary'] })
-    queryClient.invalidateQueries({ queryKey: ['topUsers'] })
-    queryClient.invalidateQueries({ queryKey: ['trends'] })
-    queryClient.invalidateQueries({ queryKey: ['topViolators'] })
-    queryClient.invalidateQueries({ queryKey: ['dashboard-audit-feed'] })
-    queryClient.invalidateQueries({ queryKey: ['dashboard-node-fleet'] })
-    queryClient.invalidateQueries({ queryKey: ['dashboard-expiring'] })
-  }
+  const handleRefreshAll = () => queryClient.invalidateQueries()
 
   // ── Chart data ───────────────────────────────────────────────
 
@@ -1973,17 +2116,6 @@ export default function Dashboard() {
           <h1 className="text-2xl md:text-3xl font-bold text-foreground tracking-tight">{t('dashboard.title')}</h1>
           <p className="text-muted-foreground mt-1 text-sm">{t('dashboard.subtitle')}</p>
         </div>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={handleRefreshAll}
-          disabled={isRefreshing}
-          className="gap-2 backdrop-blur-sm"
-          aria-label={t('dashboard.refresh')}
-        >
-          <RefreshCw className={cn("w-3.5 h-3.5", isRefreshing && "animate-spin")} />
-          <span className="hidden sm:inline">{t('dashboard.refresh')}</span>
-        </Button>
       </div>
 
       {/* ── Error banner ────────────────────────────────────────── */}
@@ -2017,6 +2149,9 @@ export default function Dashboard() {
           </Button>
         </div>
       )}
+
+      {/* ── Your quota card ──────────────────────────────────────── */}
+      <AdminQuotaCard />
 
       {/* ── Sortable widgets ────────────────────────────────────── */}
       <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleWidgetDragEnd}>

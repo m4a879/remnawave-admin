@@ -8,6 +8,13 @@ from typing import Any, Dict, List, Optional
 
 from shared.logger import logger
 from shared.db._base import _db_row_to_api_format
+from shared.db_schema import (
+    NODES_TABLE,
+    USER_NODE_TRAFFIC_TABLE,
+    NODE_METRICS_SNAPSHOTS_TABLE,
+    USERS_TABLE,
+)
+from shared.db_query import select_sql, insert_sql, update_sql, delete_sql
 
 
 class NodesMixin:
@@ -19,7 +26,7 @@ class NodesMixin:
             return []
         
         async with self.acquire() as conn:
-            rows = await conn.fetch("SELECT * FROM nodes ORDER BY name")
+            rows = await conn.fetch(select_sql(NODES_TABLE, "*", "ORDER BY name"))
             return [_db_row_to_api_format(row) for row in rows]
     
     async def get_node_by_uuid(self, uuid: str) -> Optional[Dict[str, Any]]:
@@ -29,7 +36,7 @@ class NodesMixin:
         
         async with self.acquire() as conn:
             row = await conn.fetchrow(
-                "SELECT * FROM nodes WHERE uuid = $1",
+                select_sql(NODES_TABLE, "*", "WHERE uuid = $1"),
                 uuid
             )
             return _db_row_to_api_format(row) if row else None
@@ -45,7 +52,7 @@ class NodesMixin:
 
         async with self.acquire() as conn:
             rows = await conn.fetch(
-                "SELECT * FROM nodes WHERE uuid::text = ANY($1)",
+                select_sql(NODES_TABLE, "*", "WHERE uuid::text = ANY($1)"),
                 [str(u) for u in uuids]
             )
             result = {}
@@ -62,7 +69,7 @@ class NodesMixin:
 
         async with self.acquire() as conn:
             row = await conn.fetchrow(
-                "SELECT agent_token FROM nodes WHERE uuid = $1",
+                select_sql(NODES_TABLE, "agent_token", "WHERE uuid = $1"),
                 uuid
             )
             return row["agent_token"] if row and row["agent_token"] else None
@@ -79,13 +86,12 @@ class NodesMixin:
 
         async with self.acquire() as conn:
             rows = await conn.fetch(
-                """
-                SELECT uuid,
-                       (agent_token IS NOT NULL AND agent_token <> '') AS has_agent_token,
-                       COALESCE(agent_v2_connected, false) AS agent_v2_connected,
-                       agent_v2_last_ping
-                FROM nodes
-                """
+                select_sql(NODES_TABLE, """
+                        uuid,
+                        (agent_token IS NOT NULL AND agent_token <> '') AS has_agent_token,
+                        COALESCE(agent_v2_connected, false) AS agent_v2_connected,
+                        agent_v2_last_ping
+                    """)
             )
 
         result: Dict[str, Dict[str, Any]] = {}
@@ -109,14 +115,12 @@ class NodesMixin:
         
         async with self.acquire() as conn:
             row = await conn.fetchrow(
-                """
-                SELECT 
-                    COUNT(*) as total,
-                    COUNT(*) FILTER (WHERE NOT is_disabled) as enabled,
-                    COUNT(*) FILTER (WHERE is_disabled) as disabled,
-                    COUNT(*) FILTER (WHERE is_connected AND NOT is_disabled) as connected
-                FROM nodes
-                """
+                select_sql(NODES_TABLE, """
+                        COUNT(*) as total,
+                        COUNT(*) FILTER (WHERE NOT is_disabled) as enabled,
+                        COUNT(*) FILTER (WHERE is_disabled) as disabled,
+                        COUNT(*) FILTER (WHERE is_connected AND NOT is_disabled) as connected
+                    """)
             )
             return dict(row) if row else {"total": 0, "enabled": 0, "disabled": 0, "connected": 0}
     
@@ -165,24 +169,27 @@ class NodesMixin:
 
         async with self.acquire() as conn:
             await conn.execute(
-                """
-                INSERT INTO nodes (
-                    uuid, name, address, port, is_disabled, is_connected,
-                    traffic_limit_bytes, traffic_used_bytes, users_online, updated_at, raw_data
-                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), $10)
-                ON CONFLICT (uuid) DO UPDATE SET
-                    name = EXCLUDED.name,
-                    address = EXCLUDED.address,
-                    port = EXCLUDED.port,
-                    is_disabled = EXCLUDED.is_disabled,
-                    is_connected = EXCLUDED.is_connected,
-                    traffic_limit_bytes = EXCLUDED.traffic_limit_bytes,
-                    traffic_used_bytes = EXCLUDED.traffic_used_bytes,
-                    users_online = EXCLUDED.users_online,
-                    updated_at = NOW(),
-                    raw_data = EXCLUDED.raw_data
-                    -- agent_token НЕ обновляем при синхронизации из API (сохраняем локальные настройки)
-                """,
+                insert_sql(
+                    NODES_TABLE,
+                    [
+                        "uuid", "name", "address", "port", "is_disabled", "is_connected",
+                        "traffic_limit_bytes", "traffic_used_bytes", "users_online", "updated_at", "raw_data",
+                    ],
+                    values="$1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), $10",
+                    suffix="""
+                    ON CONFLICT (uuid) DO UPDATE SET
+                        name = EXCLUDED.name,
+                        address = EXCLUDED.address,
+                        port = EXCLUDED.port,
+                        is_disabled = EXCLUDED.is_disabled,
+                        is_connected = EXCLUDED.is_connected,
+                        traffic_limit_bytes = EXCLUDED.traffic_limit_bytes,
+                        traffic_used_bytes = EXCLUDED.traffic_used_bytes,
+                        users_online = EXCLUDED.users_online,
+                        updated_at = NOW(),
+                        raw_data = EXCLUDED.raw_data
+                    """,
+                ),
                 uuid,
                 response.get("name"),
                 response.get("address"),
@@ -219,7 +226,7 @@ class NodesMixin:
         
         async with self.acquire() as conn:
             result = await conn.execute(
-                "DELETE FROM nodes WHERE uuid = $1",
+                delete_sql(NODES_TABLE, "uuid = $1"),
                 uuid
             )
             return result == "DELETE 1"
@@ -245,22 +252,24 @@ class NodesMixin:
 
         async with self.acquire() as conn:
             result = await conn.execute(
-                """
-                UPDATE nodes SET
-                    cpu_usage = $2,
-                    cpu_cores = $3,
-                    memory_usage = $4,
-                    memory_total_bytes = $5,
-                    memory_used_bytes = $6,
-                    disk_usage = $7,
-                    disk_total_bytes = $8,
-                    disk_used_bytes = $9,
-                    disk_read_speed_bps = $10,
-                    disk_write_speed_bps = $11,
-                    uptime_seconds = $12,
-                    metrics_updated_at = NOW()
-                WHERE uuid = $1
-                """,
+                update_sql(
+                    NODES_TABLE,
+                    """
+                        cpu_usage = $2,
+                        cpu_cores = $3,
+                        memory_usage = $4,
+                        memory_total_bytes = $5,
+                        memory_used_bytes = $6,
+                        disk_usage = $7,
+                        disk_total_bytes = $8,
+                        disk_used_bytes = $9,
+                        disk_read_speed_bps = $10,
+                        disk_write_speed_bps = $11,
+                        uptime_seconds = $12,
+                        metrics_updated_at = NOW()
+                    """,
+                    "uuid = $1",
+                ),
                 node_uuid,
                 cpu_usage,
                 cpu_cores,
@@ -299,14 +308,15 @@ class NodesMixin:
         try:
             async with self.acquire() as conn:
                 await conn.execute(
-                    """
-                    INSERT INTO node_metrics_snapshots
-                    (node_uuid, cpu_usage, cpu_cores, memory_usage,
-                     memory_total_bytes, memory_used_bytes,
-                     disk_usage, disk_total_bytes, disk_used_bytes,
-                     disk_read_speed_bps, disk_write_speed_bps, uptime_seconds)
-                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
-                    """,
+                    insert_sql(
+                        NODE_METRICS_SNAPSHOTS_TABLE,
+                        [
+                            "node_uuid", "cpu_usage", "cpu_cores", "memory_usage",
+                            "memory_total_bytes", "memory_used_bytes",
+                            "disk_usage", "disk_total_bytes", "disk_used_bytes",
+                            "disk_read_speed_bps", "disk_write_speed_bps", "uptime_seconds",
+                        ],
+                    ),
                     node_uuid, cpu_usage, cpu_cores, memory_usage,
                     memory_total_bytes, memory_used_bytes,
                     disk_usage, disk_total_bytes, disk_used_bytes,
@@ -329,28 +339,27 @@ class NodesMixin:
         delta_map = {"24h": 1, "7d": 7, "30d": 30, "all": 3650}
         days = delta_map.get(period, 1)
 
-        query = """
-            SELECT
-                s.node_uuid,
-                n.name as node_name,
-                ROUND(AVG(s.cpu_usage)::numeric, 1) as avg_cpu,
-                ROUND(AVG(s.memory_usage)::numeric, 1) as avg_memory,
-                ROUND(AVG(s.disk_usage)::numeric, 1) as avg_disk,
-                ROUND(MAX(s.cpu_usage)::numeric, 1) as max_cpu,
-                ROUND(MAX(s.memory_usage)::numeric, 1) as max_memory,
-                ROUND(MAX(s.disk_usage)::numeric, 1) as max_disk,
-                COUNT(*) as samples_count
-            FROM node_metrics_snapshots s
-            JOIN nodes n ON n.uuid = s.node_uuid
-            WHERE s.created_at >= NOW() - make_interval(days => $1)
+        columns = """
+            s.node_uuid,
+            n.name as node_name,
+            ROUND(AVG(s.cpu_usage)::numeric, 1) as avg_cpu,
+            ROUND(AVG(s.memory_usage)::numeric, 1) as avg_memory,
+            ROUND(AVG(s.disk_usage)::numeric, 1) as avg_disk,
+            ROUND(MAX(s.cpu_usage)::numeric, 1) as max_cpu,
+            ROUND(MAX(s.memory_usage)::numeric, 1) as max_memory,
+            ROUND(MAX(s.disk_usage)::numeric, 1) as max_disk,
+            COUNT(*) as samples_count
         """
+        suffix = "s JOIN nodes n ON n.uuid = s.node_uuid WHERE s.created_at >= NOW() - make_interval(days => $1)"
         params: list = [days]
 
         if node_uuid:
-            query += " AND s.node_uuid = $2::uuid"
+            suffix += " AND s.node_uuid = $2::uuid"
             params.append(node_uuid)
 
-        query += " GROUP BY s.node_uuid, n.name ORDER BY n.name"
+        suffix += " GROUP BY s.node_uuid, n.name ORDER BY n.name"
+
+        query = select_sql(NODE_METRICS_SNAPSHOTS_TABLE, columns, suffix)
 
         try:
             async with self.acquire() as conn:
@@ -378,23 +387,22 @@ class NodesMixin:
         days = delta_map.get(period, 1)
         trunc = trunc_map.get(period, "hour")
 
-        query = f"""
-            SELECT
-                date_trunc('{trunc}', s.created_at) as bucket,
-                s.node_uuid,
-                n.name as node_name,
-                ROUND(AVG(s.cpu_usage)::numeric, 1) as avg_cpu,
-                ROUND(AVG(s.memory_usage)::numeric, 1) as avg_memory,
-                ROUND(AVG(s.disk_usage)::numeric, 1) as avg_disk
-            FROM node_metrics_snapshots s
-            JOIN nodes n ON n.uuid = s.node_uuid
-            WHERE s.created_at >= NOW() - make_interval(days => $1)
+        columns = f"""
+            date_trunc('{trunc}', s.created_at) as bucket,
+            s.node_uuid,
+            n.name as node_name,
+            ROUND(AVG(s.cpu_usage)::numeric, 1) as avg_cpu,
+            ROUND(AVG(s.memory_usage)::numeric, 1) as avg_memory,
+            ROUND(AVG(s.disk_usage)::numeric, 1) as avg_disk
         """
+        suffix = "s JOIN nodes n ON n.uuid = s.node_uuid WHERE s.created_at >= NOW() - make_interval(days => $1)"
         params: list = [days]
         if node_uuid:
-            query += " AND s.node_uuid = $2::uuid"
+            suffix += " AND s.node_uuid = $2::uuid"
             params.append(node_uuid)
-        query += f" GROUP BY bucket, s.node_uuid, n.name ORDER BY bucket"
+        suffix += f" GROUP BY bucket, s.node_uuid, n.name ORDER BY bucket"
+
+        query = select_sql(NODE_METRICS_SNAPSHOTS_TABLE, columns, suffix)
 
         try:
             async with self.acquire() as conn:
@@ -421,15 +429,15 @@ class NodesMixin:
             for _ in range(max_batches):
                 async with self.acquire() as conn:
                     result = await conn.execute(
-                        """
-                        DELETE FROM node_metrics_snapshots
-                        WHERE id IN (
-                            SELECT id FROM node_metrics_snapshots
-                            WHERE created_at < NOW() - make_interval(days => $1)
-                            ORDER BY created_at
-                            LIMIT $2
-                        )
-                        """,
+                        delete_sql(
+                            NODE_METRICS_SNAPSHOTS_TABLE,
+                            f"""id IN (
+                                SELECT id FROM {NODE_METRICS_SNAPSHOTS_TABLE}
+                                WHERE created_at < NOW() - make_interval(days => $1)
+                                ORDER BY created_at
+                                LIMIT $2
+                            )""",
+                        ),
                         retention_days, batch_size,
                     )
                     deleted = int(result.split()[-1]) if result and result.split() else 0
@@ -455,12 +463,15 @@ class NodesMixin:
             return
         async with self.acquire() as conn:
             await conn.execute(
-                """
-                INSERT INTO user_node_traffic (user_uuid, node_uuid, traffic_bytes, synced_at)
-                VALUES ($1::uuid, $2::uuid, $3, NOW())
-                ON CONFLICT (user_uuid, node_uuid)
-                DO UPDATE SET traffic_bytes = $3, synced_at = NOW()
-                """,
+                insert_sql(
+                    USER_NODE_TRAFFIC_TABLE,
+                    ["user_uuid", "node_uuid", "traffic_bytes", "synced_at"],
+                    values="$1::uuid, $2::uuid, $3, NOW()",
+                    suffix="""
+                    ON CONFLICT (user_uuid, node_uuid)
+                    DO UPDATE SET traffic_bytes = $3, synced_at = NOW()
+                    """,
+                ),
                 user_uuid, node_uuid, traffic_bytes,
             )
 
@@ -476,8 +487,8 @@ class NodesMixin:
         try:
             async with self.acquire() as conn:
                 result = await conn.execute(
-                    """
-                    INSERT INTO user_node_traffic (user_uuid, node_uuid, traffic_bytes, synced_at)
+                    f"""
+                    INSERT INTO {USER_NODE_TRAFFIC_TABLE} (user_uuid, node_uuid, traffic_bytes, synced_at)
                     SELECT u::uuid, n::uuid, t, NOW()
                     FROM UNNEST($1::text[], $2::text[], $3::bigint[]) AS r(u, n, t)
                     ON CONFLICT (user_uuid, node_uuid)
@@ -496,7 +507,7 @@ class NodesMixin:
             return {}
         async with self.acquire() as conn:
             rows = await conn.fetch(
-                "SELECT username, uuid::text FROM users WHERE LOWER(username) = ANY(SELECT LOWER(x) FROM unnest($1::text[]) AS x)",
+                select_sql(USERS_TABLE, "username, uuid::text", "WHERE LOWER(username) = ANY(SELECT LOWER(x) FROM unnest($1::text[]) AS x)"),
                 usernames,
             )
             return {r["username"].lower(): r["uuid"] for r in rows}
@@ -509,16 +520,21 @@ class NodesMixin:
             return []
         async with self.acquire() as conn:
             rows = await conn.fetch(
-                """
-                SELECT unt.user_uuid, u.username, unt.traffic_bytes,
-                       n.name as node_name
-                FROM user_node_traffic unt
-                JOIN users u ON unt.user_uuid = u.uuid
-                JOIN nodes n ON unt.node_uuid = n.uuid
-                WHERE unt.node_uuid = $1::uuid
-                  AND u.status NOT IN ('EXPIRED', 'DISABLED', 'LIMITED')
-                ORDER BY unt.traffic_bytes DESC
-                """,
+                select_sql(
+                    USER_NODE_TRAFFIC_TABLE,
+                    """
+                    unt.user_uuid, u.username, unt.traffic_bytes,
+                    n.name as node_name
+                    """,
+                    """
+                    unt
+                    JOIN users u ON unt.user_uuid = u.uuid
+                    JOIN nodes n ON unt.node_uuid = n.uuid
+                    WHERE unt.node_uuid = $1::uuid
+                      AND u.status NOT IN ('EXPIRED', 'DISABLED', 'LIMITED')
+                    ORDER BY unt.traffic_bytes DESC
+                    """,
+                ),
                 node_uuid,
             )
             return [dict(r) for r in rows]
@@ -533,16 +549,21 @@ class NodesMixin:
             return []
         async with self.acquire() as conn:
             rows = await conn.fetch(
-                """
-                SELECT unt.user_uuid, u.username, unt.node_uuid,
-                       n.name as node_name, unt.traffic_bytes
-                FROM user_node_traffic unt
-                JOIN users u ON unt.user_uuid = u.uuid
-                JOIN nodes n ON unt.node_uuid = n.uuid
-                WHERE unt.traffic_bytes >= $1
-                  AND u.status NOT IN ('EXPIRED', 'DISABLED', 'LIMITED')
-                ORDER BY unt.traffic_bytes DESC
-                """,
+                select_sql(
+                    USER_NODE_TRAFFIC_TABLE,
+                    """
+                    unt.user_uuid, u.username, unt.node_uuid,
+                    n.name as node_name, unt.traffic_bytes
+                    """,
+                    """
+                    unt
+                    JOIN users u ON unt.user_uuid = u.uuid
+                    JOIN nodes n ON unt.node_uuid = n.uuid
+                    WHERE unt.traffic_bytes >= $1
+                      AND u.status NOT IN ('EXPIRED', 'DISABLED', 'LIMITED')
+                    ORDER BY unt.traffic_bytes DESC
+                    """,
+                ),
                 threshold_bytes,
             )
             return [dict(r) for r in rows]
@@ -557,11 +578,7 @@ class NodesMixin:
             return {}
         async with self.acquire() as conn:
             rows = await conn.fetch(
-                """
-                SELECT uuid::text, raw_used_traffic_bytes
-                FROM users
-                WHERE raw_used_traffic_bytes > 0
-                """
+                select_sql(USERS_TABLE, "uuid::text, raw_used_traffic_bytes", "WHERE raw_used_traffic_bytes > 0")
             )
             return {r["uuid"]: int(r["raw_used_traffic_bytes"]) for r in rows}
 
@@ -577,11 +594,7 @@ class NodesMixin:
                 for user_uuid, delta in deltas.items():
                     if delta > 0:
                         await conn.execute(
-                            """
-                            UPDATE users
-                            SET raw_used_traffic_bytes = raw_used_traffic_bytes + $2
-                            WHERE uuid = $1::uuid
-                            """,
+                            update_sql(USERS_TABLE, "raw_used_traffic_bytes = raw_used_traffic_bytes + $2", "uuid = $1::uuid"),
                             user_uuid, delta,
                         )
 
@@ -591,10 +604,7 @@ class NodesMixin:
             return {}
         async with self.acquire() as conn:
             rows = await conn.fetch(
-                """
-                SELECT uuid::text, COALESCE(used_traffic_bytes, 0) as used
-                FROM users WHERE uuid = ANY($1::uuid[])
-                """,
+                select_sql(USERS_TABLE, "uuid::text, COALESCE(used_traffic_bytes, 0) as used", "WHERE uuid = ANY($1::uuid[])"),
                 user_uuids,
             )
             return {r["uuid"]: int(r["used"]) for r in rows}
@@ -605,10 +615,7 @@ class NodesMixin:
             return
         async with self.acquire() as conn:
             await conn.execute(
-                """
-                UPDATE users SET raw_used_traffic_bytes = 0
-                WHERE uuid = ANY($1::uuid[])
-                """,
+                update_sql(USERS_TABLE, "raw_used_traffic_bytes = 0", "uuid = ANY($1::uuid[])"),
                 user_uuids,
             )
 
@@ -621,10 +628,7 @@ class NodesMixin:
             return {}
         async with self.acquire() as conn:
             rows = await conn.fetch(
-                """
-                SELECT user_uuid::text, node_uuid::text, traffic_bytes
-                FROM user_node_traffic
-                """
+                select_sql(USER_NODE_TRAFFIC_TABLE, "user_uuid::text, node_uuid::text, traffic_bytes")
             )
         result: Dict[str, Dict[str, int]] = {}
         for r in rows:

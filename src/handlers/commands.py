@@ -13,6 +13,8 @@ from src.keyboards.hosts_menu import hosts_menu_keyboard
 from src.keyboards.main_menu import bulk_menu_keyboard, main_menu_keyboard, nodes_menu_keyboard, resources_menu_keyboard, system_menu_keyboard
 from src.keyboards.providers_menu import providers_menu_keyboard
 from src.keyboards.stats_menu import stats_menu_keyboard
+from src.utils.auth import BotAdmin
+from src.utils.formatters import build_quota_text
 
 # Импорты из соответствующих модулей
 from src.handlers.billing import _fetch_billing_nodes_text, _fetch_billing_text, _fetch_providers_text
@@ -50,18 +52,19 @@ router = Router(name="commands")
 
 
 @router.message(Command("start"))
-async def cmd_start(message: Message) -> None:
+async def cmd_start(message: Message, admin: BotAdmin) -> None:
     """Обработчик команды /start."""
     if await _not_admin(message):
         return
 
     await _send_clean_message(message, _("bot.welcome"))
     menu_text = await _fetch_main_menu_text()
-    await _send_clean_message(message, menu_text, reply_markup=main_menu_keyboard(), parse_mode="HTML")
+    quota_text = build_quota_text(admin)
+    await _send_clean_message(message, f"{menu_text}\n\n{quota_text}", reply_markup=main_menu_keyboard(admin=admin), parse_mode="HTML")
 
 
 @router.message(F.text & ~F.text.startswith("/"), StateFilter(None))
-async def handle_pending(message: Message, state: FSMContext) -> None:
+async def handle_pending(message: Message, state: FSMContext, admin: BotAdmin) -> None:
     """Обработчик текстовых сообщений (не команд) для ожидаемого ввода.
 
     Важно: StateFilter(None) гарантирует что этот обработчик срабатывает только
@@ -96,10 +99,10 @@ async def handle_pending(message: Message, state: FSMContext) -> None:
     action = ctx.get("action")
     logger.info("handle_pending: processing action=%s", action)
     if action == "user_search":
-        await _handle_user_search_input(message, ctx)
+        await _handle_user_search_input(message, ctx, admin=admin)
     elif action == "subs_search":
         from src.handlers.navigation import _handle_subs_search_input
-        await _handle_subs_search_input(message, ctx)
+        await _handle_subs_search_input(message, ctx, admin=admin)
     elif action == "template_create":
         await _handle_template_create_input(message, ctx)
     elif action == "template_update_json":
@@ -115,7 +118,7 @@ async def handle_pending(message: Message, state: FSMContext) -> None:
     elif action == "user_create":
         await _handle_user_create_input(message, ctx)
     elif action == "user_edit":
-        await _handle_user_edit_input(message, ctx)
+        await _handle_user_edit_input(message, ctx, admin=admin)
     elif action.startswith("bulk_users_"):
         await _handle_bulk_users_input(message, ctx)
     elif action == "node_create":
@@ -143,15 +146,15 @@ async def cmd_help(message: Message) -> None:
 
 
 @router.message(Command("health"))
-async def cmd_health(message: Message) -> None:
+async def cmd_health(message: Message, admin: BotAdmin) -> None:
     """Обработчик команды /health."""
     if await _not_admin(message):
         return
-    await _send_clean_message(message, await _fetch_health_text(), reply_markup=system_menu_keyboard(), parse_mode="HTML")
+    await _send_clean_message(message, await _fetch_health_text(), reply_markup=system_menu_keyboard(admin=admin), parse_mode="HTML")
 
 
 @router.message(Command("stats"))
-async def cmd_stats(message: Message) -> None:
+async def cmd_stats(message: Message, admin: BotAdmin) -> None:
     """Обработчик команды /stats."""
     if await _not_admin(message):
         return
@@ -160,16 +163,16 @@ async def cmd_stats(message: Message) -> None:
 
 
 @router.message(Command("bandwidth"))
-async def cmd_bandwidth(message: Message) -> None:
+async def cmd_bandwidth(message: Message, admin: BotAdmin) -> None:
     """Обработчик команды /bandwidth."""
     if await _not_admin(message):
         return
     text = await _fetch_bandwidth_text()
-    await _send_clean_message(message, text, reply_markup=system_menu_keyboard(), parse_mode="HTML")
+    await _send_clean_message(message, text, reply_markup=system_menu_keyboard(admin=admin), parse_mode="HTML")
 
 
 @router.message(Command("billing"))
-async def cmd_billing(message: Message) -> None:
+async def cmd_billing(message: Message, admin: BotAdmin) -> None:
     """Обработчик команды /billing."""
     if await _not_admin(message):
         return
@@ -178,7 +181,7 @@ async def cmd_billing(message: Message) -> None:
 
 
 @router.message(Command("providers"))
-async def cmd_providers(message: Message) -> None:
+async def cmd_providers(message: Message, admin: BotAdmin) -> None:
     """Обработчик команды /providers."""
     if await _not_admin(message):
         return
@@ -187,7 +190,7 @@ async def cmd_providers(message: Message) -> None:
 
 
 @router.message(Command("billing_nodes"))
-async def cmd_billing_nodes(message: Message) -> None:
+async def cmd_billing_nodes(message: Message, admin: BotAdmin) -> None:
     """Обработчик команды /billing_nodes."""
     if await _not_admin(message):
         return
@@ -196,11 +199,11 @@ async def cmd_billing_nodes(message: Message) -> None:
 
 
 @router.message(Command("bulk"))
-async def cmd_bulk(message: Message) -> None:
+async def cmd_bulk(message: Message, admin: BotAdmin) -> None:
     """Обработчик команды /bulk."""
     if await _not_admin(message):
         return
-    await _send_clean_message(message, _("bulk.title"), reply_markup=bulk_menu_keyboard())
+    await _send_clean_message(message, _("bulk.title"), reply_markup=bulk_menu_keyboard(admin=admin))
 
 
 @router.message(Command("bulk_delete_status"))
@@ -305,18 +308,18 @@ async def cmd_bulk_status(message: Message) -> None:
 
 
 @router.message(Command("user"))
-async def cmd_user(message: Message) -> None:
+async def cmd_user(message: Message, admin: BotAdmin) -> None:
     """Обработчик команды /user."""
     if await _not_admin(message):
         return
 
     parts = message.text.split(maxsplit=1)
     preset_query = parts[1].strip() if len(parts) > 1 else ""
-    await _start_user_search_flow(message, preset_query or None)
+    await _start_user_search_flow(message, preset_query or None, admin=admin)
 
 
 @router.message(Command("user_create"))
-async def cmd_user_create(message: Message) -> None:
+async def cmd_user_create(message: Message, admin: BotAdmin) -> None:
     """Обработчик команды /user_create."""
     if await _not_admin(message):
         return
@@ -328,7 +331,7 @@ async def cmd_user_create(message: Message) -> None:
             "expire_at": parts[2],
             "telegram_id": parts[3] if len(parts) > 3 else None,
         }
-        await _create_user(message, data)
+        await _create_user(message, data, admin=admin)
         return
 
     user_id = message.from_user.id
@@ -338,25 +341,25 @@ async def cmd_user_create(message: Message) -> None:
 
 
 @router.message(Command("nodes"))
-async def cmd_nodes(message: Message) -> None:
+async def cmd_nodes(message: Message, admin: BotAdmin) -> None:
     """Обработчик команды /nodes."""
     if await _not_admin(message):
         return
-    text = await _fetch_nodes_text()
-    await _send_clean_message(message, text, reply_markup=nodes_menu_keyboard())
+    text = await _fetch_nodes_text(admin=admin)
+    await _send_clean_message(message, text, reply_markup=nodes_menu_keyboard(admin=admin))
 
 
 @router.message(Command("nodes_usage"))
-async def cmd_nodes_usage(message: Message) -> None:
+async def cmd_nodes_usage(message: Message, admin: BotAdmin) -> None:
     """Обработчик команды /nodes_usage."""
     if await _not_admin(message):
         return
     text = await _fetch_nodes_realtime_text()
-    await _send_clean_message(message, text, reply_markup=nodes_menu_keyboard())
+    await _send_clean_message(message, text, reply_markup=nodes_menu_keyboard(admin=admin))
 
 
 @router.message(Command("nodes_range"))
-async def cmd_nodes_range(message: Message) -> None:
+async def cmd_nodes_range(message: Message, admin: BotAdmin) -> None:
     """Обработчик команды /nodes_range."""
     if await _not_admin(message):
         return
@@ -366,7 +369,7 @@ async def cmd_nodes_range(message: Message) -> None:
         return
     start, end = parts[1], parts[2]
     text = await _fetch_nodes_range_text(start, end)
-    await _send_clean_message(message, text, reply_markup=nodes_menu_keyboard())
+    await _send_clean_message(message, text, reply_markup=nodes_menu_keyboard(admin=admin))
 
 
 @router.message(Command("node"))
@@ -383,11 +386,11 @@ async def cmd_node(message: Message) -> None:
 
 
 @router.message(Command("hosts"))
-async def cmd_hosts(message: Message) -> None:
+async def cmd_hosts(message: Message, admin: BotAdmin) -> None:
     """Обработчик команды /hosts."""
     if await _not_admin(message):
         return
-    text = await _fetch_hosts_text()
+    text = await _fetch_hosts_text(admin=admin)
     await _send_clean_message(message, text, reply_markup=hosts_menu_keyboard())
 
 
@@ -418,11 +421,11 @@ async def cmd_sub(message: Message) -> None:
 
 
 @router.message(Command("tokens"))
-async def cmd_tokens(message: Message) -> None:
+async def cmd_tokens(message: Message, admin: BotAdmin) -> None:
     """Обработчик команды /tokens."""
     if await _not_admin(message):
         return
-    await _show_tokens(message, reply_markup=resources_menu_keyboard())
+    await _show_tokens(message, reply_markup=resources_menu_keyboard(admin=admin))
 
 
 @router.message(Command("token"))
@@ -460,12 +463,12 @@ async def cmd_template(message: Message) -> None:
 
 
 @router.message(Command("snippets"))
-async def cmd_snippets(message: Message) -> None:
+async def cmd_snippets(message: Message, admin: BotAdmin) -> None:
     """Обработчик команды /snippets."""
     if await _not_admin(message):
         return
     text = await _fetch_snippets_text()
-    await _send_clean_message(message, text, reply_markup=resources_menu_keyboard())
+    await _send_clean_message(message, text, reply_markup=resources_menu_keyboard(admin=admin))
 
 
 @router.message(Command("snippet"))
@@ -498,12 +501,12 @@ async def cmd_snippet_update(message: Message) -> None:
 
 
 @router.message(Command("configs"))
-async def cmd_configs(message: Message) -> None:
+async def cmd_configs(message: Message, admin: BotAdmin) -> None:
     """Обработчик команды /configs."""
     if await _not_admin(message):
         return
     text = await _fetch_configs_text()
-    await _send_clean_message(message, text, reply_markup=nodes_menu_keyboard())
+    await _send_clean_message(message, text, reply_markup=nodes_menu_keyboard(admin=admin))
 
 
 @router.message(Command("config"))

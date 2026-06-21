@@ -2,6 +2,7 @@ import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Icon } from "./Icon";
 import { toast } from "sonner";
+import i18next from "i18next";
 import { useSmartTagInput } from "../../hooks/useSmartTagInput";
 
 interface Suggestion {
@@ -197,8 +198,8 @@ export const SmartTagInput = ({
                                     if (onTagClick) onTagClick(tag);
                                 } else {
                                     navigator.clipboard.writeText(tag)
-                                        .then(() => toast.success(`Copied: ${tag}`))
-                                        .catch(() => toast.error("Copy failed"));
+                                        .then(() => toast.success(i18next.t('xray.copiedTag', { tag })))
+                                        .catch(() => toast.error(i18next.t('xray.copyFailed')));
                                 }
                             }}
                             className={`px-2 py-1 rounded text-xs font-mono flex items-center gap-1 border transition-colors cursor-pointer hover:ring-1 hover:ring-indigo-500 ${isInvalid

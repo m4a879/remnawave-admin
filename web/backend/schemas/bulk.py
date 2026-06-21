@@ -21,6 +21,12 @@ class BulkOperationResult(BaseModel):
     errors: List[BulkOperationError] = []
 
 
+class BulkReassignRequest(BaseModel):
+    """Request to reassign multiple users to a new admin."""
+    uuids: List[str] = Field(..., min_length=1, max_length=100)
+    new_admin_id: int = Field(..., description="ID of the admin to assign users to")
+
+
 class BulkNodeRequest(BaseModel):
     """Request to perform a bulk operation on multiple nodes."""
     uuids: List[str] = Field(..., min_length=1, max_length=500)

@@ -401,12 +401,12 @@ export default function SystemLogs() {
                 {isStreaming ? (
                   <>
                     <Pause className="w-4 h-4 sm:mr-1" />
-                    <span className="hidden sm:inline">Live</span>
+                    <span className="hidden sm:inline">{t('systemLogs.live')}</span>
                   </>
                 ) : (
                   <>
                     <Play className="w-4 h-4 sm:mr-1" />
-                    <span className="hidden sm:inline">Paused</span>
+                    <span className="hidden sm:inline">{t('systemLogs.paused')}</span>
                   </>
                 )}
               </Button>
@@ -495,10 +495,10 @@ export default function SystemLogs() {
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value="all">{t('logs.allLevels')}</SelectItem>
-                        <SelectItem value="DEBUG">DEBUG</SelectItem>
-                        <SelectItem value="INFO">INFO</SelectItem>
-                        <SelectItem value="WARNING">WARNING</SelectItem>
-                        <SelectItem value="ERROR">ERROR</SelectItem>
+                        <SelectItem value="DEBUG">{t('systemLogs.logLevels.debug')}</SelectItem>
+                        <SelectItem value="INFO">{t('systemLogs.logLevels.info')}</SelectItem>
+                        <SelectItem value="WARNING">{t('systemLogs.logLevels.warning')}</SelectItem>
+                        <SelectItem value="ERROR">{t('systemLogs.logLevels.error')}</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>

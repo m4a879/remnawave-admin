@@ -8,6 +8,7 @@ import { parseXrayLink, parseJsonSubscription } from '../../../utils/link-parser
 import { generateXrayLink } from '../../../utils/link-generator';
 import { generateUUID } from '../../../core/generators/crypto';
 import { toast } from 'sonner';
+import i18next from 'i18next';
 
 // Ключ для хранения HWID
 const HWID_STORAGE_KEY = 'xray_editor_v2_hwid';
@@ -47,12 +48,12 @@ export const BatchOutboundModal = ({ onClose }: { onClose: () => void }) => {
     }, [mode, config]);
 
 const handleFetchSub = async () => {
-    if (!subUrl.trim()) return toast.error("Please enter a subscription URL");
+    if (!subUrl.trim()) return toast.error(i18next.t('xray.enterSubscriptionUrl'));
     setIsFetching(true);
     try {
         const targetUrl = subUrl.trim();
         const proxyUrl = `https://crs.bropines.workers.dev/${targetUrl}`;
-        
+
         const headers: Record<string, string> = {
             "x-custom-user-agent": customUA || "v2rayNG/1.8.5",
             "x-hwid": customClientId // Передаем HWID согласно докам Remnawave
@@ -64,8 +65,8 @@ const handleFetchSub = async () => {
 
         // Проверяем заголовки Remnawave на превышение лимита HWID
         if (res.headers.get('x-hwid-max-devices-reached') === 'true' || res.headers.get('x-hwid-limit') === 'true') {
-            toast.error("Panel rejected this device (HWID)", { 
-                description: "Device limit reached. Check 'Active Devices' in the panel." 
+            toast.error(i18next.t('xray.hwidDeviceLimitReached'), {
+                description: i18next.t('xray.hwidDeviceLimitDesc')
             });
             setIsFetching(false);
             return;
@@ -87,7 +88,7 @@ const handleFetchSub = async () => {
 
         if (decoded.includes('://')) {
             setText(prev => prev ? prev + '\n\n' + decoded : decoded);
-            toast.success("Subscription fetched successfully");
+            toast.success(i18next.t('xray.subscriptionFetched'));
         } else if (decoded.startsWith('[') || decoded.startsWith('{')) {
             // Пробуем распарсить JSON подписку и превратить её обратно в ссылки для удобства отображения/редактирования
             const obs = parseJsonSubscription(decoded);
@@ -95,31 +96,31 @@ const handleFetchSub = async () => {
                 const links = obs.map(o => generateXrayLink(o)).filter(Boolean);
                 if (links.length > 0) {
                     setText(prev => prev ? prev + '\n\n' + links.join('\n') : links.join('\n'));
-                    toast.success(`Imported ${links.length} nodes from JSON subscription`);
+                    toast.success(i18next.t('xray.importedNodesFromJsonSub', { count: links.length }));
                 } else {
                     // Если ссылки не сгенерились (странные протоколы), просто вставляем сырой JSON
                     setText(prev => prev ? prev + '\n\n' + decoded : decoded);
-                    toast.success("JSON subscription fetched (Raw)");
+                    toast.success(i18next.t('xray.jsonSubFetchedRaw'));
                 }
             } else {
-                toast.error("JSON detected but no valid outbounds found inside");
+                toast.error(i18next.t('xray.jsonNoValidOutboundsInSub'));
             }
         } else {
-            toast.error("No valid links found in response");
+            toast.error(i18next.t('xray.noValidLinksInResponse'));
         }
     } catch (err: any) {
-        toast.error("Fetch failed", { description: err.message });
+        toast.error(i18next.t('xray.fetchFailed'), { description: err.message });
     } finally {
         setIsFetching(false);
     }
 };
 
     const regenerateHwid = () => {
-        if (confirm("Regenerate HWID? The panel will see this as a NEW device.")) {
+        if (confirm(i18next.t('xray.regenerateHwidConfirm'))) {
             const newId = generateUUID();
             setCustomClientId(newId);
             localStorage.setItem(HWID_STORAGE_KEY, newId);
-            toast.info("New HWID generated and saved");
+            toast.info(i18next.t('xray.newHwidGenerated'));
         }
     };
 
@@ -191,10 +192,10 @@ const handleFetchSub = async () => {
 
                         if (obs.length > 0) {
                             addOutbounds(obs);
-                            toast.success(`Imported ${obs.length} nodes`);
+                            toast.success(i18next.t('xray.importedNodes', { count: obs.length }));
                             onClose();
                         } else {
-                            toast.error("No valid links or JSON configs found to import");
+                            toast.error(i18next.t('xray.noValidLinksToImport'));
                         }
                     }}>Save To Config</Button>
                 )}

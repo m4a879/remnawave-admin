@@ -1,5 +1,4 @@
-from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
-from aiogram.utils.i18n import gettext as _
+from aiogram.types import InlineKeyboardMarkup
 
 from src.keyboards.navigation import NavTarget, nav_row
 

@@ -3,13 +3,14 @@ from aiogram import F, Router
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 from aiogram.utils.i18n import gettext as _
 
-from src.handlers.common import _edit_text_safe, _not_admin, _send_clean_message
+from src.handlers.common import _edit_text_safe, _fetch_data, _not_admin, require_permission, _send_clean_message
 from src.handlers.state import PENDING_INPUT
 from src.keyboards.billing_menu import billing_menu_keyboard
 from src.keyboards.billing_nodes_menu import billing_nodes_menu_keyboard
 from src.keyboards.navigation import NavTarget, input_keyboard, nav_row
 from src.keyboards.providers_menu import providers_menu_keyboard
-from shared.api_client import ApiClientError, UnauthorizedError, api_client
+from src.utils.auth import BotAdmin, resolve_admin
+from shared.internal_api import ApiClientError, UnauthorizedError, internal_api_client
 from src.utils.formatters import build_billing_history, build_billing_nodes, build_infra_providers, format_datetime
 from shared.logger import logger
 
@@ -57,98 +58,79 @@ def _providers_select_keyboard(providers: list[dict], action: str) -> InlineKeyb
 
 async def _fetch_billing_text() -> str:
     """Получает текст со списком записей биллинга."""
-    try:
-        data = await api_client.get_infra_billing_history()
-        records = data.get("response", {}).get("records", [])
-        return build_billing_history(records, _)
-    except UnauthorizedError:
-        return _("errors.unauthorized")
-    except ApiClientError:
-        logger.exception("⚠️ Billing fetch failed")
-        return _("errors.generic")
+    data = await _fetch_data(internal_api_client.get_infra_billing_history, "⚠️ Billing fetch failed")
+    if isinstance(data, str):
+        return data
+    records = data.get("response", {}).get("records", [])
+    return build_billing_history(records, _)
 
 
 async def _fetch_providers_text() -> str:
     """Получает текст со списком провайдеров."""
-    try:
-        data = await api_client.get_infra_providers()
-        providers = data.get("response", {}).get("providers", [])
-        return build_infra_providers(providers, _)
-    except UnauthorizedError:
-        return _("errors.unauthorized")
-    except ApiClientError:
-        logger.exception("⚠️ Providers fetch failed")
-        return _("errors.generic")
+    data = await _fetch_data(internal_api_client.get_infra_providers, "⚠️ Providers fetch failed")
+    if isinstance(data, str):
+        return data
+    providers = data.get("response", {}).get("providers", [])
+    return build_infra_providers(providers, _)
 
 
 async def _fetch_billing_nodes_text() -> str:
     """Получает текст со списком биллинга нод."""
-    try:
-        data = await api_client.get_infra_billing_nodes()
-        return build_billing_nodes(data, _)
-    except UnauthorizedError:
-        return _("errors.unauthorized")
-    except ApiClientError:
-        logger.exception("⚠️ Billing nodes fetch failed")
-        return _("errors.generic")
+    data = await _fetch_data(internal_api_client.get_infra_billing_nodes, "⚠️ Billing nodes fetch failed")
+    if isinstance(data, str):
+        return data
+    return build_billing_nodes(data, _)
 
 
 async def _fetch_billing_stats_text() -> str:
     """Статистика по биллингу (история платежей)."""
-    try:
-        data = await api_client.get_infra_billing_history()
-        records = data.get("response", {}).get("records", [])
+    data = await _fetch_data(internal_api_client.get_infra_billing_history, "⚠️ Billing stats fetch failed")
+    if isinstance(data, str):
+        return data
+    records = data.get("response", {}).get("records", [])
 
-        if not records:
-            return f"*{_('billing.stats_title')}*\n\n{_('billing.empty')}"
+    if not records:
+        return f"*{_('billing.stats_title')}*\n\n{_('billing.empty')}"
 
-        # Вычисляем статистику
-        total_amount = sum(float(rec.get("amount", 0)) for rec in records)
-        total_records = len(records)
+    total_amount = sum(float(rec.get("amount", 0)) for rec in records)
+    total_records = len(records)
 
-        # Группируем по провайдерам
-        by_provider: dict[str, dict] = {}
-        for rec in records:
-            provider = rec.get("provider", {})
-            provider_name = provider.get("name", "Unknown")
-            amount = float(rec.get("amount", 0))
-            if provider_name not in by_provider:
-                by_provider[provider_name] = {"count": 0, "amount": 0.0}
-            by_provider[provider_name]["count"] += 1
-            by_provider[provider_name]["amount"] += amount
+    by_provider: dict[str, dict] = {}
+    for rec in records:
+        provider = rec.get("provider", {})
+        provider_name = provider.get("name", "Unknown")
+        amount = float(rec.get("amount", 0))
+        if provider_name not in by_provider:
+            by_provider[provider_name] = {"count": 0, "amount": 0.0}
+        by_provider[provider_name]["count"] += 1
+        by_provider[provider_name]["amount"] += amount
 
-        # Сортируем по сумме
-        sorted_providers = sorted(by_provider.items(), key=lambda x: x[1]["amount"], reverse=True)
+    sorted_providers = sorted(by_provider.items(), key=lambda x: x[1]["amount"], reverse=True)
 
-        lines = [
-            f"*{_('billing.stats_title')}*",
-            "",
-            f"*{_('billing.stats_summary')}*",
-            f"  {_('billing.stats_total_amount').format(amount=f'*{total_amount:.2f}*')}",
-            f"  {_('billing.stats_total_records').format(count=f'*{total_records}*')}",
-            "",
-            f"*{_('billing.stats_by_provider')}*",
-        ]
+    lines = [
+        f"*{_('billing.stats_title')}*",
+        "",
+        f"*{_('billing.stats_summary')}*",
+        f"  {_('billing.stats_total_amount').format(amount=f'*{total_amount:.2f}*')}",
+        f"  {_('billing.stats_total_records').format(count=f'*{total_records}*')}",
+        "",
+        f"*{_('billing.stats_by_provider')}*",
+    ]
 
-        for provider_name, stats in sorted_providers[:10]:
-            lines.append(f"  • *{provider_name}*: `{stats['count']}` записей, сумма `{stats['amount']:.2f}`")
+    for provider_name, stats in sorted_providers[:10]:
+        lines.append(_("billing.stats_by_provider_line").format(provider_name=provider_name, count=stats['count'], amount=stats['amount']))
 
-        if len(sorted_providers) > 10:
-            lines.append("")
-            lines.append(_("billing.more").format(count=len(sorted_providers) - 10))
+    if len(sorted_providers) > 10:
+        lines.append("")
+        lines.append(_("billing.more").format(count=len(sorted_providers) - 10))
 
-        return "\n".join(lines)
-    except UnauthorizedError:
-        return _("errors.unauthorized")
-    except ApiClientError:
-        logger.exception("⚠️ Billing stats fetch failed")
-        return _("errors.generic")
+    return "\n".join(lines)
 
 
 async def _fetch_billing_nodes_stats_text() -> str:
     """Статистика по биллингу нод."""
     try:
-        data = await api_client.get_infra_billing_nodes()
+        data = await internal_api_client.get_infra_billing_nodes()
         resp = data.get("response", data) or {}
         nodes = resp.get("billingNodes", []) or []
         stats = resp.get("stats", {}) or {}
@@ -195,7 +177,7 @@ async def _fetch_billing_nodes_stats_text() -> str:
         # Сортируем по количеству нод
         sorted_providers = sorted(by_provider.items(), key=lambda x: x[1]["count"], reverse=True)
         for provider_name, provider_stats in sorted_providers[:10]:
-            lines.append(f"  • *{provider_name}*: `{provider_stats['count']}` нод")
+            lines.append(_("billing_nodes.stats_by_provider_line").format(provider_name=provider_name, count=provider_stats['count']))
 
         if len(sorted_providers) > 10:
             lines.append("")
@@ -230,7 +212,7 @@ def _billing_nodes_keyboard(nodes: list[dict], action_prefix: str, provider_uuid
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-async def _handle_provider_input(message: Message, ctx: dict) -> None:
+async def _handle_provider_input(message: Message, ctx: dict, admin: BotAdmin | None = None) -> None:
     """Обрабатывает ввод для создания/обновления/удаления провайдера."""
     action = ctx.get("action")
     user_id = message.from_user.id
@@ -274,14 +256,17 @@ async def _handle_provider_input(message: Message, ctx: dict) -> None:
             elif stage == "login_url":
                 login_url = text if text else None
                 data["login_url"] = login_url
-                # Создаем провайдера
-                await api_client.create_infra_provider(
+                _admin = await resolve_admin(message.from_user.id)
+                if not _admin or not await require_permission(message, _admin, "billing", "create"):
+                    PENDING_INPUT.pop(user_id, None)
+                    return
+                await internal_api_client.create_infra_provider(
                     name=data["name"],
                     favicon_link=data.get("favicon") if data.get("favicon") != "—" else None,
                     login_url=login_url,
                 )
                 PENDING_INPUT.pop(user_id, None)
-                await _send_clean_message(message, _("provider.created"), reply_markup=providers_menu_keyboard())
+                await _send_clean_message(message, _("provider.created"), reply_markup=providers_menu_keyboard(admin=admin))
                 return
 
         elif action == "provider_update":
@@ -357,20 +342,28 @@ async def _handle_provider_input(message: Message, ctx: dict) -> None:
                 if new_login_url_val != current_login_url:
                     login_url = new_login_url_val if new_login_url_val else None
 
-                await api_client.update_infra_provider(provider_uuid, name=name, favicon_link=favicon, login_url=login_url)
+                _admin = await resolve_admin(message.from_user.id)
+                if not _admin or not await require_permission(message, _admin, "billing", "edit"):
+                    PENDING_INPUT.pop(user_id, None)
+                    return
+                await internal_api_client.update_infra_provider(provider_uuid, name=name, favicon_link=favicon, login_url=login_url)
                 PENDING_INPUT.pop(user_id, None)
-                await _send_clean_message(message, _("provider.updated"), reply_markup=providers_menu_keyboard())
+                await _send_clean_message(message, _("provider.updated"), reply_markup=providers_menu_keyboard(admin=admin))
                 return
         elif action == "provider_delete":
             parts = text.split()
             if len(parts) != 1:
                 raise ValueError
-            await api_client.delete_infra_provider(parts[0])
+            _admin = await resolve_admin(message.from_user.id)
+            if not _admin or not await require_permission(message, _admin, "billing", "delete"):
+                PENDING_INPUT.pop(user_id, None)
+                return
+            await internal_api_client.delete_infra_provider(parts[0])
             PENDING_INPUT.pop(user_id, None)
-            await _send_clean_message(message, _("provider.deleted"), reply_markup=providers_menu_keyboard())
+            await _send_clean_message(message, _("provider.deleted"), reply_markup=providers_menu_keyboard(admin=admin))
         else:
             PENDING_INPUT.pop(user_id, None)
-            await _send_clean_message(message, _("errors.generic"), reply_markup=providers_menu_keyboard())
+            await _send_clean_message(message, _("errors.generic"), reply_markup=providers_menu_keyboard(admin=admin))
             return
     except ValueError:
         if action == "provider_create" and stage:
@@ -432,14 +425,14 @@ async def _handle_provider_input(message: Message, ctx: dict) -> None:
             await _send_clean_message(message, _("errors.generic"), reply_markup=input_keyboard(action))
     except UnauthorizedError:
         PENDING_INPUT.pop(user_id, None)
-        await _send_clean_message(message, _("errors.unauthorized"), reply_markup=providers_menu_keyboard())
+        await _send_clean_message(message, _("errors.unauthorized"), reply_markup=providers_menu_keyboard(admin=admin))
     except ApiClientError:
         PENDING_INPUT.pop(user_id, None)
         logger.exception("❌ Provider action failed: %s", action)
-        await _send_clean_message(message, _("provider.invalid"), reply_markup=providers_menu_keyboard())
+        await _send_clean_message(message, _("provider.invalid"), reply_markup=providers_menu_keyboard(admin=admin))
 
 
-async def _handle_billing_history_input(message: Message, ctx: dict) -> None:
+async def _handle_billing_history_input(message: Message, ctx: dict, admin: BotAdmin | None = None) -> None:
     """Обрабатывает ввод для создания/удаления записей биллинга."""
     action = ctx.get("action")
     text = message.text.strip()
@@ -475,38 +468,49 @@ async def _handle_billing_history_input(message: Message, ctx: dict) -> None:
                         message, _("billing.prompt_billed_at").format(provider_name=provider_name, amount=amount), reply_markup=input_keyboard(action), parse_mode="HTML"
                     )
                     return
-                # Создаем запись биллинга
+                _admin = await resolve_admin(message.from_user.id)
+                if not _admin or not await require_permission(message, _admin, "billing", "create"):
+                    PENDING_INPUT.pop(user_id, None)
+                    return
                 provider_uuid = ctx.get("provider_uuid")
                 amount = data.get("amount")
-                await api_client.create_infra_billing_record(provider_uuid, amount, text)
+                await internal_api_client.create_infra_billing_record(provider_uuid, amount, text)
                 billing_text = await _fetch_billing_text()
-                PENDING_INPUT.pop(user_id, None)
-                await _send_clean_message(message, billing_text, reply_markup=billing_menu_keyboard(), parse_mode="HTML")
-                return
+            PENDING_INPUT.pop(user_id, None)
+            await _send_clean_message(message, billing_text, reply_markup=billing_menu_keyboard(admin=admin), parse_mode="HTML")
+            return
 
         elif action == "billing_history_create_amount":
             # Старый формат для обратной совместимости
             parts = text.split()
             if len(parts) < 2:
                 raise ValueError
+            _admin = await resolve_admin(message.from_user.id)
+            if not _admin or not await require_permission(message, _admin, "billing", "create"):
+                PENDING_INPUT.pop(user_id, None)
+                return
             provider_uuid = ctx.get("provider_uuid")
             amount = float(parts[0])
             billed_at = parts[1]
-            await api_client.create_infra_billing_record(provider_uuid, amount, billed_at)
+            await internal_api_client.create_infra_billing_record(provider_uuid, amount, billed_at)
             billing_text = await _fetch_billing_text()
             PENDING_INPUT.pop(user_id, None)
-            await _send_clean_message(message, billing_text, reply_markup=billing_menu_keyboard(), parse_mode="HTML")
+            await _send_clean_message(message, billing_text, reply_markup=billing_menu_keyboard(admin=admin), parse_mode="HTML")
         elif action == "billing_history_delete":
             parts = text.split()
             if len(parts) != 1:
                 raise ValueError
-            await api_client.delete_infra_billing_record(parts[0])
+            _admin = await resolve_admin(message.from_user.id)
+            if not _admin or not await require_permission(message, _admin, "billing", "delete"):
+                PENDING_INPUT.pop(user_id, None)
+                return
+            await internal_api_client.delete_infra_billing_record(parts[0])
             billing_text = await _fetch_billing_text()
             PENDING_INPUT.pop(user_id, None)
-            await _send_clean_message(message, billing_text, reply_markup=billing_menu_keyboard(), parse_mode="HTML")
+            await _send_clean_message(message, billing_text, reply_markup=billing_menu_keyboard(admin=admin), parse_mode="HTML")
         else:
             PENDING_INPUT.pop(user_id, None)
-            await _send_clean_message(message, _("errors.generic"), reply_markup=billing_menu_keyboard(), parse_mode="HTML")
+            await _send_clean_message(message, _("errors.generic"), reply_markup=billing_menu_keyboard(admin=admin), parse_mode="HTML")
             return
     except ValueError:
         if action == "billing_history_create" and stage:
@@ -521,20 +525,20 @@ async def _handle_billing_history_input(message: Message, ctx: dict) -> None:
                 )
         elif action == "billing_history_create_amount":
             PENDING_INPUT[user_id] = ctx
-            await _send_clean_message(message, _("billing.prompt_amount_date"), reply_markup=billing_menu_keyboard(), parse_mode="HTML")
+            await _send_clean_message(message, _("billing.prompt_amount_date"), reply_markup=billing_menu_keyboard(admin=admin), parse_mode="HTML")
         else:
             PENDING_INPUT[user_id] = ctx
-            await _send_clean_message(message, _("billing.prompt_delete"), reply_markup=billing_menu_keyboard(), parse_mode="HTML")
+            await _send_clean_message(message, _("billing.prompt_delete"), reply_markup=billing_menu_keyboard(admin=admin), parse_mode="HTML")
     except UnauthorizedError:
         PENDING_INPUT.pop(user_id, None)
-        await _send_clean_message(message, _("errors.unauthorized"), reply_markup=billing_menu_keyboard(), parse_mode="HTML")
+        await _send_clean_message(message, _("errors.unauthorized"), reply_markup=billing_menu_keyboard(admin=admin), parse_mode="HTML")
     except ApiClientError:
         PENDING_INPUT.pop(user_id, None)
         logger.exception("❌ Billing history action failed: %s", action)
-        await _send_clean_message(message, _("billing.invalid"), reply_markup=billing_menu_keyboard(), parse_mode="HTML")
+        await _send_clean_message(message, _("billing.invalid"), reply_markup=billing_menu_keyboard(admin=admin), parse_mode="HTML")
 
 
-async def _handle_billing_nodes_input(message: Message, ctx: dict) -> None:
+async def _handle_billing_nodes_input(message: Message, ctx: dict, admin: BotAdmin | None = None) -> None:
     """Обрабатывает ввод для создания/обновления биллинга нод."""
     action = ctx.get("action")
     text = (message.text or "").strip()
@@ -542,13 +546,16 @@ async def _handle_billing_nodes_input(message: Message, ctx: dict) -> None:
 
     try:
         if action == "billing_nodes_create_confirm":
-            # Провайдер и нода уже выбраны, дата опциональна
+            _admin = await resolve_admin(message.from_user.id)
+            if not _admin or not await require_permission(message, _admin, "billing", "create"):
+                PENDING_INPUT.pop(user_id, None)
+                return
             provider_uuid = ctx.get("provider_uuid")
             node_uuid = ctx.get("node_uuid")
             next_billing_at = text if text else None
-            await api_client.create_infra_billing_node(provider_uuid, node_uuid, next_billing_at)
+            await internal_api_client.create_infra_billing_node(provider_uuid, node_uuid, next_billing_at)
             billing_text = await _fetch_billing_nodes_text()
-            await _send_clean_message(message, billing_text, reply_markup=billing_nodes_menu_keyboard(), parse_mode="HTML")
+            await _send_clean_message(message, billing_text, reply_markup=billing_nodes_menu_keyboard(admin=admin), parse_mode="HTML")
             PENDING_INPUT.pop(user_id, None)
         elif action == "billing_nodes_update_date":
             # UUID записи биллинга уже в контексте
@@ -556,15 +563,19 @@ async def _handle_billing_nodes_input(message: Message, ctx: dict) -> None:
                 raise ValueError
             record_uuid = ctx.get("record_uuid")
             if not record_uuid:
-                await _send_clean_message(message, _("billing_nodes.not_found"), reply_markup=billing_nodes_menu_keyboard(), parse_mode="HTML")
+                await _send_clean_message(message, _("billing_nodes.not_found"), reply_markup=billing_nodes_menu_keyboard(admin=admin), parse_mode="HTML")
                 PENDING_INPUT.pop(user_id, None)
                 return
-            await api_client.update_infra_billing_nodes([record_uuid], text)
+            _admin = await resolve_admin(message.from_user.id)
+            if not _admin or not await require_permission(message, _admin, "billing", "edit"):
+                PENDING_INPUT.pop(user_id, None)
+                return
+            await internal_api_client.update_infra_billing_nodes([record_uuid], text)
             billing_text = await _fetch_billing_nodes_text()
-            await _send_clean_message(message, billing_text, reply_markup=billing_nodes_menu_keyboard(), parse_mode="HTML")
+            await _send_clean_message(message, billing_text, reply_markup=billing_nodes_menu_keyboard(admin=admin), parse_mode="HTML")
             PENDING_INPUT.pop(user_id, None)
         else:
-            await _send_clean_message(message, _("errors.generic"), reply_markup=billing_nodes_menu_keyboard(), parse_mode="HTML")
+            await _send_clean_message(message, _("errors.generic"), reply_markup=billing_nodes_menu_keyboard(admin=admin), parse_mode="HTML")
             PENDING_INPUT.pop(user_id, None)
             return
     except ValueError:
@@ -575,26 +586,26 @@ async def _handle_billing_nodes_input(message: Message, ctx: dict) -> None:
             PENDING_INPUT[user_id] = ctx
             await _send_clean_message(message, _("billing_nodes.prompt_date_optional"), reply_markup=input_keyboard(action), parse_mode="HTML")
     except UnauthorizedError:
-        await _send_clean_message(message, _("errors.unauthorized"), reply_markup=billing_nodes_menu_keyboard(), parse_mode="HTML")
+        await _send_clean_message(message, _("errors.unauthorized"), reply_markup=billing_nodes_menu_keyboard(admin=admin), parse_mode="HTML")
         PENDING_INPUT.pop(user_id, None)
     except ApiClientError:
         logger.exception("❌ Billing nodes action failed: %s", action)
-        await _send_clean_message(message, _("billing_nodes.invalid"), reply_markup=billing_nodes_menu_keyboard(), parse_mode="HTML")
+        await _send_clean_message(message, _("billing_nodes.invalid"), reply_markup=billing_nodes_menu_keyboard(admin=admin), parse_mode="HTML")
         PENDING_INPUT.pop(user_id, None)
 
 
 @router.callback_query(F.data == "menu:providers")
-async def cb_providers(callback: CallbackQuery) -> None:
+async def cb_providers(callback: CallbackQuery, admin: BotAdmin) -> None:
     """Обработчик кнопки 'Провайдеры' в меню."""
     if await _not_admin(callback):
         return
     await callback.answer()
     text = await _fetch_providers_text()
-    await _edit_text_safe(callback.message, text, reply_markup=providers_menu_keyboard(), parse_mode="HTML")
+    await _edit_text_safe(callback.message, text, reply_markup=providers_menu_keyboard(admin=admin), parse_mode="HTML")
 
 
 @router.callback_query(F.data.startswith("providers:"))
-async def cb_providers_actions(callback: CallbackQuery) -> None:
+async def cb_providers_actions(callback: CallbackQuery, admin: BotAdmin) -> None:
     """Обработчик действий с провайдерами."""
     if await _not_admin(callback):
         return
@@ -608,24 +619,24 @@ async def cb_providers_actions(callback: CallbackQuery) -> None:
     elif action == "update":
         # Показываем список провайдеров для выбора
         try:
-            providers_data = await api_client.get_infra_providers()
+            providers_data = await internal_api_client.get_infra_providers()
             providers = providers_data.get("response", {}).get("providers", [])
             if not providers:
-                await callback.message.edit_text(_("provider.empty"), reply_markup=providers_menu_keyboard(), parse_mode="HTML")
+                await callback.message.edit_text(_("provider.empty"), reply_markup=providers_menu_keyboard(admin=admin), parse_mode="HTML")
                 return
             keyboard = _providers_select_keyboard(providers, "update")
             await callback.message.edit_text(_("provider.select_update"), reply_markup=keyboard, parse_mode="HTML")
         except Exception:
-            await callback.message.edit_text(_("errors.generic"), reply_markup=providers_menu_keyboard(), parse_mode="HTML")
+            await callback.message.edit_text(_("errors.generic"), reply_markup=providers_menu_keyboard(admin=admin), parse_mode="HTML")
     elif action == "update_select":
         # Начинаем редактирование выбранного провайдера
         if len(parts) < 3:
-            await callback.message.edit_text(_("errors.generic"), reply_markup=providers_menu_keyboard(), parse_mode="HTML")
+            await callback.message.edit_text(_("errors.generic"), reply_markup=providers_menu_keyboard(admin=admin), parse_mode="HTML")
             return
         provider_uuid = parts[2]
         try:
             # Получаем данные провайдера
-            provider_data = await api_client.get_infra_provider(provider_uuid)
+            provider_data = await internal_api_client.get_infra_provider(provider_uuid)
             provider_info = provider_data.get("response", {})
             current_name = provider_info.get("name", "")
             current_favicon = provider_info.get("faviconLink") or ""
@@ -648,59 +659,59 @@ async def cb_providers_actions(callback: CallbackQuery) -> None:
                 parse_mode="HTML",
             )
         except Exception:
-            await callback.message.edit_text(_("errors.generic"), reply_markup=providers_menu_keyboard(), parse_mode="HTML")
+            await callback.message.edit_text(_("errors.generic"), reply_markup=providers_menu_keyboard(admin=admin), parse_mode="HTML")
     elif action == "delete":
         PENDING_INPUT[callback.from_user.id] = {"action": "provider_delete"}
-        await callback.message.edit_text(_("provider.prompt_delete"), reply_markup=providers_menu_keyboard())
+        await callback.message.edit_text(_("provider.prompt_delete"), reply_markup=providers_menu_keyboard(admin=admin))
     else:
-        await callback.message.edit_text(_("errors.generic"), reply_markup=providers_menu_keyboard())
+        await callback.message.edit_text(_("errors.generic"), reply_markup=providers_menu_keyboard(admin=admin))
 
 
 @router.callback_query(F.data == "menu:billing")
-async def cb_billing(callback: CallbackQuery) -> None:
+async def cb_billing(callback: CallbackQuery, admin: BotAdmin) -> None:
     """Обработчик кнопки 'Биллинг' в меню."""
     if await _not_admin(callback):
         return
     await callback.answer()
     text = await _fetch_billing_text()
-    await _edit_text_safe(callback.message, text, reply_markup=billing_menu_keyboard(), parse_mode="HTML")
+    await _edit_text_safe(callback.message, text, reply_markup=billing_menu_keyboard(admin=admin), parse_mode="HTML")
 
 
 @router.callback_query(F.data.startswith("billing:"))
-async def cb_billing_actions(callback: CallbackQuery) -> None:
+async def cb_billing_actions(callback: CallbackQuery, admin: BotAdmin) -> None:
     """Обработчик действий с биллингом."""
     if await _not_admin(callback):
         return
     await callback.answer()
     parts = callback.data.split(":")
     if len(parts) < 2:
-        await _edit_text_safe(callback.message, _("errors.generic"), reply_markup=billing_menu_keyboard(), parse_mode="HTML")
+        await _edit_text_safe(callback.message, _("errors.generic"), reply_markup=billing_menu_keyboard(admin=admin), parse_mode="HTML")
         return
 
     action = parts[1]  # Вторая часть после "billing:"
 
     if action == "stats":
         text = await _fetch_billing_stats_text()
-        await _edit_text_safe(callback.message, text, reply_markup=billing_menu_keyboard(), parse_mode="HTML")
+        await _edit_text_safe(callback.message, text, reply_markup=billing_menu_keyboard(admin=admin), parse_mode="HTML")
     elif action == "create":
         # Показываем список провайдеров для выбора
         try:
-            providers_data = await api_client.get_infra_providers()
+            providers_data = await internal_api_client.get_infra_providers()
             providers = providers_data.get("response", {}).get("providers", [])
             if not providers:
-                await _edit_text_safe(callback.message, _("billing.no_providers"), reply_markup=billing_menu_keyboard(), parse_mode="HTML")
+                await _edit_text_safe(callback.message, _("billing.no_providers"), reply_markup=billing_menu_keyboard(admin=admin), parse_mode="HTML")
                 return
             keyboard = _billing_providers_keyboard(providers, "billing_history_create")
             await _edit_text_safe(callback.message, _("billing.select_provider"), reply_markup=keyboard, parse_mode="HTML")
         except Exception:
-            await _edit_text_safe(callback.message, _("errors.generic"), reply_markup=billing_menu_keyboard(), parse_mode="HTML")
+            await _edit_text_safe(callback.message, _("errors.generic"), reply_markup=billing_menu_keyboard(admin=admin), parse_mode="HTML")
     elif action == "delete":
         # Показываем список записей для удаления
         try:
-            billing_data = await api_client.get_infra_billing_history()
+            billing_data = await internal_api_client.get_infra_billing_history()
             records = billing_data.get("response", {}).get("records", [])
             if not records:
-                await _edit_text_safe(callback.message, _("billing.empty"), reply_markup=billing_menu_keyboard(), parse_mode="HTML")
+                await _edit_text_safe(callback.message, _("billing.empty"), reply_markup=billing_menu_keyboard(admin=admin), parse_mode="HTML")
                 return
             rows: list[list[InlineKeyboardButton]] = []
             for rec in records[:10]:
@@ -714,28 +725,29 @@ async def cb_billing_actions(callback: CallbackQuery) -> None:
             keyboard = InlineKeyboardMarkup(inline_keyboard=rows)
             await _edit_text_safe(callback.message, _("billing.select_delete"), reply_markup=keyboard, parse_mode="HTML")
         except Exception:
-            await _edit_text_safe(callback.message, _("errors.generic"), reply_markup=billing_menu_keyboard(), parse_mode="HTML")
+            await _edit_text_safe(callback.message, _("errors.generic"), reply_markup=billing_menu_keyboard(admin=admin), parse_mode="HTML")
     elif action == "delete_confirm":
-        # Подтверждение удаления записи биллинга
+        if not await require_permission(callback, admin, "billing", "delete"):
+            return
         if len(parts) < 3:
-            await _edit_text_safe(callback.message, _("errors.generic"), reply_markup=billing_menu_keyboard(), parse_mode="HTML")
+            await _edit_text_safe(callback.message, _("errors.generic"), reply_markup=billing_menu_keyboard(admin=admin), parse_mode="HTML")
             return
         record_uuid = parts[2]
         try:
-            await api_client.delete_infra_billing_record(record_uuid)
+            await internal_api_client.delete_infra_billing_record(record_uuid)
             text = await _fetch_billing_text()
-            await _edit_text_safe(callback.message, text, reply_markup=billing_menu_keyboard(), parse_mode="HTML")
+            await _edit_text_safe(callback.message, text, reply_markup=billing_menu_keyboard(admin=admin), parse_mode="HTML")
         except UnauthorizedError:
-            await _edit_text_safe(callback.message, _("errors.unauthorized"), reply_markup=billing_menu_keyboard(), parse_mode="HTML")
+            await _edit_text_safe(callback.message, _("errors.unauthorized"), reply_markup=billing_menu_keyboard(admin=admin), parse_mode="HTML")
         except ApiClientError:
             logger.exception("❌ Billing record delete failed")
-            await _edit_text_safe(callback.message, _("billing.invalid"), reply_markup=billing_menu_keyboard(), parse_mode="HTML")
+            await _edit_text_safe(callback.message, _("billing.invalid"), reply_markup=billing_menu_keyboard(admin=admin), parse_mode="HTML")
     elif action in ("provider", "p"):
         # Обработка выбора провайдера. Короткий префикс `p` пришёл с укороченной
         # клавиатуры (см. _billing_providers_keyboard); полный `provider` остался
         # ради совместимости со старыми pending-кнопками после редеплоя.
         if len(parts) < 4:
-            await _edit_text_safe(callback.message, _("errors.generic"), reply_markup=billing_menu_keyboard(), parse_mode="HTML")
+            await _edit_text_safe(callback.message, _("errors.generic"), reply_markup=billing_menu_keyboard(admin=admin), parse_mode="HTML")
             return
         provider_action = _BILLING_ACTIONS_LONG.get(parts[2], parts[2])
         provider_uuid = parts[3]
@@ -743,7 +755,7 @@ async def cb_billing_actions(callback: CallbackQuery) -> None:
         if provider_action == "billing_history_create":
             # Для создания записи биллинга запрашиваем сумму, затем дату
             try:
-                provider_data = await api_client.get_infra_provider(provider_uuid)
+                provider_data = await internal_api_client.get_infra_provider(provider_uuid)
                 provider_name = provider_data.get("response", {}).get("name", "—")
             except Exception:
                 provider_name = "—"
@@ -762,10 +774,10 @@ async def cb_billing_actions(callback: CallbackQuery) -> None:
             # provider_uuid сохраняем в FSM state — раньше он ехал в
             # callback_data вторым полем, но это вылазило за 64 байта.
             try:
-                nodes_data = await api_client.get_nodes()
+                nodes_data = await internal_api_client.get_nodes()
                 all_nodes = nodes_data.get("response", {}).get("nodes", [])
                 if not all_nodes:
-                    await _edit_text_safe(callback.message, _("billing_nodes.no_nodes"), reply_markup=billing_nodes_menu_keyboard(), parse_mode="HTML")
+                    await _edit_text_safe(callback.message, _("billing_nodes.no_nodes"), reply_markup=billing_nodes_menu_keyboard(admin=admin), parse_mode="HTML")
                     return
                 PENDING_INPUT[callback.from_user.id] = {
                     "action": "billing_nodes_create_pick_node",
@@ -774,25 +786,25 @@ async def cb_billing_actions(callback: CallbackQuery) -> None:
                 keyboard = _billing_nodes_keyboard(all_nodes, "billing_nodes_create")
                 await _edit_text_safe(callback.message, _("billing_nodes.select_node"), reply_markup=keyboard, parse_mode="HTML")
             except Exception:
-                await _edit_text_safe(callback.message, _("errors.generic"), reply_markup=billing_nodes_menu_keyboard(), parse_mode="HTML")
+                await _edit_text_safe(callback.message, _("errors.generic"), reply_markup=billing_nodes_menu_keyboard(admin=admin), parse_mode="HTML")
         else:
-            await _edit_text_safe(callback.message, _("errors.generic"), reply_markup=billing_menu_keyboard(), parse_mode="HTML")
+            await _edit_text_safe(callback.message, _("errors.generic"), reply_markup=billing_menu_keyboard(admin=admin), parse_mode="HTML")
     else:
-        await _edit_text_safe(callback.message, _("errors.generic"), reply_markup=billing_menu_keyboard(), parse_mode="HTML")
+        await _edit_text_safe(callback.message, _("errors.generic"), reply_markup=billing_menu_keyboard(admin=admin), parse_mode="HTML")
 
 
 @router.callback_query(F.data == "menu:billing_nodes")
-async def cb_billing_nodes(callback: CallbackQuery) -> None:
+async def cb_billing_nodes(callback: CallbackQuery, admin: BotAdmin) -> None:
     """Обработчик кнопки 'Биллинг нод' в меню."""
     if await _not_admin(callback):
         return
     await callback.answer()
     text = await _fetch_billing_nodes_text()
-    await _edit_text_safe(callback.message, text, reply_markup=billing_nodes_menu_keyboard(), parse_mode="HTML")
+    await _edit_text_safe(callback.message, text, reply_markup=billing_nodes_menu_keyboard(admin=admin), parse_mode="HTML")
 
 
 @router.callback_query(F.data.startswith("billing_nodes:"))
-async def cb_billing_nodes_actions(callback: CallbackQuery) -> None:
+async def cb_billing_nodes_actions(callback: CallbackQuery, admin: BotAdmin) -> None:
     """Обработчик действий с биллингом нод."""
     if await _not_admin(callback):
         return
@@ -803,21 +815,21 @@ async def cb_billing_nodes_actions(callback: CallbackQuery) -> None:
     if action == "create":
         # Сначала выбираем провайдера
         try:
-            providers_data = await api_client.get_infra_providers()
+            providers_data = await internal_api_client.get_infra_providers()
             providers = providers_data.get("response", {}).get("providers", [])
             if not providers:
-                await _edit_text_safe(callback.message, _("billing_nodes.no_providers"), reply_markup=billing_nodes_menu_keyboard(), parse_mode="HTML")
+                await _edit_text_safe(callback.message, _("billing_nodes.no_providers"), reply_markup=billing_nodes_menu_keyboard(admin=admin), parse_mode="HTML")
                 return
             keyboard = _billing_providers_keyboard(providers, "billing_nodes_create", NavTarget.BILLING_NODES_MENU)
             await _edit_text_safe(callback.message, _("billing_nodes.select_provider"), reply_markup=keyboard, parse_mode="HTML")
         except Exception:
-            await _edit_text_safe(callback.message, _("errors.generic"), reply_markup=billing_nodes_menu_keyboard(), parse_mode="HTML")
+            await _edit_text_safe(callback.message, _("errors.generic"), reply_markup=billing_nodes_menu_keyboard(admin=admin), parse_mode="HTML")
     elif action in ("node", "n"):
         # Обработка выбора ноды после выбора провайдера. Короткий `n`
         # пришёл с укороченной клавиатуры (issue #248); полный `node`
         # сохраняем ради совместимости со старыми pending-кнопками.
         if len(parts) < 4:
-            await _edit_text_safe(callback.message, _("errors.generic"), reply_markup=billing_nodes_menu_keyboard(), parse_mode="HTML")
+            await _edit_text_safe(callback.message, _("errors.generic"), reply_markup=billing_nodes_menu_keyboard(admin=admin), parse_mode="HTML")
             return
         node_action = _BILLING_ACTIONS_LONG.get(parts[2], parts[2])
         node_uuid = parts[3]
@@ -839,7 +851,7 @@ async def cb_billing_nodes_actions(callback: CallbackQuery) -> None:
         elif node_action == "billing_nodes_update":
             # Находим UUID записи биллинга для этой ноды
             try:
-                nodes_data = await api_client.get_infra_billing_nodes()
+                nodes_data = await internal_api_client.get_infra_billing_nodes()
                 billing_nodes = nodes_data.get("response", {}).get("billingNodes", [])
                 record_uuid = None
                 for item in billing_nodes:
@@ -847,7 +859,7 @@ async def cb_billing_nodes_actions(callback: CallbackQuery) -> None:
                         record_uuid = item.get("uuid")
                         break
                 if not record_uuid:
-                    await _edit_text_safe(callback.message, _("billing_nodes.not_found"), reply_markup=billing_nodes_menu_keyboard(), parse_mode="HTML")
+                    await _edit_text_safe(callback.message, _("billing_nodes.not_found"), reply_markup=billing_nodes_menu_keyboard(admin=admin), parse_mode="HTML")
                     return
                 # Запрашиваем новую дату оплаты
                 PENDING_INPUT[callback.from_user.id] = {
@@ -858,49 +870,50 @@ async def cb_billing_nodes_actions(callback: CallbackQuery) -> None:
                     callback.message, _("billing_nodes.prompt_new_date"), reply_markup=input_keyboard("billing_nodes_update_date"), parse_mode="HTML"
                 )
             except Exception:
-                await _edit_text_safe(callback.message, _("errors.generic"), reply_markup=billing_nodes_menu_keyboard(), parse_mode="HTML")
+                await _edit_text_safe(callback.message, _("errors.generic"), reply_markup=billing_nodes_menu_keyboard(admin=admin), parse_mode="HTML")
         else:
-            await _edit_text_safe(callback.message, _("errors.generic"), reply_markup=billing_nodes_menu_keyboard(), parse_mode="HTML")
+            await _edit_text_safe(callback.message, _("errors.generic"), reply_markup=billing_nodes_menu_keyboard(admin=admin), parse_mode="HTML")
     elif action == "delete_confirm":
-        # Подтверждение удаления записи биллинга ноды
-        if len(parts) < 3:
-            await _edit_text_safe(callback.message, _("errors.generic"), reply_markup=billing_nodes_menu_keyboard(), parse_mode="HTML")
+        if not await require_permission(callback, admin, "billing", "delete"):
             return
-        record_uuid = parts[2]  # billing_nodes:delete_confirm:uuid
+        if len(parts) < 3:
+            await _edit_text_safe(callback.message, _("errors.generic"), reply_markup=billing_nodes_menu_keyboard(admin=admin), parse_mode="HTML")
+            return
+        record_uuid = parts[2]
         try:
-            await api_client.delete_infra_billing_node(record_uuid)
+            await internal_api_client.delete_infra_billing_node(record_uuid)
             text = await _fetch_billing_nodes_text()
-            await _edit_text_safe(callback.message, text, reply_markup=billing_nodes_menu_keyboard(), parse_mode="HTML")
+            await _edit_text_safe(callback.message, text, reply_markup=billing_nodes_menu_keyboard(admin=admin), parse_mode="HTML")
         except UnauthorizedError:
-            await _edit_text_safe(callback.message, _("errors.unauthorized"), reply_markup=billing_nodes_menu_keyboard(), parse_mode="HTML")
+            await _edit_text_safe(callback.message, _("errors.unauthorized"), reply_markup=billing_nodes_menu_keyboard(admin=admin), parse_mode="HTML")
         except ApiClientError:
             logger.exception("❌ Billing node delete failed")
-            await _edit_text_safe(callback.message, _("billing_nodes.invalid"), reply_markup=billing_nodes_menu_keyboard(), parse_mode="HTML")
+            await _edit_text_safe(callback.message, _("billing_nodes.invalid"), reply_markup=billing_nodes_menu_keyboard(admin=admin), parse_mode="HTML")
     elif action == "update":
         # Показываем список нод с биллингом для обновления
         try:
-            nodes_data = await api_client.get_infra_billing_nodes()
+            nodes_data = await internal_api_client.get_infra_billing_nodes()
             billing_nodes = nodes_data.get("response", {}).get("billingNodes", [])
             if not billing_nodes:
-                await _edit_text_safe(callback.message, _("billing_nodes.empty"), reply_markup=billing_nodes_menu_keyboard(), parse_mode="HTML")
+                await _edit_text_safe(callback.message, _("billing_nodes.empty"), reply_markup=billing_nodes_menu_keyboard(admin=admin), parse_mode="HTML")
                 return
             # Создаем список нод для выбора
             nodes_list = [item.get("node", {}) for item in billing_nodes if item.get("node")]
             keyboard = _billing_nodes_keyboard(nodes_list, "billing_nodes_update")
             await _edit_text_safe(callback.message, _("billing_nodes.select_nodes_update"), reply_markup=keyboard, parse_mode="HTML")
         except Exception:
-            await _edit_text_safe(callback.message, _("errors.generic"), reply_markup=billing_nodes_menu_keyboard(), parse_mode="HTML")
+            await _edit_text_safe(callback.message, _("errors.generic"), reply_markup=billing_nodes_menu_keyboard(admin=admin), parse_mode="HTML")
     elif action == "stats":
         # Показываем статистику биллинга нод
         text = await _fetch_billing_nodes_stats_text()
-        await _edit_text_safe(callback.message, text, reply_markup=billing_nodes_menu_keyboard(), parse_mode="HTML")
+        await _edit_text_safe(callback.message, text, reply_markup=billing_nodes_menu_keyboard(admin=admin), parse_mode="HTML")
     elif action == "delete":
         # Показываем список нод с биллингом для удаления
         try:
-            nodes_data = await api_client.get_infra_billing_nodes()
+            nodes_data = await internal_api_client.get_infra_billing_nodes()
             billing_nodes = nodes_data.get("response", {}).get("billingNodes", [])
             if not billing_nodes:
-                await _edit_text_safe(callback.message, _("billing_nodes.empty"), reply_markup=billing_nodes_menu_keyboard(), parse_mode="HTML")
+                await _edit_text_safe(callback.message, _("billing_nodes.empty"), reply_markup=billing_nodes_menu_keyboard(admin=admin), parse_mode="HTML")
                 return
             rows: list[list[InlineKeyboardButton]] = []
             for item in billing_nodes[:10]:
@@ -916,5 +929,5 @@ async def cb_billing_nodes_actions(callback: CallbackQuery) -> None:
             keyboard = InlineKeyboardMarkup(inline_keyboard=rows)
             await _edit_text_safe(callback.message, _("billing_nodes.select_delete"), reply_markup=keyboard, parse_mode="HTML")
         except Exception:
-            await _edit_text_safe(callback.message, _("errors.generic"), reply_markup=billing_nodes_menu_keyboard(), parse_mode="HTML")
+            await _edit_text_safe(callback.message, _("errors.generic"), reply_markup=billing_nodes_menu_keyboard(admin=admin), parse_mode="HTML")
 

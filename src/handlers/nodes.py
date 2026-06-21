@@ -6,15 +6,18 @@ from aiogram.exceptions import TelegramBadRequest
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 from aiogram.utils.i18n import gettext as _
 
-from src.handlers.common import _cleanup_message, _edit_text_safe, _get_target_user_id, _not_admin, _send_clean_message
+from src.utils.auth import BotAdmin
+
+from src.handlers.common import _cleanup_message, _edit_text_safe, _get_target_user_id, _not_admin, require_permission, _send_clean_message
 from src.handlers.state import NODES_FILTER_BY_USER, NODES_PAGE_BY_USER, NODES_PAGE_SIZE, PENDING_INPUT
 from src.keyboards.main_menu import main_menu_keyboard, nodes_menu_keyboard
 from src.keyboards.navigation import NavTarget, nav_keyboard, nav_row
 from src.keyboards.node_actions import node_actions_keyboard
 from src.keyboards.node_edit import node_edit_keyboard
 from src.keyboards.navigation import input_keyboard
-from shared.api_client import ApiClientError, NotFoundError, UnauthorizedError, api_client
+from shared.internal_api import ApiClientError, NotFoundError, UnauthorizedError, internal_api_client
 from shared.database import db_service
+from shared.rbac import check_quota, filter_by_scope
 from src.utils.formatters import _esc, build_node_summary, build_nodes_realtime_usage, build_nodes_usage_range, format_bytes
 from shared.logger import logger
 
@@ -23,7 +26,7 @@ from shared.logger import logger
 router = Router(name="nodes")
 
 
-async def _fetch_nodes_text() -> str:
+async def _fetch_nodes_text(admin: BotAdmin | None = None) -> str:
     """Получает текст со списком нод (API для realtime, БД как fallback)."""
     try:
         nodes = []
@@ -31,7 +34,7 @@ async def _fetch_nodes_text() -> str:
         
         # Пробуем получить из API (realtime данные)
         try:
-            data = await api_client.get_nodes()
+            data = await internal_api_client.get_nodes()
             nodes = data.get("response", [])
         except ApiClientError:
             # Fallback на БД
@@ -44,6 +47,10 @@ async def _fetch_nodes_text() -> str:
             return _("node.list_empty")
         
         sorted_nodes = sorted(nodes, key=lambda n: n.get("viewPosition", 0))
+        if admin is not None:
+            scope = await admin.get_scope("node", "view")
+            if scope is not None:
+                sorted_nodes = filter_by_scope(sorted_nodes, scope, "uuid")
         total = len(nodes)
         lines = [_("node.list_title").format(total=total, page=1, pages=1)]
         
@@ -82,7 +89,7 @@ def _get_nodes_page(user_id: int | None) -> int:
     return max(NODES_PAGE_BY_USER.get(user_id, 0), 0)
 
 
-async def _fetch_nodes_with_keyboard(user_id: int | None = None, page: int = 0) -> tuple[str, InlineKeyboardMarkup]:
+async def _fetch_nodes_with_keyboard(user_id: int | None = None, page: int = 0, admin: BotAdmin | None = None) -> tuple[str, InlineKeyboardMarkup]:
     """Получает текст списка нод со статистикой и клавиатуру с кнопками для каждой ноды (API для realtime, БД как fallback)."""
     try:
         nodes = []
@@ -90,7 +97,7 @@ async def _fetch_nodes_with_keyboard(user_id: int | None = None, page: int = 0) 
         
         # Пробуем получить из API (realtime данные)
         try:
-            data = await api_client.get_nodes()
+            data = await internal_api_client.get_nodes()
             nodes = data.get("response", [])
         except ApiClientError:
             # Fallback на БД
@@ -103,6 +110,11 @@ async def _fetch_nodes_with_keyboard(user_id: int | None = None, page: int = 0) 
             return _("node.list_empty"), InlineKeyboardMarkup(inline_keyboard=[nav_row(NavTarget.NODES_MENU)])
 
         sorted_nodes = sorted(nodes, key=lambda n: n.get("viewPosition", 0))
+
+        if admin is not None:
+            scope = await admin.get_scope("node", "view")
+            if scope is not None:
+                sorted_nodes = filter_by_scope(sorted_nodes, scope, "uuid")
 
         # Получаем текущий фильтр
         current_filter = NODES_FILTER_BY_USER.get(user_id) if user_id else None
@@ -246,7 +258,7 @@ async def _fetch_nodes_realtime_text() -> str:
 async def _fetch_nodes_range_text(start: str, end: str) -> str:
     """Получает текст со статистикой нод за период."""
     try:
-        data = await api_client.get_nodes_usage_range(start, end)
+        data = await internal_api_client.get_nodes_usage_range(start, end)
         usages = data.get("response", [])
         return build_nodes_usage_range(usages, _)
     except UnauthorizedError:
@@ -256,7 +268,7 @@ async def _fetch_nodes_range_text(start: str, end: str) -> str:
         return _("errors.generic")
 
 
-async def _apply_node_update(target: Message | CallbackQuery, node_uuid: str, payload: dict, back_to: str) -> None:
+async def _apply_node_update(target: Message | CallbackQuery, node_uuid: str, payload: dict, back_to: str, admin: BotAdmin | None = None) -> None:
     """Применяет обновление ноды."""
     try:
         # Преобразуем payload для API
@@ -285,12 +297,12 @@ async def _apply_node_update(target: Message | CallbackQuery, node_uuid: str, pa
         if "tags" in payload:
             api_payload["tags"] = payload["tags"]
 
-        await api_client.update_node(node_uuid, **api_payload)
-        node = await api_client.get_node(node_uuid)
+        await internal_api_client.update_node(node_uuid, **api_payload)
+        node = await internal_api_client.get_node(node_uuid)
         info = node.get("response", node)
         is_disabled = bool(info.get("isDisabled"))
         text = _format_node_edit_snapshot(info, _)
-        markup = node_edit_keyboard(node_uuid, is_disabled=is_disabled, back_to=back_to)
+        markup = node_edit_keyboard(node_uuid, is_disabled=is_disabled, back_to=back_to, admin=admin)
         if isinstance(target, CallbackQuery):
             await target.message.edit_text(text, reply_markup=markup, parse_mode="HTML")
         else:
@@ -386,7 +398,7 @@ async def _handle_node_create_input(message: Message, ctx: dict) -> None:
 
             # Показываем список профилей конфигурации
             try:
-                profiles_data = await api_client.get_config_profiles()
+                profiles_data = await internal_api_client.get_config_profiles()
                 profiles = profiles_data.get("response", {}).get("configProfiles", [])
                 if not profiles:
                     await _send_clean_message(message, _("node.no_profiles"), reply_markup=nodes_menu_keyboard(), parse_mode="HTML")
@@ -456,7 +468,7 @@ async def _handle_node_create_input(message: Message, ctx: dict) -> None:
 
             # Показываем список провайдеров
             try:
-                providers_data = await api_client.get_infra_providers()
+                providers_data = await internal_api_client.get_infra_providers()
                 providers = providers_data.get("response", {}).get("providers", [])
                 keyboard = _node_providers_keyboard(providers) if providers else input_keyboard(action, allow_skip=True, skip_callback="nodes:select_provider:none")
                 country_display = data.get("country_code", "—") or "—"
@@ -681,9 +693,16 @@ async def _handle_node_create_input(message: Message, ctx: dict) -> None:
             else:
                 data["tags"] = None
 
-            # Создаем ноду
+            admin_account_id = ctx.get("admin_account_id")
+            if admin_account_id:
+                allowed, msg = await check_quota(admin_account_id, "nodes")
+                if not allowed:
+                    await _send_clean_message(message, msg, reply_markup=nodes_menu_keyboard())
+                    PENDING_INPUT.pop(user_id, None)
+                    return
+
             try:
-                await api_client.create_node(
+                await internal_api_client.create_node(
                     name=data["name"],
                     address=data["address"],
                     config_profile_uuid=data["config_profile_uuid"],
@@ -716,7 +735,7 @@ async def _handle_node_create_input(message: Message, ctx: dict) -> None:
         await _send_clean_message(message, _("errors.generic"), reply_markup=nodes_menu_keyboard())
 
 
-async def _handle_node_edit_input(message: Message, ctx: dict) -> None:
+async def _handle_node_edit_input(message: Message, ctx: dict, admin: BotAdmin | None = None) -> None:
     """Обработчик ввода значений при редактировании ноды."""
     import asyncio
 
@@ -735,7 +754,7 @@ async def _handle_node_edit_input(message: Message, ctx: dict) -> None:
             _send_clean_message(
                 message,
                 _(prompt_key),
-                reply_markup=node_edit_keyboard(node_uuid, back_to=back_to),
+                reply_markup=node_edit_keyboard(node_uuid, back_to=back_to, admin=admin),
             )
         )
 
@@ -826,10 +845,10 @@ async def _handle_node_edit_input(message: Message, ctx: dict) -> None:
             tags = [tag.strip() for tag in text.split(",") if tag.strip()]
             payload["tags"] = tags
     else:
-        await _send_clean_message(message, _("errors.generic"), reply_markup=node_edit_keyboard(node_uuid, back_to=back_to))
+        await _send_clean_message(message, _("errors.generic"), reply_markup=node_edit_keyboard(node_uuid, back_to=back_to, admin=admin))
         return
 
-    await _apply_node_update(message, node_uuid, payload, back_to=back_to)
+    await _apply_node_update(message, node_uuid, payload, back_to=back_to, admin=admin)
 
 
 def _node_config_profiles_keyboard(profiles: list[dict]) -> InlineKeyboardMarkup:
@@ -951,10 +970,10 @@ def _node_yes_no_keyboard(action: str, field: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-async def _send_node_detail(target: Message | CallbackQuery, node_uuid: str, from_callback: bool = False) -> None:
+async def _send_node_detail(target: Message | CallbackQuery, node_uuid: str, from_callback: bool = False, admin: BotAdmin | None = None) -> None:
     """Отправляет детальную информацию о ноде."""
     try:
-        node = await api_client.get_node(node_uuid)
+        node = await internal_api_client.get_node(node_uuid)
     except UnauthorizedError:
         text = _("errors.unauthorized")
         if isinstance(target, CallbackQuery):
@@ -981,7 +1000,7 @@ async def _send_node_detail(target: Message | CallbackQuery, node_uuid: str, fro
     info = node.get("response", node)
     summary = build_node_summary(node, _)
     is_disabled = bool(info.get("isDisabled"))
-    keyboard = node_actions_keyboard(info.get("uuid", node_uuid), is_disabled)
+    keyboard = node_actions_keyboard(info.get("uuid", node_uuid), is_disabled, admin=admin)
 
     if isinstance(target, CallbackQuery):
         await target.message.edit_text(summary, reply_markup=keyboard)
@@ -1001,7 +1020,7 @@ async def cb_nodes(callback: CallbackQuery) -> None:
 
 
 @router.callback_query(F.data.startswith("nodes:") | F.data.startswith("node_create:"))
-async def cb_nodes_actions(callback: CallbackQuery) -> None:
+async def cb_nodes_actions(callback: CallbackQuery, admin: BotAdmin) -> None:
     """Обработчик действий с нодами."""
     if await _not_admin(callback):
         return
@@ -1018,7 +1037,7 @@ async def cb_nodes_actions(callback: CallbackQuery) -> None:
         try:
             user_id = callback.from_user.id
             current_page = _get_nodes_page(user_id)
-            text, keyboard = await _fetch_nodes_with_keyboard(user_id=user_id, page=current_page)
+            text, keyboard = await _fetch_nodes_with_keyboard(user_id=user_id, page=current_page, admin=admin)
             try:
                 await callback.message.edit_text(text, reply_markup=keyboard)
                 if action == "refresh":
@@ -1032,12 +1051,12 @@ async def cb_nodes_actions(callback: CallbackQuery) -> None:
         except UnauthorizedError:
             from src.keyboards.nodes_menu import nodes_list_keyboard
 
-            await callback.message.edit_text(_("errors.unauthorized"), reply_markup=nodes_list_keyboard())
+            await callback.message.edit_text(_("errors.unauthorized"), reply_markup=nodes_list_keyboard(admin=admin))
         except ApiClientError:
             logger.exception("❌ Nodes fetch failed")
             from src.keyboards.nodes_menu import nodes_list_keyboard
 
-            await callback.message.edit_text(_("errors.generic"), reply_markup=nodes_list_keyboard())
+            await callback.message.edit_text(_("errors.generic"), reply_markup=nodes_list_keyboard(admin=admin))
     elif action == "page":
         # Обработчик пагинации списка нод
         if len(parts) < 3:
@@ -1048,25 +1067,27 @@ async def cb_nodes_actions(callback: CallbackQuery) -> None:
             page = 0
         user_id = callback.from_user.id
         try:
-            text, keyboard = await _fetch_nodes_with_keyboard(user_id=user_id, page=max(page, 0))
+            text, keyboard = await _fetch_nodes_with_keyboard(user_id=user_id, page=max(page, 0), admin=admin)
             await callback.message.edit_text(text, reply_markup=keyboard)
         except UnauthorizedError:
             from src.keyboards.nodes_menu import nodes_list_keyboard
-            await callback.message.edit_text(_("errors.unauthorized"), reply_markup=nodes_list_keyboard())
+            await callback.message.edit_text(_("errors.unauthorized"), reply_markup=nodes_list_keyboard(admin=admin))
         except ApiClientError:
             logger.exception("❌ Nodes fetch failed")
             from src.keyboards.nodes_menu import nodes_list_keyboard
-            await callback.message.edit_text(_("errors.generic"), reply_markup=nodes_list_keyboard())
+            await callback.message.edit_text(_("errors.generic"), reply_markup=nodes_list_keyboard(admin=admin))
     elif action == "create":
+        if not await require_permission(callback, admin, "nodes", "create"):
+            return
         # Начинаем создание ноды
-        PENDING_INPUT[callback.from_user.id] = {"action": "node_create", "stage": "name", "data": {}}
+        PENDING_INPUT[callback.from_user.id] = {"action": "node_create", "stage": "name", "data": {}, "admin_account_id": admin.account_id}
         await callback.message.edit_text(_("node.prompt_name"), reply_markup=input_keyboard("node_create"))
     elif action == "select_profile":
         # Выбор профиля конфигурации
         if len(parts) < 3:
             from src.keyboards.nodes_menu import nodes_list_keyboard
 
-            await callback.message.edit_text(_("errors.generic"), reply_markup=nodes_list_keyboard())
+            await callback.message.edit_text(_("errors.generic"), reply_markup=nodes_list_keyboard(admin=admin))
             return
         profile_uuid = parts[2]
         user_id = callback.from_user.id
@@ -1077,7 +1098,7 @@ async def cb_nodes_actions(callback: CallbackQuery) -> None:
 
         try:
             # Получаем информацию о профиле и его инбаундах
-            profile_data = await api_client.get_config_profile_computed(profile_uuid)
+            profile_data = await internal_api_client.get_config_profile_computed(profile_uuid)
             profile_info = profile_data.get("response", profile_data)
             inbounds = profile_info.get("inbounds", [])
 
@@ -1217,12 +1238,12 @@ async def cb_nodes_actions(callback: CallbackQuery) -> None:
         # Начинаем массовое изменение профилей конфигурации
         try:
             # Получаем список нод для выбора
-            nodes_data = await api_client.get_nodes()
+            nodes_data = await internal_api_client.get_nodes()
             nodes = nodes_data.get("response", [])
             if not nodes:
                 from src.keyboards.nodes_menu import nodes_list_keyboard
 
-                await callback.message.edit_text(_("node.list_empty"), reply_markup=nodes_list_keyboard())
+                await callback.message.edit_text(_("node.list_empty"), reply_markup=nodes_list_keyboard(admin=admin))
                 return
 
             # Инициализируем состояние для массового изменения
@@ -1239,7 +1260,7 @@ async def cb_nodes_actions(callback: CallbackQuery) -> None:
             logger.exception("Failed to start bulk profile modification")
             from src.keyboards.nodes_menu import nodes_list_keyboard
 
-            await callback.message.edit_text(_("errors.generic"), reply_markup=nodes_list_keyboard())
+            await callback.message.edit_text(_("errors.generic"), reply_markup=nodes_list_keyboard(admin=admin))
     elif action == "bulk_profile_toggle_node":
         # Переключение выбора ноды для массового изменения
         if len(parts) < 3:
@@ -1279,7 +1300,7 @@ async def cb_nodes_actions(callback: CallbackQuery) -> None:
 
         # Получаем список профилей конфигурации
         try:
-            profiles_data = await api_client.get_config_profiles()
+            profiles_data = await internal_api_client.get_config_profiles()
             profiles = profiles_data.get("response", {}).get("configProfiles", [])
             if not profiles:
                 await callback.message.edit_text(_("node.no_profiles"), reply_markup=nodes_menu_keyboard())
@@ -1307,7 +1328,7 @@ async def cb_nodes_actions(callback: CallbackQuery) -> None:
 
         try:
             # Получаем информацию о профиле и его инбаундах
-            profile_data = await api_client.get_config_profile_computed(profile_uuid)
+            profile_data = await internal_api_client.get_config_profile_computed(profile_uuid)
             profile_info = profile_data.get("response", profile_data)
             inbounds = profile_info.get("inbounds", [])
 
@@ -1353,6 +1374,8 @@ async def cb_nodes_actions(callback: CallbackQuery) -> None:
         keyboard = _bulk_profile_inbounds_keyboard(available, selected)
         await callback.message.edit_text(_("node.bulk_profile_select_inbounds"), reply_markup=keyboard)
     elif action == "bulk_profile_confirm":
+        if not await require_permission(callback, admin, "nodes", "edit"):
+            return
         # Применение массового изменения профилей
         user_id = callback.from_user.id
         if user_id not in PENDING_INPUT:
@@ -1369,7 +1392,7 @@ async def cb_nodes_actions(callback: CallbackQuery) -> None:
 
         try:
             # Применяем массовое изменение
-            await api_client.bulk_nodes_profile_modification(
+            await internal_api_client.bulk_nodes_profile_modification(
                 node_uuids=selected_nodes, profile_uuid=profile_uuid, inbound_uuids=selected_inbounds
             )
 
@@ -1380,7 +1403,7 @@ async def cb_nodes_actions(callback: CallbackQuery) -> None:
             from src.keyboards.nodes_menu import nodes_list_keyboard
 
             text = _("node.bulk_profile_success").format(count=len(selected_nodes))
-            await callback.message.edit_text(text, reply_markup=nodes_list_keyboard())
+            await callback.message.edit_text(text, reply_markup=nodes_list_keyboard(admin=admin))
         except UnauthorizedError:
             await callback.message.edit_text(_("errors.unauthorized"), reply_markup=nodes_menu_keyboard())
         except ApiClientError:
@@ -1391,20 +1414,20 @@ async def cb_nodes_actions(callback: CallbackQuery) -> None:
 
 
 @router.callback_query(F.data.startswith("node_edit:"))
-async def cb_node_edit_menu(callback: CallbackQuery) -> None:
+async def cb_node_edit_menu(callback: CallbackQuery, admin: BotAdmin) -> None:
     """Обработчик входа в меню редактирования ноды."""
     if await _not_admin(callback):
         return
     await callback.answer()
     _prefix, node_uuid = callback.data.split(":")
     try:
-        node = await api_client.get_node(node_uuid)
+        node = await internal_api_client.get_node(node_uuid)
         info = node.get("response", node)
         summary = build_node_summary(node, _)
         is_disabled = bool(info.get("isDisabled"))
         await callback.message.edit_text(
             summary,
-            reply_markup=node_edit_keyboard(node_uuid, is_disabled=is_disabled, back_to=NavTarget.NODES_LIST),
+            reply_markup=node_edit_keyboard(node_uuid, is_disabled=is_disabled, back_to=NavTarget.NODES_LIST, admin=admin),
             parse_mode="HTML",
         )
     except UnauthorizedError:
@@ -1417,11 +1440,13 @@ async def cb_node_edit_menu(callback: CallbackQuery) -> None:
 
 
 @router.callback_query(F.data.startswith("nef:"))
-async def cb_node_edit_field(callback: CallbackQuery) -> None:
+async def cb_node_edit_field(callback: CallbackQuery, admin: BotAdmin) -> None:
     """Обработчик редактирования полей ноды."""
     if await _not_admin(callback):
         return
     await callback.answer()
+    if not await require_permission(callback, admin, "nodes", "edit"):
+        return
     parts = callback.data.split(":")
     # patterns: nef:{field}::{node_uuid} или nef:{field}:{value}:{node_uuid}
     if len(parts) < 3:
@@ -1434,7 +1459,7 @@ async def cb_node_edit_field(callback: CallbackQuery) -> None:
 
     # Загружаем текущие данные ноды
     try:
-        node = await api_client.get_node(node_uuid)
+        node = await internal_api_client.get_node(node_uuid)
         info = node.get("response", node)
     except UnauthorizedError:
         await callback.message.edit_text(_("errors.unauthorized"), reply_markup=main_menu_keyboard())
@@ -1451,11 +1476,11 @@ async def cb_node_edit_field(callback: CallbackQuery) -> None:
     if field == "provider" and not value:
         # Показываем список провайдеров для выбора
         try:
-            providers_data = await api_client.get_infra_providers()
+            providers_data = await internal_api_client.get_infra_providers()
             providers = providers_data.get("response", {}).get("providers", [])
             if not providers:
                 await callback.message.edit_text(
-                    _("node.no_providers"), reply_markup=node_edit_keyboard(node_uuid, back_to=back_to)
+                    _("node.no_providers"), reply_markup=node_edit_keyboard(node_uuid, back_to=back_to, admin=admin)
                 )
                 return
             keyboard = _node_providers_keyboard(providers)
@@ -1471,17 +1496,17 @@ async def cb_node_edit_field(callback: CallbackQuery) -> None:
             await callback.message.edit_text(_("node.prompt_provider"), reply_markup=keyboard)
             return
         except Exception:
-            await callback.message.edit_text(_("errors.generic"), reply_markup=node_edit_keyboard(node_uuid, back_to=back_to))
+            await callback.message.edit_text(_("errors.generic"), reply_markup=node_edit_keyboard(node_uuid, back_to=back_to, admin=admin))
             return
 
     if field == "config_profile" and not value:
         # Показываем список профилей конфигурации для выбора
         try:
-            profiles_data = await api_client.get_config_profiles()
+            profiles_data = await internal_api_client.get_config_profiles()
             profiles = profiles_data.get("response", {}).get("configProfiles", [])
             if not profiles:
                 await callback.message.edit_text(
-                    _("node.no_config_profiles"), reply_markup=node_edit_keyboard(node_uuid, back_to=back_to)
+                    _("node.no_config_profiles"), reply_markup=node_edit_keyboard(node_uuid, back_to=back_to, admin=admin)
                 )
                 return
             keyboard = _node_config_profiles_keyboard(profiles)
@@ -1494,7 +1519,7 @@ async def cb_node_edit_field(callback: CallbackQuery) -> None:
             await callback.message.edit_text(_("node.prompt_config_profile"), reply_markup=keyboard)
             return
         except Exception:
-            await callback.message.edit_text(_("errors.generic"), reply_markup=node_edit_keyboard(node_uuid, back_to=back_to))
+            await callback.message.edit_text(_("errors.generic"), reply_markup=node_edit_keyboard(node_uuid, back_to=back_to, admin=admin))
             return
 
     # Если значение уже передано (например, выбор провайдера или профиля)
@@ -1509,7 +1534,7 @@ async def cb_node_edit_field(callback: CallbackQuery) -> None:
             # Для профиля конфигурации нужно также получить инбаунды
             # Пока упростим - просто обновим профиль, инбаунды оставим как есть
             try:
-                profile_data = await api_client.get_config_profile_computed(value)
+                profile_data = await internal_api_client.get_config_profile_computed(value)
                 profile_info = profile_data.get("response", profile_data)
                 inbounds = profile_info.get("inbounds", [])
                 inbound_uuids = [i.get("uuid") for i in inbounds if i.get("uuid")]
@@ -1517,11 +1542,11 @@ async def cb_node_edit_field(callback: CallbackQuery) -> None:
                     payload["config_profile_uuid"] = value
                     payload["active_inbounds"] = inbound_uuids
             except Exception:
-                await callback.message.edit_text(_("errors.generic"), reply_markup=node_edit_keyboard(node_uuid, back_to=back_to))
+                await callback.message.edit_text(_("errors.generic"), reply_markup=node_edit_keyboard(node_uuid, back_to=back_to, admin=admin))
                 return
 
         if payload:
-            await _apply_node_update(callback, node_uuid, payload, back_to)
+            await _apply_node_update(callback, node_uuid, payload, back_to, admin=admin)
         return
 
     # Для остальных полей показываем промпт для ввода
@@ -1550,7 +1575,7 @@ async def cb_node_edit_field(callback: CallbackQuery) -> None:
     }
     prompt = prompt_map.get(field, _("errors.generic"))
     if prompt == _("errors.generic"):
-        await callback.message.edit_text(prompt, reply_markup=node_edit_keyboard(node_uuid, back_to=back_to))
+        await callback.message.edit_text(prompt, reply_markup=node_edit_keyboard(node_uuid, back_to=back_to, admin=admin))
         return
 
     current_line = _("user.current").format(value=current_values.get(field, _("user.not_set")))
@@ -1583,7 +1608,7 @@ async def cb_node_delete(callback: CallbackQuery) -> None:
 
     try:
         # Получаем информацию о ноде для подтверждения
-        node = await api_client.get_node(node_uuid)
+        node = await internal_api_client.get_node(node_uuid)
         node_info = node.get("response", node)
         node_name = node_info.get("name", "n/a")
 
@@ -1611,11 +1636,13 @@ async def cb_node_delete(callback: CallbackQuery) -> None:
 
 
 @router.callback_query(F.data.startswith("node_delete_confirm:"))
-async def cb_node_delete_confirm(callback: CallbackQuery) -> None:
+async def cb_node_delete_confirm(callback: CallbackQuery, admin: BotAdmin) -> None:
     """Обработчик подтверждения удаления ноды."""
     if await _not_admin(callback):
         return
     await callback.answer()
+    if not await require_permission(callback, admin, "nodes", "delete"):
+        return
     parts = callback.data.split(":")
     if len(parts) < 2:
         return
@@ -1625,12 +1652,12 @@ async def cb_node_delete_confirm(callback: CallbackQuery) -> None:
 
     try:
         # Получаем информацию о ноде перед удалением
-        node = await api_client.get_node(node_uuid)
+        node = await internal_api_client.get_node(node_uuid)
         node_info = node.get("response", node)
         node_name = node_info.get("name", "n/a")
 
         # Удаляем ноду
-        await api_client.delete_node(node_uuid)
+        await internal_api_client.delete_node(node_uuid)
 
         # Показываем сообщение об успешном удалении
         text = _("node.deleted").format(name=_esc(node_name))
@@ -1646,18 +1673,20 @@ async def cb_node_delete_confirm(callback: CallbackQuery) -> None:
 
 
 @router.callback_query(F.data.startswith("node:"))
-async def cb_node_actions(callback: CallbackQuery) -> None:
+async def cb_node_actions(callback: CallbackQuery, admin: BotAdmin) -> None:
     """Обработчик действий с нодой (enable, disable, restart, reset)."""
     if await _not_admin(callback):
         return
     await callback.answer()
+    if not await require_permission(callback, admin, "nodes", "edit"):
+        return
     parts = callback.data.split(":")
     _prefix, node_uuid, action = parts[0], parts[1], parts[2] if len(parts) > 2 else ""
     try:
         if action == "enable":
-            await api_client.enable_node(node_uuid)
+            await internal_api_client.enable_node(node_uuid)
         elif action == "disable":
-            await api_client.disable_node(node_uuid)
+            await internal_api_client.disable_node(node_uuid)
         elif action == "restart":
             if "confirm" not in callback.data:
                 keyboard = InlineKeyboardMarkup(inline_keyboard=[
@@ -1668,7 +1697,7 @@ async def cb_node_actions(callback: CallbackQuery) -> None:
                 ])
                 await _edit_text_safe(callback.message, f"⚠️ <b>{_('node.restart_confirm', default='Перезапустить ноду?')}</b>\n\n{_('node.restart_warning', default='Все активные соединения на ноде будут разорваны.')}", reply_markup=keyboard, parse_mode="HTML")
                 return
-            await api_client.restart_node(node_uuid)
+            await internal_api_client.restart_node(node_uuid)
         elif action == "reset":
             if "confirm" not in callback.data:
                 keyboard = InlineKeyboardMarkup(inline_keyboard=[
@@ -1679,11 +1708,11 @@ async def cb_node_actions(callback: CallbackQuery) -> None:
                 ])
                 await _edit_text_safe(callback.message, f"⚠️ <b>{_('node.reset_confirm', default='Сбросить трафик ноды?')}</b>", reply_markup=keyboard, parse_mode="HTML")
                 return
-            await api_client.reset_node_traffic(node_uuid)
+            await internal_api_client.reset_node_traffic(node_uuid)
         else:
             await callback.answer(_("errors.generic"), show_alert=True)
             return
-        await _send_node_detail(callback, node_uuid, from_callback=True)
+        await _send_node_detail(callback, node_uuid, from_callback=True, admin=admin)
     except UnauthorizedError:
         await callback.message.edit_text(_("errors.unauthorized"), reply_markup=main_menu_keyboard())
     except NotFoundError:
@@ -1708,7 +1737,7 @@ async def cb_node_agent_token_menu(callback: CallbackQuery) -> None:
     
     try:
         # Получаем информацию о ноде
-        node = await api_client.get_node(node_uuid)
+        node = await internal_api_client.get_node(node_uuid)
         node_info = node.get("response", node)
         node_name = node_info.get("name", "n/a")
         
@@ -1761,11 +1790,13 @@ async def cb_node_agent_token_menu(callback: CallbackQuery) -> None:
 
 
 @router.callback_query(F.data.startswith("node_agent_token_generate:"))
-async def cb_node_agent_token_generate(callback: CallbackQuery) -> None:
+async def cb_node_agent_token_generate(callback: CallbackQuery, admin: BotAdmin) -> None:
     """Генерация нового токена агента для ноды."""
     if await _not_admin(callback):
         return
     await callback.answer()
+    if not await require_permission(callback, admin, "nodes", "edit"):
+        return
     parts = callback.data.split(":")
     if len(parts) < 2:
         return
@@ -1775,7 +1806,7 @@ async def cb_node_agent_token_generate(callback: CallbackQuery) -> None:
     
     try:
         # Проверяем существование ноды
-        node = await api_client.get_node(node_uuid)
+        node = await internal_api_client.get_node(node_uuid)
         node_info = node.get("response", node)
         node_name = node_info.get("name", "n/a")
         
@@ -1830,7 +1861,7 @@ async def cb_node_agent_token_show(callback: CallbackQuery) -> None:
     
     try:
         # Проверяем существование ноды
-        node = await api_client.get_node(node_uuid)
+        node = await internal_api_client.get_node(node_uuid)
         node_info = node.get("response", node)
         node_name = node_info.get("name", "n/a")
         
@@ -1868,11 +1899,13 @@ async def cb_node_agent_token_show(callback: CallbackQuery) -> None:
 
 
 @router.callback_query(F.data.startswith("node_agent_token_revoke:"))
-async def cb_node_agent_token_revoke(callback: CallbackQuery) -> None:
+async def cb_node_agent_token_revoke(callback: CallbackQuery, admin: BotAdmin) -> None:
     """Отзыв токена агента (удаление)."""
     if await _not_admin(callback):
         return
     await callback.answer()
+    if not await require_permission(callback, admin, "nodes", "edit"):
+        return
     parts = callback.data.split(":")
     if len(parts) < 2:
         return
@@ -1882,7 +1915,7 @@ async def cb_node_agent_token_revoke(callback: CallbackQuery) -> None:
     
     try:
         # Проверяем существование ноды
-        node = await api_client.get_node(node_uuid)
+        node = await internal_api_client.get_node(node_uuid)
         node_info = node.get("response", node)
         node_name = node_info.get("name", "n/a")
         

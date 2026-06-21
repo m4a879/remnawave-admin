@@ -12,23 +12,24 @@ from web.backend.api.deps import (
     require_superadmin,
     get_client_ip,
 )
-from web.backend.core.rbac import (
+from web.backend.core.admin_accounts import (
     create_admin_account,
     update_admin_account,
     delete_admin_account,
     list_admin_accounts,
     get_admin_account_by_id,
     get_admin_account_by_username,
-    get_role_by_id,
-    write_audit_log,
-    get_audit_logs,
+    reset_admin_counter,
 )
+from web.backend.core.audit import write_audit_log, get_audit_logs
+from web.backend.core.rbac import get_role_by_id
 from web.backend.core.admin_credentials import hash_password, validate_password_strength
 from web.backend.schemas.admin import (
     AdminAccountCreate,
     AdminAccountUpdate,
     AdminAccountResponse,
     AdminAccountListResponse,
+    CounterResetRequest,
     AuditLogEntry,
     AuditLogResponse,
 )
@@ -52,6 +53,9 @@ def _account_to_response(account: dict) -> AdminAccountResponse:
         max_traffic_gb=account.get("max_traffic_gb"),
         max_nodes=account.get("max_nodes"),
         max_hosts=account.get("max_hosts"),
+        unlimited_traffic_policy=account.get("unlimited_traffic_policy", "allowed"),
+        unrestricted_user_access=account.get("unrestricted_user_access", True),
+        has_bot_access=account.get("has_bot_access", False),
         users_created=account.get("users_created", 0),
         traffic_used_bytes=account.get("traffic_used_bytes", 0),
         nodes_created=account.get("nodes_created", 0),
@@ -68,7 +72,21 @@ def _account_to_response(account: dict) -> AdminAccountResponse:
 async def list_admins(
     admin: AdminUser = Depends(require_permission("admins", "view")),
 ):
-    """List all admin accounts."""
+    """List all admin accounts. Also allowed for unrestricted_user_access admins."""
+    accounts = await list_admin_accounts()
+    return AdminAccountListResponse(
+        items=[_account_to_response(a) for a in accounts],
+        total=len(accounts),
+    )
+
+
+@router.get("/me", response_model=AdminAccountListResponse)
+async def list_admins_for_filter(
+    admin: AdminUser = Depends(get_current_admin),
+):
+    """Lightweight admin list for filter dropdown (allowed for unrestricted_user_access)."""
+    if not (admin.role == "superadmin" or getattr(admin, "unrestricted_user_access", False)):
+        raise api_error(403, E.FORBIDDEN)
     accounts = await list_admin_accounts()
     return AdminAccountListResponse(
         items=[_account_to_response(a) for a in accounts],
@@ -122,6 +140,9 @@ async def create_admin(
         max_traffic_gb=data.max_traffic_gb,
         max_nodes=data.max_nodes,
         max_hosts=data.max_hosts,
+        unlimited_traffic_policy=data.unlimited_traffic_policy,
+        unrestricted_user_access=data.unrestricted_user_access,
+        has_bot_access=data.has_bot_access,
         is_generated_password=bool(pw_hash),
         created_by=admin.account_id,
         email=data.email,
@@ -171,25 +192,47 @@ async def update_admin(
         if dup and dup["id"] != admin_id:
             raise api_error(409, E.USERNAME_EXISTS)
         fields["username"] = data.username
-    if data.telegram_id is not None:
+    if data.telegram_id is not None or "telegram_id" in data.model_fields_set:
+        # Use model_fields_set to distinguish "not provided" from "explicitly null"
+        # so the frontend can clear an existing value by sending null.
+        if data.telegram_id is not None and not (1 <= data.telegram_id <= 9_999_999_999):
+            raise api_error(400, E.INVALID_TELEGRAM_ID)
         fields["telegram_id"] = data.telegram_id
-    if data.role_id is not None:
-        role = await get_role_by_id(data.role_id)
-        if not role:
-            raise api_error(400, E.ROLE_NOT_FOUND)
+    if data.role_id is not None or "role_id" in data.model_fields_set:
+        if data.role_id is not None:
+            role = await get_role_by_id(data.role_id)
+            if not role:
+                raise api_error(400, E.ROLE_NOT_FOUND)
         fields["role_id"] = data.role_id
-    if data.max_users is not None:
+    # For numeric quota fields, accept null as "clear" (set to NULL → unlimited).
+    if data.max_users is not None or "max_users" in data.model_fields_set:
+        if data.max_users is not None and data.max_users < 0:
+            raise api_error(400, E.INVALID_INPUT, "max_users must be >= 0")
         fields["max_users"] = data.max_users
-    if data.max_traffic_gb is not None:
+    if data.max_traffic_gb is not None or "max_traffic_gb" in data.model_fields_set:
+        if data.max_traffic_gb is not None and data.max_traffic_gb < 0:
+            raise api_error(400, E.INVALID_INPUT, "max_traffic_gb must be >= 0")
         fields["max_traffic_gb"] = data.max_traffic_gb
-    if data.max_nodes is not None:
+    if data.max_nodes is not None or "max_nodes" in data.model_fields_set:
+        if data.max_nodes is not None and data.max_nodes < 0:
+            raise api_error(400, E.INVALID_INPUT, "max_nodes must be >= 0")
         fields["max_nodes"] = data.max_nodes
-    if data.max_hosts is not None:
+    if data.max_hosts is not None or "max_hosts" in data.model_fields_set:
+        if data.max_hosts is not None and data.max_hosts < 0:
+            raise api_error(400, E.INVALID_INPUT, "max_hosts must be >= 0")
         fields["max_hosts"] = data.max_hosts
     if data.is_active is not None:
         fields["is_active"] = data.is_active
-    if data.email is not None:
+    if data.email is not None or "email" in data.model_fields_set:
         fields["email"] = data.email or None
+    if data.unlimited_traffic_policy is not None:
+        if data.unlimited_traffic_policy not in ("allowed", "disabled", "enforced"):
+            raise api_error(400, E.INVALID_INPUT, "Policy must be one of: allowed, disabled, enforced")
+        fields["unlimited_traffic_policy"] = data.unlimited_traffic_policy
+    if data.unrestricted_user_access is not None:
+        fields["unrestricted_user_access"] = data.unrestricted_user_access
+    if data.has_bot_access is not None:
+        fields["has_bot_access"] = data.has_bot_access
     if data.password is not None:
         is_strong, error = validate_password_strength(data.password)
         if not is_strong:
@@ -246,6 +289,39 @@ async def delete_admin_endpoint(
     )
 
     return SuccessResponse(message="Admin account deleted")
+
+
+@router.post("/{admin_id}/counters/reset", response_model=AdminAccountResponse)
+async def reset_admin_counter_endpoint(
+    admin_id: int,
+    request: Request,
+    data: CounterResetRequest,
+    admin: AdminUser = Depends(require_permission("admins", "edit")),
+):
+    """Reset a specific usage counter for an admin account."""
+    valid_counters = ("users_created", "nodes_created", "hosts_created", "traffic_used_bytes")
+    if data.counter not in valid_counters:
+        raise api_error(400, E.INVALID_INPUT, f"counter must be one of: {', '.join(valid_counters)}")
+
+    existing = await get_admin_account_by_id(admin_id)
+    if not existing:
+        raise api_error(404, E.ADMIN_NOT_FOUND)
+
+    updated = await reset_admin_counter(admin_id, data.counter)
+    if not updated:
+        raise api_error(500, E.INVALID_INPUT, "Failed to reset counter")
+
+    await write_audit_log(
+        admin_id=admin.account_id,
+        admin_username=admin.username,
+        action="admin.counter_reset",
+        resource="admins",
+        resource_id=str(admin_id),
+        details=json.dumps({"counter": data.counter, "target_username": existing.get("username")}),
+        ip_address=get_client_ip(request),
+    )
+
+    return _account_to_response(updated)
 
 
 @router.get("/audit-log", response_model=AuditLogResponse)

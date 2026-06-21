@@ -12,6 +12,9 @@ import logging
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
+from shared.db_schema import NODES_TABLE
+from shared.db_query import select_sql
+
 from web.backend.api.deps import get_current_admin_ws
 from web.backend.core.agent_manager import agent_manager
 from web.backend.core.agent_hmac import sign_command_with_ts
@@ -29,7 +32,7 @@ async def _get_agent_token(node_uuid: str) -> str | None:
             return None
         async with db_service.acquire() as conn:
             row = await conn.fetchrow(
-                "SELECT agent_token FROM nodes WHERE uuid = $1",
+                select_sql(NODES_TABLE, "agent_token", "WHERE uuid = $1"),
                 node_uuid,
             )
             return row["agent_token"] if row and row["agent_token"] else None

@@ -5,7 +5,7 @@ import logging
 from fastapi import APIRouter, Body, Depends, HTTPException, Request
 
 from web.backend.api.deps import AdminUser, get_client_ip, require_permission
-from web.backend.core.rbac import write_audit_log
+from web.backend.core.audit import write_audit_log
 
 logger = logging.getLogger(__name__)
 router = APIRouter()

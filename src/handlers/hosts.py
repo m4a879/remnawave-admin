@@ -6,15 +6,18 @@ from aiogram.utils.i18n import gettext as _
 
 from math import ceil
 
-from src.handlers.common import _edit_text_safe, _get_target_user_id, _not_admin, _send_clean_message
+from src.utils.auth import BotAdmin
+
+from src.handlers.common import _edit_text_safe, _get_target_user_id, _not_admin, _send_clean_message, require_permission
 from src.handlers.state import HOSTS_FILTER_BY_USER, HOSTS_PAGE_BY_USER, HOSTS_PAGE_SIZE, PENDING_INPUT
 from src.keyboards.host_actions import host_actions_keyboard
 from src.keyboards.host_edit import host_edit_keyboard
 from src.keyboards.hosts_menu import hosts_menu_keyboard
 from src.keyboards.main_menu import main_menu_keyboard
 from src.keyboards.navigation import NavTarget, input_keyboard, nav_keyboard, nav_row
-from shared.api_client import ApiClientError, NotFoundError, UnauthorizedError, api_client
+from shared.internal_api import ApiClientError, NotFoundError, UnauthorizedError, internal_api_client
 from shared.database import db_service
+from shared.rbac import check_quota, filter_by_scope
 from src.utils.formatters import build_host_summary
 from shared.logger import logger
 
@@ -45,7 +48,7 @@ def _host_inbounds_keyboard(inbounds: list[dict]) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-async def _fetch_hosts_text() -> str:
+async def _fetch_hosts_text(admin: BotAdmin | None = None) -> str:
     """Получает текст со списком хостов (из БД, fallback на API)."""
     try:
         hosts = []
@@ -61,14 +64,18 @@ async def _fetch_hosts_text() -> str:
         
         # Fallback на API если БД пуста или недоступна
         if not hosts:
-            data = await api_client.get_hosts()
+            data = await internal_api_client.get_hosts()
             hosts = data.get("response", [])
         
         if not hosts:
             return _("host.list_empty")
         
         sorted_hosts = sorted(hosts, key=lambda h: h.get("viewPosition", 0))
-        total = len(hosts)
+        if admin is not None:
+            scope = await admin.get_scope("host", "view")
+            if scope is not None:
+                sorted_hosts = filter_by_scope(sorted_hosts, scope, "uuid")
+        total = len(sorted_hosts)
         lines = [_("host.list_title").format(total=total, page=1, pages=1)]
         for host in sorted_hosts[:10]:
             status = "DISABLED" if host.get("isDisabled") else "ENABLED"
@@ -82,8 +89,8 @@ async def _fetch_hosts_text() -> str:
                 tag=host.get("tag", "—"),
             )
             lines.append(line)
-        if len(hosts) > 10:
-            lines.append(_("host.list_more").format(count=len(hosts) - 10))
+        if len(sorted_hosts) > 10:
+            lines.append(_("host.list_more").format(count=len(sorted_hosts) - 10))
         lines.append(_("host.list_hint"))
         return "\n".join(lines)
     except UnauthorizedError:
@@ -100,7 +107,7 @@ def _get_hosts_page(user_id: int | None) -> int:
     return max(HOSTS_PAGE_BY_USER.get(user_id, 0), 0)
 
 
-async def _fetch_hosts_with_keyboard(user_id: int | None = None, page: int = 0) -> tuple[str, InlineKeyboardMarkup]:
+async def _fetch_hosts_with_keyboard(user_id: int | None = None, page: int = 0, admin: BotAdmin | None = None) -> tuple[str, InlineKeyboardMarkup]:
     """Получает список хостов с клавиатурой для редактирования с пагинацией и фильтрацией (из БД)."""
     try:
         hosts = []
@@ -116,13 +123,18 @@ async def _fetch_hosts_with_keyboard(user_id: int | None = None, page: int = 0) 
         
         # Fallback на API если БД пуста или недоступна
         if not hosts:
-            data = await api_client.get_hosts()
+            data = await internal_api_client.get_hosts()
             hosts = data.get("response", [])
         
         if not hosts:
             return _("host.list_empty"), InlineKeyboardMarkup(inline_keyboard=[nav_row(NavTarget.NODES_MENU)])
 
         sorted_hosts = sorted(hosts, key=lambda h: h.get("viewPosition", 0))
+
+        if admin is not None:
+            scope = await admin.get_scope("host", "view")
+            if scope is not None:
+                sorted_hosts = filter_by_scope(sorted_hosts, scope, "uuid")
 
         # Получаем текущий фильтр
         current_filter = HOSTS_FILTER_BY_USER.get(user_id) if user_id else None
@@ -228,10 +240,10 @@ async def _fetch_hosts_with_keyboard(user_id: int | None = None, page: int = 0) 
         return _("errors.generic"), InlineKeyboardMarkup(inline_keyboard=[nav_row(NavTarget.NODES_MENU)])
 
 
-async def _send_host_detail(target: Message | CallbackQuery, host_uuid: str, from_callback: bool = False) -> None:
+async def _send_host_detail(target: Message | CallbackQuery, host_uuid: str, from_callback: bool = False, admin: BotAdmin | None = None) -> None:
     """Отправляет детальную информацию о хосте."""
     try:
-        host = await api_client.get_host(host_uuid)
+        host = await internal_api_client.get_host(host_uuid)
     except UnauthorizedError:
         text = _("errors.unauthorized")
         if isinstance(target, CallbackQuery):
@@ -258,7 +270,7 @@ async def _send_host_detail(target: Message | CallbackQuery, host_uuid: str, fro
     info = host.get("response", host)
     summary = build_host_summary(host, _)
     is_disabled = bool(info.get("isDisabled"))
-    keyboard = host_actions_keyboard(info.get("uuid", host_uuid), is_disabled)
+    keyboard = host_actions_keyboard(info.get("uuid", host_uuid), is_disabled, admin=admin)
 
     if isinstance(target, CallbackQuery):
         await target.message.edit_text(summary, reply_markup=keyboard)
@@ -334,7 +346,7 @@ async def _handle_host_create_input(message: Message, ctx: dict) -> None:
             PENDING_INPUT[user_id] = ctx
             # Показываем список профилей конфигурации для выбора
             try:
-                profiles_data = await api_client.get_config_profiles()
+                profiles_data = await internal_api_client.get_config_profiles()
                 profiles = profiles_data.get("response", {}).get("configProfiles", [])
                 if not profiles:
                     await _send_clean_message(message, _("host.no_config_profiles"), reply_markup=input_keyboard(action))
@@ -354,32 +366,32 @@ async def _handle_host_create_input(message: Message, ctx: dict) -> None:
         await _send_clean_message(message, _("errors.generic"), reply_markup=hosts_menu_keyboard())
 
 
-async def _apply_host_update(target: Message | CallbackQuery, host_uuid: str, payload: dict, back_to: str) -> None:
+async def _apply_host_update(target: Message | CallbackQuery, host_uuid: str, payload: dict, back_to: str, admin: BotAdmin | None = None) -> None:
     """Применяет обновление хоста."""
     try:
-        await api_client.update_host(host_uuid, **payload)
-        host = await api_client.get_host(host_uuid)
+        await internal_api_client.update_host(host_uuid, **payload)
+        host = await internal_api_client.get_host(host_uuid)
         summary = build_host_summary(host, _)
-        markup = host_edit_keyboard(host_uuid, back_to=back_to)
+        markup = host_edit_keyboard(host_uuid, back_to=back_to, admin=admin)
         if isinstance(target, CallbackQuery):
             await target.message.edit_text(summary, reply_markup=markup)
         else:
             await _send_clean_message(target, summary, reply_markup=markup)
     except UnauthorizedError:
-        reply_markup = hosts_menu_keyboard()
+        reply_markup = hosts_menu_keyboard(admin=admin)
         if isinstance(target, CallbackQuery):
             await target.message.edit_text(_("errors.unauthorized"), reply_markup=reply_markup)
         else:
             await _send_clean_message(target, _("errors.unauthorized"), reply_markup=reply_markup)
     except NotFoundError:
-        reply_markup = hosts_menu_keyboard()
+        reply_markup = hosts_menu_keyboard(admin=admin)
         if isinstance(target, CallbackQuery):
             await target.message.edit_text(_("host.not_found"), reply_markup=reply_markup)
         else:
             await _send_clean_message(target, _("host.not_found"), reply_markup=reply_markup)
     except ApiClientError:
         logger.exception("❌ Host update failed host_uuid=%s payload_keys=%s", host_uuid, list(payload.keys()))
-        reply_markup = hosts_menu_keyboard()
+        reply_markup = hosts_menu_keyboard(admin=admin)
         if isinstance(target, CallbackQuery):
             await target.message.edit_text(_("errors.generic"), reply_markup=reply_markup)
         else:
@@ -387,13 +399,13 @@ async def _apply_host_update(target: Message | CallbackQuery, host_uuid: str, pa
 
 
 @router.callback_query(F.data == "menu:hosts")
-async def cb_hosts(callback: CallbackQuery) -> None:
+async def cb_hosts(callback: CallbackQuery, admin: BotAdmin) -> None:
     """Обработчик кнопки 'Хосты' в меню."""
     if await _not_admin(callback):
         return
     await callback.answer()
     text = await _fetch_hosts_text()
-    await callback.message.edit_text(text, reply_markup=hosts_menu_keyboard())
+    await callback.message.edit_text(text, reply_markup=hosts_menu_keyboard(admin=admin))
 
 
 @router.callback_query(F.data == "hosts:create")
@@ -437,7 +449,7 @@ async def cb_hosts_select_profile(callback: CallbackQuery) -> None:
 
     # Загружаем инбаунды профиля
     try:
-        profile_data = await api_client.get_config_profile_computed(profile_uuid)
+        profile_data = await internal_api_client.get_config_profile_computed(profile_uuid)
         profile_info = profile_data.get("response", profile_data)
         inbounds = profile_info.get("inbounds", [])
         if not inbounds:
@@ -453,24 +465,32 @@ async def cb_hosts_select_profile(callback: CallbackQuery) -> None:
 
 
 @router.callback_query(F.data.startswith("hosts:select_inbound:"))
-async def cb_hosts_select_inbound(callback: CallbackQuery) -> None:
+async def cb_hosts_select_inbound(callback: CallbackQuery, admin: BotAdmin) -> None:
     """Обработчик выбора инбаунда для хоста."""
     if await _not_admin(callback):
         return
     await callback.answer()
+    if not await require_permission(callback, admin, "hosts", "create"):
+        return
     user_id = callback.from_user.id
     ctx = PENDING_INPUT.get(user_id)
     if not ctx or ctx.get("action") != "host_create":
-        await callback.message.edit_text(_("errors.generic"), reply_markup=hosts_menu_keyboard())
+        await callback.message.edit_text(_("errors.generic"), reply_markup=hosts_menu_keyboard(admin=admin))
         return
 
     inbound_uuid = callback.data.split(":")[-1]
     data = ctx.setdefault("data", {})
     data["config_profile_inbound_uuid"] = inbound_uuid
 
-    # Создаем хост
+    if admin and admin.account_id:
+        allowed, msg = await check_quota(admin.account_id, "hosts")
+        if not allowed:
+            PENDING_INPUT.pop(user_id, None)
+            await callback.message.edit_text(msg, reply_markup=hosts_menu_keyboard(admin=admin))
+            return
+
     try:
-        await api_client.create_host(
+        await internal_api_client.create_host(
             remark=data["remark"],
             address=data["address"],
             port=data["port"],
@@ -480,18 +500,18 @@ async def cb_hosts_select_inbound(callback: CallbackQuery) -> None:
         )
         PENDING_INPUT.pop(user_id, None)
         hosts_text = await _fetch_hosts_text()
-        await callback.message.edit_text(hosts_text, reply_markup=hosts_menu_keyboard())
+        await callback.message.edit_text(hosts_text, reply_markup=hosts_menu_keyboard(admin=admin))
     except UnauthorizedError:
         PENDING_INPUT.pop(user_id, None)
-        await callback.message.edit_text(_("errors.unauthorized"), reply_markup=hosts_menu_keyboard())
+        await callback.message.edit_text(_("errors.unauthorized"), reply_markup=hosts_menu_keyboard(admin=admin))
     except ApiClientError:
         PENDING_INPUT.pop(user_id, None)
         logger.exception("❌ Host creation failed")
-        await callback.message.edit_text(_("errors.generic"), reply_markup=hosts_menu_keyboard())
+        await callback.message.edit_text(_("errors.generic"), reply_markup=hosts_menu_keyboard(admin=admin))
 
 
 @router.callback_query(F.data.startswith("hosts:"))
-async def cb_hosts_actions(callback: CallbackQuery) -> None:
+async def cb_hosts_actions(callback: CallbackQuery, admin: BotAdmin) -> None:
     """Обработчик действий с хостами."""
     if await _not_admin(callback):
         return
@@ -500,25 +520,22 @@ async def cb_hosts_actions(callback: CallbackQuery) -> None:
     action = parts[1] if len(parts) > 1 else None
 
     if action == "list":
-        # Обновляем список хостов
         try:
             user_id = callback.from_user.id
-            text, keyboard = await _fetch_hosts_with_keyboard(user_id=user_id)
+            text, keyboard = await _fetch_hosts_with_keyboard(user_id=user_id, admin=admin)
             try:
                 await callback.message.edit_text(text, reply_markup=keyboard)
             except TelegramBadRequest as e:
-                # Если сообщение не изменилось, просто показываем уведомление
                 if "message is not modified" in str(e):
                     await callback.answer(_("host.list_updated"), show_alert=False)
                 else:
                     raise
         except UnauthorizedError:
-            await callback.message.edit_text(_("errors.unauthorized"), reply_markup=hosts_menu_keyboard())
+            await callback.message.edit_text(_("errors.unauthorized"), reply_markup=hosts_menu_keyboard(admin=admin))
         except ApiClientError:
             logger.exception("❌ Hosts fetch failed")
-            await callback.message.edit_text(_("errors.generic"), reply_markup=hosts_menu_keyboard())
+            await callback.message.edit_text(_("errors.generic"), reply_markup=hosts_menu_keyboard(admin=admin))
     elif action == "page":
-        # Обработчик пагинации списка хостов
         if len(parts) < 3:
             return
         try:
@@ -527,60 +544,61 @@ async def cb_hosts_actions(callback: CallbackQuery) -> None:
             page = 0
         user_id = callback.from_user.id
         try:
-            text, keyboard = await _fetch_hosts_with_keyboard(user_id=user_id, page=max(page, 0))
+            text, keyboard = await _fetch_hosts_with_keyboard(user_id=user_id, page=max(page, 0), admin=admin)
             await callback.message.edit_text(text, reply_markup=keyboard)
         except UnauthorizedError:
-            await callback.message.edit_text(_("errors.unauthorized"), reply_markup=hosts_menu_keyboard())
+            await callback.message.edit_text(_("errors.unauthorized"), reply_markup=hosts_menu_keyboard(admin=admin))
         except ApiClientError:
             logger.exception("❌ Hosts fetch failed")
-            await callback.message.edit_text(_("errors.generic"), reply_markup=hosts_menu_keyboard())
+            await callback.message.edit_text(_("errors.generic"), reply_markup=hosts_menu_keyboard(admin=admin))
     elif action == "update":
-        # Показываем список хостов для выбора
         try:
             user_id = callback.from_user.id
             current_page = _get_hosts_page(user_id)
-            text, keyboard = await _fetch_hosts_with_keyboard(user_id=user_id, page=current_page)
+            text, keyboard = await _fetch_hosts_with_keyboard(user_id=user_id, page=current_page, admin=admin)
             await callback.message.edit_text(text, reply_markup=keyboard)
         except UnauthorizedError:
-            await callback.message.edit_text(_("errors.unauthorized"), reply_markup=hosts_menu_keyboard())
+            await callback.message.edit_text(_("errors.unauthorized"), reply_markup=hosts_menu_keyboard(admin=admin))
         except ApiClientError:
             logger.exception("❌ Hosts fetch failed")
-            await callback.message.edit_text(_("errors.generic"), reply_markup=hosts_menu_keyboard())
+            await callback.message.edit_text(_("errors.generic"), reply_markup=hosts_menu_keyboard(admin=admin))
 
 
 @router.callback_query(F.data.startswith("host_edit:"))
-async def cb_host_edit_menu(callback: CallbackQuery) -> None:
+async def cb_host_edit_menu(callback: CallbackQuery, admin: BotAdmin) -> None:
     """Обработчик входа в меню редактирования хоста."""
     if await _not_admin(callback):
         return
     await callback.answer()
     _prefix, host_uuid = callback.data.split(":")
     try:
-        host = await api_client.get_host(host_uuid)
+        host = await internal_api_client.get_host(host_uuid)
         summary = build_host_summary(host, _)
         await callback.message.edit_text(
             summary,
-            reply_markup=host_edit_keyboard(host_uuid, back_to=NavTarget.HOSTS_MENU),
+            reply_markup=host_edit_keyboard(host_uuid, back_to=NavTarget.HOSTS_MENU, admin=admin),
         )
     except UnauthorizedError:
-        await callback.message.edit_text(_("errors.unauthorized"), reply_markup=hosts_menu_keyboard())
+        await callback.message.edit_text(_("errors.unauthorized"), reply_markup=hosts_menu_keyboard(admin=admin))
     except NotFoundError:
-        await callback.message.edit_text(_("host.not_found"), reply_markup=hosts_menu_keyboard())
+        await callback.message.edit_text(_("host.not_found"), reply_markup=hosts_menu_keyboard(admin=admin))
     except ApiClientError:
         logger.exception("❌ Host edit menu failed host_uuid=%s actor_id=%s", host_uuid, callback.from_user.id)
-        await callback.message.edit_text(_("errors.generic"), reply_markup=hosts_menu_keyboard())
+        await callback.message.edit_text(_("errors.generic"), reply_markup=hosts_menu_keyboard(admin=admin))
 
 
 @router.callback_query(F.data.startswith("hef:"))
-async def cb_host_edit_field(callback: CallbackQuery) -> None:
+async def cb_host_edit_field(callback: CallbackQuery, admin: BotAdmin) -> None:
     """Обработчик редактирования полей хоста."""
     if await _not_admin(callback):
         return
     await callback.answer()
+    if not await require_permission(callback, admin, "hosts", "edit"):
+        return
     parts = callback.data.split(":")
     # patterns: hef:{field}::{host_uuid} или hef:{field}:{value}:{host_uuid}
     if len(parts) < 3:
-        await callback.message.edit_text(_("errors.generic"), reply_markup=hosts_menu_keyboard())
+        await callback.message.edit_text(_("errors.generic"), reply_markup=hosts_menu_keyboard(admin=admin))
         return
     _prefix, field = parts[0], parts[1]
     value = parts[2] if len(parts) > 3 and parts[2] else None
@@ -589,17 +607,17 @@ async def cb_host_edit_field(callback: CallbackQuery) -> None:
 
     # Загружаем текущие данные хоста
     try:
-        host = await api_client.get_host(host_uuid)
+        host = await internal_api_client.get_host(host_uuid)
         info = host.get("response", host)
     except UnauthorizedError:
-        await callback.message.edit_text(_("errors.unauthorized"), reply_markup=hosts_menu_keyboard())
+        await callback.message.edit_text(_("errors.unauthorized"), reply_markup=hosts_menu_keyboard(admin=admin))
         return
     except NotFoundError:
-        await callback.message.edit_text(_("host.not_found"), reply_markup=hosts_menu_keyboard())
+        await callback.message.edit_text(_("host.not_found"), reply_markup=hosts_menu_keyboard(admin=admin))
         return
     except ApiClientError:
         logger.exception("❌ Failed to fetch host for edit host_uuid=%s", host_uuid)
-        await callback.message.edit_text(_("errors.generic"), reply_markup=hosts_menu_keyboard())
+        await callback.message.edit_text(_("errors.generic"), reply_markup=hosts_menu_keyboard(admin=admin))
         return
 
     # Если значение уже передано (например, выбор инбаунда)
@@ -613,7 +631,7 @@ async def cb_host_edit_field(callback: CallbackQuery) -> None:
             if not config_profile_uuid:
                 await callback.message.edit_text(
                     _("host.no_config_profiles"),
-                    reply_markup=host_edit_keyboard(host_uuid, back_to=back_to),
+                    reply_markup=host_edit_keyboard(host_uuid, back_to=back_to, admin=admin),
                 )
                 return
 
@@ -628,10 +646,11 @@ async def cb_host_edit_field(callback: CallbackQuery) -> None:
                     }
                 },
                 back_to=back_to,
+                admin=admin,
             )
         except Exception:
             logger.exception("❌ Failed to update host inbound")
-            await callback.message.edit_text(_("errors.generic"), reply_markup=host_edit_keyboard(host_uuid, back_to=back_to))
+            await callback.message.edit_text(_("errors.generic"), reply_markup=host_edit_keyboard(host_uuid, back_to=back_to, admin=admin))
         return
 
     # Показываем промпт для ввода нового значения
@@ -664,17 +683,17 @@ async def cb_host_edit_field(callback: CallbackQuery) -> None:
             if not config_profile_uuid:
                 await callback.message.edit_text(
                     _("host.no_config_profiles"),
-                    reply_markup=host_edit_keyboard(host_uuid, back_to=back_to),
+                    reply_markup=host_edit_keyboard(host_uuid, back_to=back_to, admin=admin),
                 )
                 return
 
-            profile_data = await api_client.get_config_profile_computed(config_profile_uuid)
+            profile_data = await internal_api_client.get_config_profile_computed(config_profile_uuid)
             profile_info = profile_data.get("response", profile_data)
             inbounds = profile_info.get("inbounds", [])
             if not inbounds:
                 await callback.message.edit_text(
                     _("host.no_inbounds"),
-                    reply_markup=host_edit_keyboard(host_uuid, back_to=back_to),
+                    reply_markup=host_edit_keyboard(host_uuid, back_to=back_to, admin=admin),
                 )
                 return
             keyboard = _host_inbounds_keyboard(inbounds)
@@ -688,31 +707,33 @@ async def cb_host_edit_field(callback: CallbackQuery) -> None:
             return
         except Exception:
             logger.exception("❌ Failed to load inbounds for host edit")
-            await callback.message.edit_text(_("errors.generic"), reply_markup=host_edit_keyboard(host_uuid, back_to=back_to))
+            await callback.message.edit_text(_("errors.generic"), reply_markup=host_edit_keyboard(host_uuid, back_to=back_to, admin=admin))
             return
     else:
-        await callback.message.edit_text(_("errors.generic"), reply_markup=host_edit_keyboard(host_uuid, back_to=back_to))
+        await callback.message.edit_text(_("errors.generic"), reply_markup=host_edit_keyboard(host_uuid, back_to=back_to, admin=admin))
         return
 
     await callback.message.edit_text(prompt, reply_markup=input_keyboard("host_edit", allow_skip=(field == "tag")))
 
 
 @router.callback_query(F.data.startswith("host:"))
-async def cb_host_actions(callback: CallbackQuery) -> None:
+async def cb_host_actions(callback: CallbackQuery, admin: BotAdmin) -> None:
     """Обработчик действий с хостом (enable, disable)."""
     if await _not_admin(callback):
         return
     await callback.answer()
+    if not await require_permission(callback, admin, "hosts", "edit"):
+        return
     _prefix, host_uuid, action = callback.data.split(":")
     try:
         if action == "enable":
-            await api_client.enable_hosts([host_uuid])
+            await internal_api_client.enable_hosts([host_uuid])
         elif action == "disable":
-            await api_client.disable_hosts([host_uuid])
+            await internal_api_client.disable_hosts([host_uuid])
         else:
             await callback.answer(_("errors.generic"), show_alert=True)
             return
-        await _send_host_detail(callback, host_uuid, from_callback=True)
+        await _send_host_detail(callback, host_uuid, from_callback=True, admin=admin)
     except UnauthorizedError:
         await callback.message.edit_text(_("errors.unauthorized"), reply_markup=main_menu_keyboard())
     except NotFoundError:

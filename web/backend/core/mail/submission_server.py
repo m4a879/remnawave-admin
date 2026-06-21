@@ -10,6 +10,9 @@ import logging
 import secrets
 from typing import Optional
 
+from shared.db_schema import SMTP_CREDENTIALS_TABLE
+from shared.db_query import select_sql, update_sql
+
 from aiosmtpd.smtp import SMTP as SMTPProtocol, AuthResult, LoginPassword, Envelope, Session
 
 logger = logging.getLogger(__name__)
@@ -68,9 +71,10 @@ class SubmissionAuthenticator:
             from shared.database import db_service
             async with db_service.acquire() as conn:
                 rows = await conn.fetch(
-                    "SELECT id, username, password_hash, is_active, "
-                    "max_send_per_hour, allowed_from_domains "
-                    "FROM smtp_credentials WHERE is_active = true"
+                    select_sql(SMTP_CREDENTIALS_TABLE,
+                        "id, username, password_hash, is_active, "
+                        "max_send_per_hour, allowed_from_domains",
+                        "WHERE is_active = true")
                 )
             self._credentials = {row["username"]: dict(row) for row in rows}
             logger.debug("SMTP credential cache refreshed: %d active credential(s)", len(self._credentials))
@@ -150,7 +154,8 @@ class SubmissionAuthenticator:
             from shared.database import db_service
             async with db_service.acquire() as conn:
                 await conn.execute(
-                    "UPDATE smtp_credentials SET last_login_at = NOW(), last_login_ip = $1 WHERE id = $2",
+                    update_sql(SMTP_CREDENTIALS_TABLE,
+                        "last_login_at = NOW(), last_login_ip = $1", "id = $2"),
                     remote_ip, cred_id,
                 )
         except Exception as e:

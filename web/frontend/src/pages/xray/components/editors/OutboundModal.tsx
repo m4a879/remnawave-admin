@@ -3,6 +3,7 @@ import React from 'react';
 import { Button } from '../ui/Button';
 import { useConfigStore } from '../../store/configStore';
 import { toast } from 'sonner';
+import i18next from 'i18next';
 import { generateXrayLink } from '../../utils/link-generator';
 import { useOutboundEditor } from '../../hooks/useOutboundEditor';
 import { EditorLayout } from '../ui/EditorLayout';
@@ -36,10 +37,10 @@ export const OutboundModal = ({ data, onSave, onClose, index }: any) => {
             const [primary, ...others] = parsed.outbounds;
             setLocal(primary);
             others.forEach(outbound => addItem('outbounds', outbound));
-            toast.success(`Imported ${parsed.outbounds.length} outbounds (chained)`);
+            toast.success(i18next.t('xray.importedChained', { count: parsed.outbounds.length }));
         } else {
             setLocal(parsed);
-            toast.success("Configuration imported successfully");
+            toast.success(i18next.t('xray.configImported'));
         }
         setRawMode(false);
     };
@@ -47,10 +48,10 @@ export const OutboundModal = ({ data, onSave, onClose, index }: any) => {
     const handleCopyLink = () => {
         const link = generateXrayLink(local);
         if (!link) {
-            toast.error("Error generating link", { description: "Protocol might not be supported." });
+            toast.error(i18next.t('xray.errorGeneratingLink'), { description: i18next.t('xray.protocolNotSupported') });
             return;
         }
-        navigator.clipboard.writeText(link).then(() => toast.success("Copied to clipboard!"));
+        navigator.clipboard.writeText(link).then(() => toast.success(i18next.t('xray.copiedToClipboard')));
     };
 
     const extraButtons = (

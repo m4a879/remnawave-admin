@@ -6,6 +6,9 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, Query, Request
 from pydantic import BaseModel
 
+from shared.db_schema import WEBHOOK_SUBSCRIPTIONS_TABLE, WEBHOOK_DELIVERIES_TABLE
+from shared.db_query import select_sql, insert_sql, update_sql, delete_sql
+
 from web.backend.api.deps import AdminUser, require_permission
 from web.backend.core.errors import api_error, E
 from web.backend.core.webhook_security import (
@@ -112,11 +115,9 @@ async def list_webhooks(
         return []
     async with db_service.acquire() as conn:
         rows = await conn.fetch(
-            "SELECT id, name, url, secret, events, is_active, "
-            "last_triggered_at, failure_count, consecutive_failures, "
-            "auto_disabled_at, disabled_reason, signature_version, "
-            "description, created_at "
-            "FROM webhook_subscriptions ORDER BY created_at DESC"
+            select_sql(WEBHOOK_SUBSCRIPTIONS_TABLE,
+                "id, name, url, secret, events, is_active, last_triggered_at, failure_count, consecutive_failures, auto_disabled_at, disabled_reason, signature_version, description, created_at",
+                "ORDER BY created_at DESC")
         )
     return [_row_to_response(r) for r in rows]
 
@@ -143,14 +144,9 @@ async def create_webhook(
     admin_id = admin.id if hasattr(admin, "id") else (admin.account_id or None)
     async with db_service.acquire() as conn:
         row = await conn.fetchrow(
-            "INSERT INTO webhook_subscriptions "
-            "(name, url, secret, events, created_by_admin_id, "
-            "signature_version, description) "
-            "VALUES ($1, $2, $3, $4, $5, $6, $7) "
-            "RETURNING id, name, url, secret, events, is_active, "
-            "last_triggered_at, failure_count, consecutive_failures, "
-            "auto_disabled_at, disabled_reason, signature_version, "
-            "description, created_at",
+            insert_sql(WEBHOOK_SUBSCRIPTIONS_TABLE,
+                ["name", "url", "secret", "events", "created_by_admin_id", "signature_version", "description"],
+                returning="id, name, url, secret, events, is_active, last_triggered_at, failure_count, consecutive_failures, auto_disabled_at, disabled_reason, signature_version, description, created_at"),
             body.name, body.url, body.secret, body.events, admin_id,
             body.signature_version or "v2", body.description,
         )
@@ -193,13 +189,9 @@ async def update_webhook(
     params.append(webhook_id)
 
     async with db_service.acquire() as conn:
+        set_str = ', '.join(set_clauses)
         row = await conn.fetchrow(
-            f"UPDATE webhook_subscriptions SET {', '.join(set_clauses)}, updated_at = NOW() "
-            f"WHERE id = ${idx} "
-            f"RETURNING id, name, url, secret, events, is_active, "
-            f"last_triggered_at, failure_count, consecutive_failures, "
-            f"auto_disabled_at, disabled_reason, signature_version, "
-            f"description, created_at",
+            update_sql(WEBHOOK_SUBSCRIPTIONS_TABLE, f"{set_str}, updated_at = NOW()", f"id = ${idx}", returning="id, name, url, secret, events, is_active, last_triggered_at, failure_count, consecutive_failures, auto_disabled_at, disabled_reason, signature_version, description, created_at"),
             *params,
         )
     if not row:
@@ -217,7 +209,7 @@ async def delete_webhook(
         raise api_error(503, E.DB_UNAVAILABLE)
     async with db_service.acquire() as conn:
         result = await conn.execute(
-            "DELETE FROM webhook_subscriptions WHERE id = $1", webhook_id,
+            delete_sql(WEBHOOK_SUBSCRIPTIONS_TABLE, "id = $1"), webhook_id,
         )
     if result == "DELETE 0":
         raise api_error(404, E.ADMIN_NOT_FOUND, "Webhook not found")
@@ -254,8 +246,7 @@ async def test_webhook(
         raise api_error(503, E.DB_UNAVAILABLE)
     async with db_service.acquire() as conn:
         row = await conn.fetchrow(
-            "SELECT id, url, secret, signature_version FROM webhook_subscriptions "
-            "WHERE id = $1",
+            select_sql(WEBHOOK_SUBSCRIPTIONS_TABLE, "id, url, secret, signature_version", "WHERE id = $1"),
             webhook_id,
         )
     if not row:
@@ -290,9 +281,9 @@ async def list_deliveries(
         return []
     async with db_service.acquire() as conn:
         rows = await conn.fetch(
-            "SELECT id, webhook_id, event, status_code, response_body, error, "
-            "duration_ms, sent_at FROM webhook_deliveries "
-            "WHERE webhook_id = $1 ORDER BY sent_at DESC LIMIT $2",
+            select_sql(WEBHOOK_DELIVERIES_TABLE,
+                "id, webhook_id, event, status_code, response_body, error, duration_ms, sent_at",
+                "WHERE webhook_id = $1 ORDER BY sent_at DESC LIMIT $2"),
             webhook_id, limit,
         )
     result = []

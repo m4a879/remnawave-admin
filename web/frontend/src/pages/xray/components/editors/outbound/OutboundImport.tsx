@@ -5,6 +5,7 @@ import { Help } from '../../ui/Help';
 import { Icon } from '../../ui/Icon';
 import { parseXrayLink, parseWireguardConfig, parseJsonSubscription } from '../../../utils/link-parser';
 import { toast } from 'sonner';
+import i18next from 'i18next';
 
 export const OutboundImport = ({ onImport }: any) => {
     const [input, setInput] = useState("");
@@ -19,7 +20,7 @@ export const OutboundImport = ({ onImport }: any) => {
             if (parsed) {
                 onImport(parsed);
                 setInput("");
-                toast.success("Link imported successfully");
+                toast.success(i18next.t('xray.linkImported'));
                 return;
             }
         }
@@ -30,10 +31,10 @@ export const OutboundImport = ({ onImport }: any) => {
             if (parsed && parsed.length > 0) {
                 if (parsed.length === 1) {
                     onImport(parsed[0]);
-                    toast.success("JSON configuration imported");
+                    toast.success(i18next.t('xray.jsonConfigImported'));
                 } else {
                     onImport({ multiple: true, outbounds: parsed });
-                    toast.success(`Imported ${parsed.length} outbounds from JSON`);
+                    toast.success(i18next.t('xray.importedOutboundsFromJson', { count: parsed.length }));
                 }
                 setInput("");
                 return;
@@ -51,18 +52,18 @@ export const OutboundImport = ({ onImport }: any) => {
                     if (obfuscator) {
                         onImport(obfuscator);
                         setInput("");
-                        toast.success("Only Obfuscator (Freedom) imported");
+                        toast.success(i18next.t('xray.onlyObfuscatorImported'));
                         return;
                     }
                 }
                 onImport(parsed);
                 setInput("");
-                toast.success(mode === 'chained' ? "WG + Obfuscator (Legacy Chain) imported" : "Direct WireGuard (Modern) imported");
+                toast.success(mode === 'chained' ? i18next.t('xray.wgChainedImported') : i18next.t('xray.wgDirectImported'));
                 return;
             }
         }
 
-        toast.error("Unrecognized import format");
+        toast.error(i18next.t('xray.unrecognizedImportFormat'));
     };
 
     const isAWGDetected = input.includes('[Interface]') && (input.includes('Jc') || input.includes('Jmin') || input.includes('<b 0x'));

@@ -15,6 +15,9 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from web.backend.core.errors import api_error, E
 from pydantic import BaseModel, ConfigDict
 
+from shared.db_schema import NODES_TABLE, NODE_SCRIPTS_TABLE, NODE_COMMAND_LOG_TABLE, SCHEDULED_TASKS_TABLE
+from shared.db_query import select_sql, insert_sql, update_sql, delete_sql
+
 from web.backend.api.deps import AdminUser, require_permission
 from web.backend.core.agent_manager import agent_manager
 from web.backend.core.agent_hmac import sign_command_with_ts
@@ -112,14 +115,12 @@ async def list_scripts(
         async with db_service.acquire() as conn:
             if category:
                 rows = await conn.fetch(
-                    "SELECT id, name, display_name, description, category, timeout_seconds, requires_root, is_builtin "
-                    "FROM node_scripts WHERE category = $1 ORDER BY is_builtin DESC, display_name",
+                    select_sql(NODE_SCRIPTS_TABLE, "id, name, display_name, description, category, timeout_seconds, requires_root, is_builtin", "WHERE category = $1 ORDER BY is_builtin DESC, display_name"),
                     category,
                 )
             else:
                 rows = await conn.fetch(
-                    "SELECT id, name, display_name, description, category, timeout_seconds, requires_root, is_builtin "
-                    "FROM node_scripts ORDER BY category, is_builtin DESC, display_name",
+                    select_sql(NODE_SCRIPTS_TABLE, "id, name, display_name, description, category, timeout_seconds, requires_root, is_builtin", "ORDER BY category, is_builtin DESC, display_name"),
                 )
 
         return [ScriptListItem(**dict(r)) for r in rows]
@@ -142,7 +143,7 @@ async def get_script(
 
     async with db_service.acquire() as conn:
         row = await conn.fetchrow(
-            "SELECT * FROM node_scripts WHERE id = $1", script_id,
+            select_sql(NODE_SCRIPTS_TABLE, "*", "WHERE id = $1"), script_id,
         )
     if not row:
         raise api_error(404, E.SCRIPT_NOT_FOUND)
@@ -168,13 +169,10 @@ async def create_script(
 
     async with db_service.acquire() as conn:
         row = await conn.fetchrow(
-            """
-            INSERT INTO node_scripts (name, display_name, description, category,
-                                      script_content, timeout_seconds, requires_root,
-                                      is_builtin, created_by)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, false, $8)
-            RETURNING *
-            """,
+            insert_sql(NODE_SCRIPTS_TABLE,
+                ["name", "display_name", "description", "category", "script_content", "timeout_seconds", "requires_root", "is_builtin", "created_by"],
+                values="$1, $2, $3, $4, $5, $6, $7, false, $8",
+                returning="*"),
             body.name, body.display_name, body.description, body.category,
             body.script_content, body.timeout_seconds, body.requires_root,
             admin_id,
@@ -200,7 +198,7 @@ async def update_script(
 
     async with db_service.acquire() as conn:
         existing = await conn.fetchrow(
-            "SELECT is_builtin FROM node_scripts WHERE id = $1", script_id,
+            select_sql(NODE_SCRIPTS_TABLE, "is_builtin", "WHERE id = $1"), script_id,
         )
         if not existing:
             raise api_error(404, E.SCRIPT_NOT_FOUND)
@@ -221,8 +219,7 @@ async def update_script(
         params.append(script_id)
 
         row = await conn.fetchrow(
-            f"UPDATE node_scripts SET {', '.join(set_clauses)}, updated_at = NOW() "
-            f"WHERE id = ${idx} RETURNING *",
+            update_sql(NODE_SCRIPTS_TABLE, f"{', '.join(set_clauses)}, updated_at = NOW()", f"id = ${idx}", returning="*"),
             *params,
         )
 
@@ -245,14 +242,14 @@ async def delete_script(
 
     async with db_service.acquire() as conn:
         existing = await conn.fetchrow(
-            "SELECT is_builtin FROM node_scripts WHERE id = $1", script_id,
+            select_sql(NODE_SCRIPTS_TABLE, "is_builtin", "WHERE id = $1"), script_id,
         )
         if not existing:
             raise api_error(404, E.SCRIPT_NOT_FOUND)
         if existing["is_builtin"]:
             raise api_error(403, E.BUILTIN_SCRIPT_PROTECTED)
 
-        await conn.execute("DELETE FROM node_scripts WHERE id = $1", script_id)
+        await conn.execute(delete_sql(NODE_SCRIPTS_TABLE, "id = $1"), script_id)
 
 
 # ── Script Execution ─────────────────────────────────────────────
@@ -274,7 +271,7 @@ async def exec_script(
     # Get script
     async with db_service.acquire() as conn:
         script = await conn.fetchrow(
-            "SELECT * FROM node_scripts WHERE id = $1", body.script_id,
+            select_sql(NODE_SCRIPTS_TABLE, "*", "WHERE id = $1"), body.script_id,
         )
     if not script:
         raise api_error(404, E.SCRIPT_NOT_FOUND)
@@ -283,7 +280,7 @@ async def exec_script(
     agent_token = None
     async with db_service.acquire() as conn:
         row = await conn.fetchrow(
-            "SELECT agent_token FROM nodes WHERE uuid = $1", body.node_uuid,
+            select_sql(NODES_TABLE, "agent_token", "WHERE uuid = $1"), body.node_uuid,
         )
         if row:
             agent_token = row["agent_token"]
@@ -296,12 +293,10 @@ async def exec_script(
     # Create command log entry
     async with db_service.acquire() as conn:
         cmd_row = await conn.fetchrow(
-            """
-            INSERT INTO node_command_log
-                (node_uuid, admin_id, admin_username, command_type, command_data, status)
-            VALUES ($1, $2, $3, 'exec_script', $4, 'running')
-            RETURNING id
-            """,
+            insert_sql(NODE_COMMAND_LOG_TABLE,
+                ["node_uuid", "admin_id", "admin_username", "command_type", "command_data", "status"],
+                values="$1, $2, $3, 'exec_script', $4, 'running'",
+                returning="id"),
             body.node_uuid, admin_id, admin_username,
             f"script={script['name']}" + (f" env={list(body.env_vars.keys())}" if body.env_vars else ""),
         )
@@ -343,8 +338,7 @@ async def exec_script(
         # Update log to error
         async with db_service.acquire() as conn:
             await conn.execute(
-                "UPDATE node_command_log SET status = 'error', output = 'Failed to send to agent' "
-                "WHERE id = $1", exec_id,
+                update_sql(NODE_COMMAND_LOG_TABLE, "status = 'error', output = 'Failed to send to agent'", "id = $1"), exec_id,
             )
         raise api_error(500, E.AGENT_COMMAND_FAILED)
 
@@ -365,11 +359,7 @@ async def get_exec_status(
 
     async with db_service.acquire() as conn:
         row = await conn.fetchrow(
-            """
-            SELECT id, node_uuid, status, output, exit_code,
-                   started_at, finished_at, duration_ms
-            FROM node_command_log WHERE id = $1
-            """,
+            select_sql(NODE_COMMAND_LOG_TABLE, "id, node_uuid, status, output, exit_code, started_at, finished_at, duration_ms", "WHERE id = $1"),
             exec_id,
         )
     if not row:
@@ -388,13 +378,9 @@ async def get_exec_status(
         if elapsed > 210:
             async with db_service.acquire() as conn:
                 await conn.execute(
-                    """
-                    UPDATE node_command_log
-                    SET status = 'error', output = 'Timed out: agent did not respond',
-                        finished_at = NOW(),
-                        duration_ms = EXTRACT(EPOCH FROM (NOW() - started_at))::INTEGER * 1000
-                    WHERE id = $1 AND status = 'running'
-                    """,
+                    update_sql(NODE_COMMAND_LOG_TABLE,
+                        "status = 'error', output = 'Timed out: agent did not respond', finished_at = NOW(), duration_ms = EXTRACT(EPOCH FROM (NOW() - started_at))::INTEGER * 1000",
+                        "id = $1 AND status = 'running'"),
                     exec_id,
                 )
             r["status"] = "error"
@@ -502,13 +488,10 @@ async def import_script_from_url(
 
     async with db_service.acquire() as conn:
         row = await conn.fetchrow(
-            """
-            INSERT INTO node_scripts (name, display_name, description, category,
-                                      script_content, timeout_seconds, requires_root,
-                                      is_builtin, created_by, source_url, imported_at)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, false, $8, $9, NOW())
-            RETURNING *
-            """,
+            insert_sql(NODE_SCRIPTS_TABLE,
+                ["name", "display_name", "description", "category", "script_content", "timeout_seconds", "requires_root", "is_builtin", "created_by", "source_url", "imported_at"],
+                values="$1, $2, $3, $4, $5, $6, $7, false, $8, $9, NOW()",
+                returning="*"),
             body.name, body.display_name, body.description, body.category,
             content, body.timeout_seconds, body.requires_root,
             admin_id, url,
@@ -600,13 +583,10 @@ async def bulk_import_scripts(
 
             async with db_service.acquire() as conn:
                 await conn.fetchrow(
-                    """
-                    INSERT INTO node_scripts (name, display_name, description, category,
-                                              script_content, timeout_seconds, requires_root,
-                                              is_builtin, created_by, source_url, imported_at)
-                    VALUES ($1, $2, $3, $4, $5, $6, $7, false, $8, $9, NOW())
-                    RETURNING id
-                    """,
+                    insert_sql(NODE_SCRIPTS_TABLE,
+                        ["name", "display_name", "description", "category", "script_content", "timeout_seconds", "requires_root", "is_builtin", "created_by", "source_url", "imported_at"],
+                        values="$1, $2, $3, $4, $5, $6, $7, false, $8, $9, NOW()",
+                        returning="id"),
                     item.name, item.display_name, item.description, item.category,
                     content, item.timeout_seconds, item.requires_root,
                     admin_id, url,
@@ -678,13 +658,8 @@ async def list_scheduled_tasks(
     from shared.database import db_service
     async with db_service.acquire() as conn:
         rows = await conn.fetch(
-            """
-            SELECT st.*, ns.name AS script_name, n.name AS node_name
-            FROM scheduled_tasks st
-            LEFT JOIN node_scripts ns ON ns.id = st.script_id
-            LEFT JOIN nodes n ON n.uuid = st.node_uuid
-            ORDER BY st.created_at DESC
-            """
+            select_sql(SCHEDULED_TASKS_TABLE, "st.*, ns.name AS script_name, n.name AS node_name",
+                "st LEFT JOIN node_scripts ns ON ns.id = st.script_id LEFT JOIN nodes n ON n.uuid = st.node_uuid ORDER BY st.created_at DESC")
         )
     items = [ScheduledTaskItem(**_normalize_scheduled_task_row(r)) for r in rows]
     return {"items": items, "total": len(items)}
@@ -709,11 +684,10 @@ async def create_scheduled_task(
     env_json = json.dumps(body.env_vars) if body.env_vars else "{}"
     async with db_service.acquire() as conn:
         row = await conn.fetchrow(
-            """
-            INSERT INTO scheduled_tasks (script_id, node_uuid, cron_expression, is_enabled, env_vars, created_by)
-            VALUES ($1, $2::uuid, $3, $4, $5::jsonb, $6)
-            RETURNING *
-            """,
+            insert_sql(SCHEDULED_TASKS_TABLE,
+                ["script_id", "node_uuid", "cron_expression", "is_enabled", "env_vars", "created_by"],
+                values="$1, $2::uuid, $3, $4, $5::jsonb, $6",
+                returning="*"),
             body.script_id, body.node_uuid, body.cron_expression,
             body.is_enabled, env_json, admin.account_id,
         )
@@ -757,7 +731,7 @@ async def update_scheduled_task(
 
     async with db_service.acquire() as conn:
         row = await conn.fetchrow(
-            f"UPDATE scheduled_tasks SET {', '.join(updates)} WHERE id = $1 RETURNING *",
+            update_sql(SCHEDULED_TASKS_TABLE, ', '.join(updates), "id = $1", returning="*"),
             *args,
         )
     if not row:
@@ -775,7 +749,7 @@ async def delete_scheduled_task(
     from shared.database import db_service
     async with db_service.acquire() as conn:
         row = await conn.fetchrow(
-            "DELETE FROM scheduled_tasks WHERE id = $1 RETURNING id", task_id
+            f"{delete_sql(SCHEDULED_TASKS_TABLE, 'id = $1')} RETURNING id", task_id
         )
     if not row:
         raise api_error(404, "NOT_FOUND")
@@ -791,8 +765,7 @@ async def toggle_scheduled_task(
     from shared.database import db_service
     async with db_service.acquire() as conn:
         row = await conn.fetchrow(
-            "UPDATE scheduled_tasks SET is_enabled = NOT is_enabled, updated_at = NOW() "
-            "WHERE id = $1 RETURNING *",
+            update_sql(SCHEDULED_TASKS_TABLE, "is_enabled = NOT is_enabled, updated_at = NOW()", "id = $1", returning="*"),
             task_id,
         )
     if not row:

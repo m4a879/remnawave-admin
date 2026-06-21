@@ -8,6 +8,8 @@ from typing import Any, Dict, List, Optional, Set
 
 from shared.logger import logger
 from shared.db._base import _db_row_to_api_format, _parse_timestamp
+from shared.db_schema import ADMIN_TABLE, USERS_TABLE, USER_BASELINES_TABLE, USER_CONNECTIONS_TABLE, USER_HWID_DEVICES_TABLE
+from shared.db_query import select_sql, insert_sql, update_sql, delete_sql
 
 
 class UsersMixin:
@@ -20,14 +22,14 @@ class UsersMixin:
         try:
             async with self.acquire() as conn:
                 row = await conn.fetchrow(
-                    """
-                    SELECT user_uuid, typical_countries, typical_cities, typical_regions,
-                           typical_asns, known_ips, avg_daily_unique_ips, max_daily_unique_ips,
-                           typical_hours, avg_session_duration_min, data_points
-                    FROM user_baselines
-                    WHERE user_uuid = $1
-                      AND computed_at > NOW() - make_interval(secs => $2)
-                    """,
+                    select_sql(
+                        USER_BASELINES_TABLE,
+                        "user_uuid, typical_countries, typical_cities, typical_regions,"
+                        " typical_asns, known_ips, avg_daily_unique_ips, max_daily_unique_ips,"
+                        " typical_hours, avg_session_duration_min, data_points",
+                        "WHERE user_uuid = $1"
+                        " AND computed_at > NOW() - make_interval(secs => $2)",
+                    ),
                     user_uuid, max_age_seconds,
                 )
                 if row:
@@ -54,25 +56,29 @@ class UsersMixin:
         try:
             async with self.acquire() as conn:
                 await conn.execute(
-                    """
-                    INSERT INTO user_baselines (
-                        user_uuid, typical_countries, typical_cities, typical_regions,
-                        typical_asns, known_ips, avg_daily_unique_ips, max_daily_unique_ips,
-                        typical_hours, avg_session_duration_min, data_points, computed_at
-                    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW())
-                    ON CONFLICT (user_uuid) DO UPDATE SET
-                        typical_countries = EXCLUDED.typical_countries,
-                        typical_cities = EXCLUDED.typical_cities,
-                        typical_regions = EXCLUDED.typical_regions,
-                        typical_asns = EXCLUDED.typical_asns,
-                        known_ips = EXCLUDED.known_ips,
-                        avg_daily_unique_ips = EXCLUDED.avg_daily_unique_ips,
-                        max_daily_unique_ips = EXCLUDED.max_daily_unique_ips,
-                        typical_hours = EXCLUDED.typical_hours,
-                        avg_session_duration_min = EXCLUDED.avg_session_duration_min,
-                        data_points = EXCLUDED.data_points,
-                        computed_at = NOW()
-                    """,
+                    insert_sql(
+                        USER_BASELINES_TABLE,
+                        [
+                            "user_uuid", "typical_countries", "typical_cities", "typical_regions",
+                            "typical_asns", "known_ips", "avg_daily_unique_ips", "max_daily_unique_ips",
+                            "typical_hours", "avg_session_duration_min", "data_points", "computed_at",
+                        ],
+                        values="$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW()",
+                        suffix=(
+                            "ON CONFLICT (user_uuid) DO UPDATE SET "
+                            "typical_countries = EXCLUDED.typical_countries, "
+                            "typical_cities = EXCLUDED.typical_cities, "
+                            "typical_regions = EXCLUDED.typical_regions, "
+                            "typical_asns = EXCLUDED.typical_asns, "
+                            "known_ips = EXCLUDED.known_ips, "
+                            "avg_daily_unique_ips = EXCLUDED.avg_daily_unique_ips, "
+                            "max_daily_unique_ips = EXCLUDED.max_daily_unique_ips, "
+                            "typical_hours = EXCLUDED.typical_hours, "
+                            "avg_session_duration_min = EXCLUDED.avg_session_duration_min, "
+                            "data_points = EXCLUDED.data_points, "
+                            "computed_at = NOW()"
+                        ),
+                    ),
                     user_uuid,
                     baseline.get('typical_countries', []),
                     baseline.get('typical_cities', []),
@@ -95,18 +101,18 @@ class UsersMixin:
         try:
             async with self.acquire() as conn:
                 rows = await conn.fetch(
-                    """
+                    f"""
                     (
                         SELECT u.uuid, NULL::timestamptz AS computed_at
-                        FROM users u
+                        FROM {USERS_TABLE} u
                         WHERE NOT EXISTS (
-                            SELECT 1 FROM user_baselines b WHERE b.user_uuid = u.uuid
+                            SELECT 1 FROM {USER_BASELINES_TABLE} b WHERE b.user_uuid = u.uuid
                         )
                     )
                     UNION ALL
                     (
                         SELECT b.user_uuid AS uuid, b.computed_at
-                        FROM user_baselines b
+                        FROM {USER_BASELINES_TABLE} b
                         WHERE b.computed_at < NOW() - make_interval(secs => $1)
                     )
                     ORDER BY computed_at ASC NULLS FIRST
@@ -128,7 +134,7 @@ class UsersMixin:
         
         async with self.acquire() as conn:
             row = await conn.fetchrow(
-                "SELECT * FROM users WHERE uuid = $1",
+                select_sql(USERS_TABLE, "*", "WHERE uuid = $1"),
                 uuid
             )
             return _db_row_to_api_format(row) if row else None
@@ -140,7 +146,7 @@ class UsersMixin:
         
         async with self.acquire() as conn:
             row = await conn.fetchrow(
-                "SELECT uuid FROM users WHERE email = $1 LIMIT 1",
+                select_sql(USERS_TABLE, "uuid", "WHERE email = $1 LIMIT 1"),
                 email
             )
             return str(row["uuid"]) if row else None
@@ -153,7 +159,7 @@ class UsersMixin:
             return {}
         async with self.acquire() as conn:
             rows = await conn.fetch(
-                "SELECT email, uuid::text FROM users WHERE email = ANY($1::text[])",
+                select_sql(USERS_TABLE, "email, uuid::text", "WHERE email = ANY($1::text[])"),
                 emails,
             )
             return {r["email"]: r["uuid"] for r in rows}
@@ -166,7 +172,7 @@ class UsersMixin:
             return {}
         async with self.acquire() as conn:
             rows = await conn.fetch(
-                "SELECT short_uuid, uuid::text FROM users WHERE short_uuid = ANY($1::text[])",
+                select_sql(USERS_TABLE, "short_uuid, uuid::text", "WHERE short_uuid = ANY($1::text[])"),
                 short_uuids,
             )
             return {r["short_uuid"]: r["uuid"] for r in rows}
@@ -178,7 +184,7 @@ class UsersMixin:
         
         async with self.acquire() as conn:
             row = await conn.fetchrow(
-                "SELECT * FROM users WHERE LOWER(username) = LOWER($1)",
+                select_sql(USERS_TABLE, "*", "WHERE LOWER(username) = LOWER($1)"),
                 username
             )
             return _db_row_to_api_format(row) if row else None
@@ -190,7 +196,7 @@ class UsersMixin:
         
         async with self.acquire() as conn:
             row = await conn.fetchrow(
-                "SELECT * FROM users WHERE telegram_id = $1",
+                select_sql(USERS_TABLE, "*", "WHERE telegram_id = $1"),
                 telegram_id
             )
             return _db_row_to_api_format(row) if row else None
@@ -202,7 +208,7 @@ class UsersMixin:
         
         async with self.acquire() as conn:
             row = await conn.fetchrow(
-                "SELECT * FROM users WHERE short_uuid = $1",
+                select_sql(USERS_TABLE, "*", "WHERE short_uuid = $1"),
                 short_uuid
             )
             return _db_row_to_api_format(row) if row else None
@@ -214,7 +220,7 @@ class UsersMixin:
         
         async with self.acquire() as conn:
             row = await conn.fetchrow(
-                "SELECT * FROM users WHERE subscription_uuid = $1",
+                select_sql(USERS_TABLE, "*", "WHERE subscription_uuid = $1"),
                 subscription_uuid
             )
             return _db_row_to_api_format(row) if row else None
@@ -243,13 +249,13 @@ class UsersMixin:
             # UNION ALL allows each branch to use its own functional index
             # instead of a sequential scan caused by OR conditions
             row = await conn.fetchrow(
-                """
+                f"""
                 SELECT uuid FROM (
-                    SELECT uuid FROM users WHERE raw_data->>'id' = $1 AND raw_data IS NOT NULL
+                    SELECT uuid FROM {USERS_TABLE} WHERE raw_data->>'id' = $1 AND raw_data IS NOT NULL
                     UNION ALL
-                    SELECT uuid FROM users WHERE raw_data->>'userId' = $1 AND raw_data IS NOT NULL
+                    SELECT uuid FROM {USERS_TABLE} WHERE raw_data->>'userId' = $1 AND raw_data IS NOT NULL
                     UNION ALL
-                    SELECT uuid FROM users WHERE raw_data->>'user_id' = $1 AND raw_data IS NOT NULL
+                    SELECT uuid FROM {USERS_TABLE} WHERE raw_data->>'user_id' = $1 AND raw_data IS NOT NULL
                 ) sub
                 LIMIT 1
                 """,
@@ -288,7 +294,7 @@ class UsersMixin:
         async with self.acquire() as conn:
             rows = await conn.fetch(
                 f"""
-                SELECT {self._USER_LIST_COLUMNS} FROM users
+                SELECT {self._USER_LIST_COLUMNS} FROM {USERS_TABLE}
                 WHERE
                     LOWER(username) LIKE LOWER($1) OR
                     LOWER(email) LIKE LOWER($1) OR
@@ -307,7 +313,7 @@ class UsersMixin:
             return 0
         
         async with self.acquire() as conn:
-            result = await conn.fetchval("SELECT COUNT(*) FROM users")
+            result = await conn.fetchval(select_sql(USERS_TABLE, "COUNT(*)"))
             return result or 0
     
     # Allowlist для ORDER BY — защита от SQL-инъекции
@@ -317,7 +323,7 @@ class UsersMixin:
     _USER_LIST_COLUMNS = (
         "uuid, username, status, email, expire_at, traffic_limit_bytes, used_traffic_bytes, "
         "raw_used_traffic_bytes, hwid_device_limit, created_at, updated_at, short_uuid, "
-        "subscription_uuid, telegram_id"
+        "subscription_uuid, telegram_id, created_by_admin_id"
     )
 
     async def get_all_users(
@@ -340,12 +346,12 @@ class UsersMixin:
         async with self.acquire() as conn:
             if status:
                 rows = await conn.fetch(
-                    f"SELECT {self._USER_LIST_COLUMNS} FROM users WHERE status = $1 ORDER BY {order_by} LIMIT $2 OFFSET $3",
+                    f"SELECT {self._USER_LIST_COLUMNS} FROM {USERS_TABLE} WHERE status = $1 ORDER BY {order_by} LIMIT $2 OFFSET $3",
                     status, limit, offset
                 )
             else:
                 rows = await conn.fetch(
-                    f"SELECT {self._USER_LIST_COLUMNS} FROM users ORDER BY {order_by} LIMIT $1 OFFSET $2",
+                    f"SELECT {self._USER_LIST_COLUMNS} FROM {USERS_TABLE} ORDER BY {order_by} LIMIT $1 OFFSET $2",
                     limit, offset
                 )
             return [_db_row_to_api_format(row) for row in rows]
@@ -360,10 +366,7 @@ class UsersMixin:
         
         async with self.acquire() as conn:
             rows = await conn.fetch(
-                """
-                SELECT status, COUNT(*) as count FROM users 
-                GROUP BY status
-                """
+                select_sql(USERS_TABLE, "status, COUNT(*) as count", "GROUP BY status")
             )
             
             stats = {"total": 0, "active": 0, "expired": 0, "disabled": 0, "limited": 0}
@@ -387,16 +390,15 @@ class UsersMixin:
 
         async with self.acquire() as conn:
             row = await conn.fetchrow(
-                """
-                SELECT
-                    COUNT(*) AS total,
-                    COUNT(*) FILTER (WHERE LOWER(status) = 'active') AS active,
-                    COUNT(*) FILTER (WHERE LOWER(status) = 'disabled') AS disabled,
-                    COUNT(*) FILTER (WHERE LOWER(status) = 'expired') AS expired,
-                    COUNT(*) FILTER (WHERE LOWER(status) = 'limited') AS limited,
-                    COALESCE(SUM(used_traffic_bytes), 0) AS total_used_traffic_bytes
-                FROM users
-                """
+                select_sql(
+                    USERS_TABLE,
+                    "COUNT(*) AS total,\n"
+                    "                    COUNT(*) FILTER (WHERE LOWER(status) = 'active') AS active,\n"
+                    "                    COUNT(*) FILTER (WHERE LOWER(status) = 'disabled') AS disabled,\n"
+                    "                    COUNT(*) FILTER (WHERE LOWER(status) = 'expired') AS expired,\n"
+                    "                    COUNT(*) FILTER (WHERE LOWER(status) = 'limited') AS limited,\n"
+                    "                    COALESCE(SUM(used_traffic_bytes), 0) AS total_used_traffic_bytes"
+                )
             )
             return dict(row) if row else {
                 "total": 0, "active": 0, "disabled": 0, "expired": 0,
@@ -418,6 +420,9 @@ class UsersMixin:
         "traffic_limit_bytes": "COALESCE(traffic_limit_bytes, 0)",
         "hwid_device_limit": "COALESCE(hwid_device_limit, 0)",
         "online_at": "immutable_tstz(raw_data->'userTraffic'->>'onlineAt')",
+        "created_by_admin_username": (
+            "(" + select_sql(ADMIN_TABLE, 'username', 'WHERE id = users.created_by_admin_id') + ")"
+        ),
     }
 
     async def get_users_paginated(
@@ -433,6 +438,7 @@ class UsersMixin:
         sort_by: str = "created_at",
         sort_order: str = "desc",
         uuid_whitelist: Optional[List[str]] = None,
+        admin_id: Optional[int] = None,
     ) -> tuple:
         """
         Get paginated users with server-side filtering and sorting.
@@ -523,6 +529,12 @@ class UsersMixin:
                 f"traffic_limit_bytes > 0 AND (used_traffic_bytes::float / traffic_limit_bytes) >= ${param_idx}"
             )
 
+        # Filter: admin
+        if admin_id is not None:
+            param_idx += 1
+            args.append(admin_id)
+            conditions.append(f"created_by_admin_id = ${param_idx}")
+
         where_clause = " AND ".join(conditions) if conditions else "TRUE"
 
         # Sort
@@ -542,7 +554,7 @@ class UsersMixin:
 
         query = f"""
             SELECT *, COUNT(*) OVER() AS _total_count
-            FROM users
+            FROM {USERS_TABLE}
             WHERE {where_clause}
             ORDER BY {order_clause}
             LIMIT {limit_param} OFFSET {offset_param}
@@ -553,7 +565,7 @@ class UsersMixin:
 
         if not rows:
             # No results — still need total count for empty filter results
-            count_query = f"SELECT COUNT(*) FROM users WHERE {where_clause}"
+            count_query = select_sql(USERS_TABLE, "COUNT(*)", f"WHERE {where_clause}")
             # Remove limit/offset args for count query
             count_args = args[:-2]
             async with self.acquire() as conn:
@@ -571,8 +583,7 @@ class UsersMixin:
         try:
             async with self.acquire() as conn:
                 rows = await conn.fetch(
-                    "SELECT user_uuid, COUNT(*) as cnt FROM user_hwid_devices "
-                    "WHERE user_uuid = ANY($1::uuid[]) GROUP BY user_uuid",
+                    select_sql(USER_HWID_DEVICES_TABLE, "user_uuid, COUNT(*) as cnt", "WHERE user_uuid = ANY($1::uuid[]) GROUP BY user_uuid"),
                     user_uuids
                 )
                 return {str(row["user_uuid"]): row["cnt"] for row in rows}
@@ -587,8 +598,7 @@ class UsersMixin:
         try:
             async with self.acquire() as conn:
                 rows = await conn.fetch(
-                    "SELECT uuid::text, raw_used_traffic_bytes FROM users "
-                    "WHERE uuid = ANY($1::uuid[]) AND raw_used_traffic_bytes > 0",
+                    select_sql(USERS_TABLE, "uuid::text, raw_used_traffic_bytes", "WHERE uuid = ANY($1::uuid[]) AND raw_used_traffic_bytes > 0"),
                     user_uuids
                 )
                 return {r["uuid"]: int(r["raw_used_traffic_bytes"]) for r in rows}
@@ -603,7 +613,7 @@ class UsersMixin:
         
         async with self.acquire() as conn:
             rows = await conn.fetch(
-                "SELECT * FROM users WHERE status = $1 ORDER BY username LIMIT $2 OFFSET $3",
+                select_sql(USERS_TABLE, "*", "WHERE status = $1 ORDER BY username LIMIT $2 OFFSET $3"),
                 status, limit, offset
             )
             return [_db_row_to_api_format(row) for row in rows]
@@ -622,27 +632,34 @@ class UsersMixin:
         used_traffic = ut_val if ut_val is not None else response.get("usedTrafficBytes")
 
         await conn.execute(
-            """
-            INSERT INTO users (
-                uuid, short_uuid, username, subscription_uuid, telegram_id,
-                email, status, expire_at, traffic_limit_bytes, used_traffic_bytes,
-                hwid_device_limit, description, created_at, updated_at, raw_data
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, NOW(), $14)
-            ON CONFLICT (uuid) DO UPDATE SET
-                short_uuid = EXCLUDED.short_uuid,
-                username = EXCLUDED.username,
-                subscription_uuid = EXCLUDED.subscription_uuid,
-                telegram_id = EXCLUDED.telegram_id,
-                email = EXCLUDED.email,
-                status = EXCLUDED.status,
-                expire_at = EXCLUDED.expire_at,
-                traffic_limit_bytes = EXCLUDED.traffic_limit_bytes,
-                used_traffic_bytes = EXCLUDED.used_traffic_bytes,
-                hwid_device_limit = EXCLUDED.hwid_device_limit,
-                description = EXCLUDED.description,
-                updated_at = NOW(),
-                raw_data = EXCLUDED.raw_data
-            """,
+            insert_sql(
+                USERS_TABLE,
+                [
+                    "uuid", "short_uuid", "username", "subscription_uuid", "telegram_id",
+                    "email", "status", "expire_at", "traffic_limit_bytes", "used_traffic_bytes",
+                    "hwid_device_limit", "description", "created_at", "updated_at", "raw_data",
+                    "created_by_admin_id",
+                ],
+                values="$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, NOW(), $14,\n"
+                "                NULL",
+                suffix=(
+                    "ON CONFLICT (uuid) DO UPDATE SET "
+                    "short_uuid = EXCLUDED.short_uuid, "
+                    "username = EXCLUDED.username, "
+                    "subscription_uuid = EXCLUDED.subscription_uuid, "
+                    "telegram_id = EXCLUDED.telegram_id, "
+                    "email = EXCLUDED.email, "
+                    "status = EXCLUDED.status, "
+                    "expire_at = EXCLUDED.expire_at, "
+                    "traffic_limit_bytes = EXCLUDED.traffic_limit_bytes, "
+                    "used_traffic_bytes = EXCLUDED.used_traffic_bytes, "
+                    "hwid_device_limit = EXCLUDED.hwid_device_limit, "
+                    "description = EXCLUDED.description, "
+                    "updated_at = NOW(), "
+                    "raw_data = EXCLUDED.raw_data, "
+                    "created_by_admin_id = COALESCE(EXCLUDED.created_by_admin_id, users.created_by_admin_id)"
+                ),
+            ),
             uuid,
             response.get("shortUuid"),
             response.get("username"),
@@ -737,16 +754,18 @@ class UsersMixin:
         try:
             async with self.acquire() as conn:
                 result = await conn.execute(
-                    """
-                    INSERT INTO users (
+                    f"""
+                    INSERT INTO {USERS_TABLE} (
                         uuid, short_uuid, username, subscription_uuid, telegram_id,
                         email, status, expire_at, traffic_limit_bytes, used_traffic_bytes,
-                        hwid_device_limit, description, created_at, updated_at, raw_data
+                        hwid_device_limit, description, created_at, updated_at, raw_data,
+                        created_by_admin_id
                     )
                     SELECT
                         u::uuid, su, un, sub::uuid, tid::bigint,
                         em, st, ea, tl::bigint, ut::bigint,
-                        hl::integer, descr, ca, NOW(), rd::jsonb
+                        hl::integer, descr, ca, NOW(), rd::jsonb,
+                        NULL::integer
                     FROM UNNEST(
                         $1::text[], $2::text[], $3::text[], $4::text[], $5::text[],
                         $6::text[], $7::text[], $8::timestamptz[], $9::text[], $10::text[],
@@ -765,7 +784,8 @@ class UsersMixin:
                         hwid_device_limit = EXCLUDED.hwid_device_limit,
                         description = EXCLUDED.description,
                         updated_at = NOW(),
-                        raw_data = EXCLUDED.raw_data
+                        raw_data = EXCLUDED.raw_data,
+                        created_by_admin_id = COALESCE(EXCLUDED.created_by_admin_id, {USERS_TABLE}.created_by_admin_id)
                     """,
                     uuids, short_uuids, usernames, subscription_uuids, telegram_ids,
                     emails, statuses, expire_ats, traffic_limits, used_traffics,
@@ -784,10 +804,10 @@ class UsersMixin:
         async with self.acquire() as conn:
             async with conn.transaction():
                 await conn.execute(
-                    "DELETE FROM user_connections WHERE user_uuid = $1", uuid
+                    delete_sql(USER_CONNECTIONS_TABLE, "user_uuid = $1"), uuid
                 )
                 result = await conn.execute(
-                    "DELETE FROM users WHERE uuid = $1", uuid
+                    delete_sql(USERS_TABLE, "uuid = $1"), uuid
                 )
                 return result == "DELETE 1"
 
@@ -796,6 +816,6 @@ class UsersMixin:
         if not self.is_connected:
             return set()
         async with self.acquire() as conn:
-            rows = await conn.fetch("SELECT uuid FROM users")
+            rows = await conn.fetch(select_sql(USERS_TABLE, "uuid"))
             return {str(r["uuid"]) for r in rows}
 

@@ -8,6 +8,15 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 
 from shared.logger import logger
 from shared.db._base import _parse_timestamp
+from shared.db_schema import (
+    ADMIN_TABLE, USERS_TABLE, NODES_TABLE, USER_CONNECTIONS_TABLE, USER_BASELINES_TABLE,
+    USER_HWID_DEVICES_TABLE, VIOLATIONS_TABLE, IP_METADATA_TABLE, USER_NODE_TRAFFIC_TABLE,
+    USER_NODE_TRAFFIC_HISTORY_TABLE, HOSTS_TABLE, ACCESS_POLICIES_TABLE,
+    ACCESS_POLICY_RULES_TABLE, ROLE_ACCESS_POLICIES_TABLE, SUBSCRIPTION_REQUEST_HISTORY_TABLE,
+    BLOCKED_IPS_TABLE, HWID_BLACKLIST_TABLE, USER_BLACKLIST_TABLE, ASN_RUSSIA_TABLE,
+    NODE_TRAFFIC_SNAPSHOTS_TABLE, ONLINE_USERS_SNAPSHOTS_TABLE, ADMIN_ACCESS_POLICIES_TABLE,
+)
+from shared.db_query import select_sql, insert_sql, update_sql, delete_sql
 
 
 class NetworkMixin:
@@ -32,7 +41,7 @@ class NetworkMixin:
             async with self.acquire() as conn:
                 # Получаем raw_data пользователя, где могут быть данные об устройствах
                 row = await conn.fetchrow(
-                    "SELECT raw_data FROM users WHERE uuid = $1",
+                    select_sql(USERS_TABLE, "raw_data", "WHERE uuid = $1"),
                     user_uuid
                 )
                 
@@ -91,15 +100,17 @@ class NetworkMixin:
         
         try:
             async with self.acquire() as conn:
-                query = """
-                    SELECT ip_address, country_code, country_name, region, city,
+                row = await conn.fetchrow(
+                    select_sql(
+                        IP_METADATA_TABLE,
+                        """ip_address, country_code, country_name, region, city,
                            latitude, longitude, timezone, asn, asn_org,
                            connection_type, is_proxy, is_vpn, is_tor, is_hosting, is_mobile,
-                           created_at, updated_at, last_checked_at
-                    FROM ip_metadata
-                    WHERE ip_address = $1
-                """
-                row = await conn.fetchrow(query, ip_address)
+                           created_at, updated_at, last_checked_at""",
+                        "WHERE ip_address = $1",
+                    ),
+                    ip_address,
+                )
                 
                 if row:
                     return dict(row)
@@ -124,15 +135,17 @@ class NetworkMixin:
         
         try:
             async with self.acquire() as conn:
-                query = """
-                    SELECT ip_address, country_code, country_name, region, city,
+                rows = await conn.fetch(
+                    select_sql(
+                        IP_METADATA_TABLE,
+                        """ip_address, country_code, country_name, region, city,
                            latitude, longitude, timezone, asn, asn_org,
                            connection_type, is_proxy, is_vpn, is_tor, is_hosting, is_mobile,
-                           created_at, updated_at, last_checked_at
-                    FROM ip_metadata
-                    WHERE ip_address = ANY($1::text[])
-                """
-                rows = await conn.fetch(query, ip_addresses)
+                           created_at, updated_at, last_checked_at""",
+                        "WHERE ip_address = ANY($1::text[])",
+                    ),
+                    ip_addresses,
+                )
                 
                 result = {}
                 for row in rows:
@@ -178,8 +191,9 @@ class NetworkMixin:
         
         try:
             async with self.acquire() as conn:
-                query = """
-                    INSERT INTO ip_metadata (
+                await conn.execute(
+                    f"""
+                    INSERT INTO {IP_METADATA_TABLE} (
                         ip_address, country_code, country_name, region, city,
                         latitude, longitude, timezone, asn, asn_org,
                         connection_type, is_proxy, is_vpn, is_tor, is_hosting, is_mobile,
@@ -206,10 +220,7 @@ class NetworkMixin:
                         is_mobile = EXCLUDED.is_mobile,
                         last_checked_at = NOW(),
                         updated_at = NOW()
-                """
-                
-                await conn.execute(
-                    query,
+                    """,
                     ip_address, country_code, country_name, region, city,
                     latitude, longitude, timezone, asn, asn_org,
                     connection_type, is_proxy, is_vpn, is_tor, is_hosting, is_mobile
@@ -237,12 +248,10 @@ class NetworkMixin:
         
         try:
             async with self.acquire() as conn:
-                query = """
-                    SELECT last_checked_at
-                    FROM ip_metadata
-                    WHERE ip_address = $1
-                """
-                row = await conn.fetchrow(query, ip_address)
+                row = await conn.fetchrow(
+                    select_sql(IP_METADATA_TABLE, "last_checked_at", "WHERE ip_address = $1"),
+                    ip_address,
+                )
                 
                 if not row or not row['last_checked_at']:
                     return True  # Нет данных - нужно получить
@@ -272,14 +281,16 @@ class NetworkMixin:
         
         try:
             async with self.acquire() as conn:
-                query = """
-                    SELECT asn, org_name, org_name_en, provider_type, region, city,
+                row = await conn.fetchrow(
+                    select_sql(
+                        ASN_RUSSIA_TABLE,
+                        """asn, org_name, org_name_en, provider_type, region, city,
                            country_code, description, ip_ranges, is_active,
-                           created_at, updated_at, last_synced_at
-                    FROM asn_russia
-                    WHERE asn = $1 AND is_active = true
-                """
-                row = await conn.fetchrow(query, asn)
+                           created_at, updated_at, last_synced_at""",
+                        "WHERE asn = $1 AND is_active = true",
+                    ),
+                    asn,
+                )
                 
                 if row:
                     return dict(row)
@@ -304,16 +315,18 @@ class NetworkMixin:
         
         try:
             async with self.acquire() as conn:
-                query = """
-                    SELECT asn, org_name, org_name_en, provider_type, region, city,
-                           country_code, description, is_active
-                    FROM asn_russia
-                    WHERE (LOWER(org_name) LIKE LOWER($1) OR LOWER(org_name_en) LIKE LOWER($1))
-                      AND is_active = true
-                    ORDER BY org_name
-                    LIMIT 100
-                """
-                rows = await conn.fetch(query, f"%{org_name}%")
+                rows = await conn.fetch(
+                    select_sql(
+                        ASN_RUSSIA_TABLE,
+                        """asn, org_name, org_name_en, provider_type, region, city,
+                           country_code, description, is_active""",
+                        """WHERE (LOWER(org_name) LIKE LOWER($1) OR LOWER(org_name_en) LIKE LOWER($1))
+                          AND is_active = true
+                        ORDER BY org_name
+                        LIMIT 100""",
+                    ),
+                    f"%{org_name}%",
+                )
                 return [dict(row) for row in rows]
             
         except Exception as e:
@@ -335,27 +348,6 @@ class NetworkMixin:
         
         try:
             async with self.acquire() as conn:
-                query = """
-                    INSERT INTO asn_russia (
-                        asn, org_name, org_name_en, provider_type, region, city,
-                        country_code, description, ip_ranges, is_active, updated_at
-                    )
-                    VALUES (
-                        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW()
-                    )
-                    ON CONFLICT (asn) DO UPDATE SET
-                        org_name = EXCLUDED.org_name,
-                        org_name_en = EXCLUDED.org_name_en,
-                        provider_type = EXCLUDED.provider_type,
-                        region = EXCLUDED.region,
-                        city = EXCLUDED.city,
-                        country_code = EXCLUDED.country_code,
-                        description = EXCLUDED.description,
-                        ip_ranges = EXCLUDED.ip_ranges,
-                        is_active = EXCLUDED.is_active,
-                        updated_at = NOW()
-                """
-                
                 ip_ranges_json = None
                 if asn_record.ip_ranges:
                     ip_ranges_json = json.dumps(asn_record.ip_ranges)
@@ -390,7 +382,26 @@ class NetworkMixin:
                     ip_ranges_json = None
                 
                 await conn.execute(
-                    query,
+                    f"""
+                    INSERT INTO {ASN_RUSSIA_TABLE} (
+                        asn, org_name, org_name_en, provider_type, region, city,
+                        country_code, description, ip_ranges, is_active, updated_at
+                    )
+                    VALUES (
+                        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW()
+                    )
+                    ON CONFLICT (asn) DO UPDATE SET
+                        org_name = EXCLUDED.org_name,
+                        org_name_en = EXCLUDED.org_name_en,
+                        provider_type = EXCLUDED.provider_type,
+                        region = EXCLUDED.region,
+                        city = EXCLUDED.city,
+                        country_code = EXCLUDED.country_code,
+                        description = EXCLUDED.description,
+                        ip_ranges = EXCLUDED.ip_ranges,
+                        is_active = EXCLUDED.is_active,
+                        updated_at = NOW()
+                    """,
                     asn_num,
                     org_name,
                     org_name_en,
@@ -424,13 +435,14 @@ class NetworkMixin:
         
         try:
             async with self.acquire() as conn:
-                query = """
-                    SELECT asn, org_name, org_name_en, provider_type, region, city
-                    FROM asn_russia
-                    WHERE provider_type = $1 AND is_active = true
-                    ORDER BY org_name
-                """
-                rows = await conn.fetch(query, provider_type)
+                rows = await conn.fetch(
+                    select_sql(
+                        ASN_RUSSIA_TABLE,
+                        "asn, org_name, org_name_en, provider_type, region, city",
+                        "WHERE provider_type = $1 AND is_active = true ORDER BY org_name",
+                    ),
+                    provider_type,
+                )
                 return [dict(row) for row in rows]
             
         except Exception as e:
@@ -445,13 +457,13 @@ class NetworkMixin:
         try:
             async with self.acquire() as conn:
                 # Обновляем время синхронизации для активных записей, которые давно не обновлялись
-                query = """
-                    UPDATE asn_russia
-                    SET last_synced_at = NOW()
-                    WHERE is_active = true
-                    AND (last_synced_at IS NULL OR last_synced_at < NOW() - INTERVAL '1 hour')
-                """
-                await conn.execute(query)
+                await conn.execute(
+                    update_sql(
+                        ASN_RUSSIA_TABLE,
+                        "last_synced_at = NOW()",
+                        "WHERE is_active = true AND (last_synced_at IS NULL OR last_synced_at < NOW() - INTERVAL '1 hour')",
+                    ),
+                )
             
         except Exception as e:
             logger.error("Error updating ASN sync time: %s", e, exc_info=True)
@@ -491,18 +503,18 @@ class NetworkMixin:
         try:
             async with self.acquire() as conn:
                 await conn.execute(
-                    """
-                    INSERT INTO user_hwid_devices (
+                    f"""
+                    INSERT INTO {USER_HWID_DEVICES_TABLE} (
                         user_uuid, hwid, platform, os_version, device_model, app_version,
                         user_agent, created_at, updated_at, synced_at
                     )
                     VALUES ($1, $2, $3, $4, $5, $6, $7, COALESCE($8, NOW()), COALESCE($9, NOW()), NOW())
                     ON CONFLICT (user_uuid, hwid) DO UPDATE SET
-                        platform = COALESCE(EXCLUDED.platform, user_hwid_devices.platform),
-                        os_version = COALESCE(EXCLUDED.os_version, user_hwid_devices.os_version),
-                        device_model = COALESCE(EXCLUDED.device_model, user_hwid_devices.device_model),
-                        app_version = COALESCE(EXCLUDED.app_version, user_hwid_devices.app_version),
-                        user_agent = COALESCE(EXCLUDED.user_agent, user_hwid_devices.user_agent),
+                        platform = COALESCE(EXCLUDED.platform, {USER_HWID_DEVICES_TABLE}.platform),
+                        os_version = COALESCE(EXCLUDED.os_version, {USER_HWID_DEVICES_TABLE}.os_version),
+                        device_model = COALESCE(EXCLUDED.device_model, {USER_HWID_DEVICES_TABLE}.device_model),
+                        app_version = COALESCE(EXCLUDED.app_version, {USER_HWID_DEVICES_TABLE}.app_version),
+                        user_agent = COALESCE(EXCLUDED.user_agent, {USER_HWID_DEVICES_TABLE}.user_agent),
                         updated_at = COALESCE(EXCLUDED.updated_at, NOW()),
                         synced_at = NOW()
                     """,
@@ -528,7 +540,7 @@ class NetworkMixin:
         try:
             async with self.acquire() as conn:
                 result = await conn.execute(
-                    "DELETE FROM user_hwid_devices WHERE user_uuid = $1 AND hwid = $2",
+                    delete_sql(USER_HWID_DEVICES_TABLE, "user_uuid = $1 AND hwid = $2"),
                     user_uuid, hwid
                 )
                 return "DELETE" in result
@@ -550,7 +562,7 @@ class NetworkMixin:
         try:
             async with self.acquire() as conn:
                 result = await conn.execute(
-                    "DELETE FROM user_hwid_devices WHERE user_uuid = $1",
+                    delete_sql(USER_HWID_DEVICES_TABLE, "user_uuid = $1"),
                     user_uuid
                 )
                 # Parse "DELETE X" to get count
@@ -578,13 +590,12 @@ class NetworkMixin:
         try:
             async with self.acquire() as conn:
                 rows = await conn.fetch(
-                    """
-                    SELECT hwid, platform, os_version, device_model, app_version,
-                           user_agent, created_at, updated_at
-                    FROM user_hwid_devices
-                    WHERE user_uuid = $1
-                    ORDER BY created_at DESC
-                    """,
+                    select_sql(
+                        USER_HWID_DEVICES_TABLE,
+                        """hwid, platform, os_version, device_model, app_version,
+                           user_agent, created_at, updated_at""",
+                        "WHERE user_uuid = $1 ORDER BY created_at DESC",
+                    ),
                     user_uuid
                 )
                 return [dict(row) for row in rows]
@@ -606,7 +617,7 @@ class NetworkMixin:
         try:
             async with self.acquire() as conn:
                 result = await conn.fetchval(
-                    "SELECT COUNT(*) FROM user_hwid_devices WHERE user_uuid = $1",
+                    select_sql(USER_HWID_DEVICES_TABLE, "COUNT(*)", "WHERE user_uuid = $1"),
                     user_uuid
                 )
                 return result or 0
@@ -643,8 +654,8 @@ class NetworkMixin:
         try:
             async with self.acquire() as conn:
                 await conn.executemany(
-                    """
-                    INSERT INTO subscription_request_history (id, user_uuid, request_ip, user_agent, request_at)
+                    f"""
+                    INSERT INTO {SUBSCRIPTION_REQUEST_HISTORY_TABLE} (id, user_uuid, request_ip, user_agent, request_at)
                     VALUES ($1, $2, $3, $4, $5)
                     ON CONFLICT (id) DO UPDATE SET
                         user_uuid = EXCLUDED.user_uuid,
@@ -673,24 +684,20 @@ class NetworkMixin:
             async with self.acquire() as conn:
                 if max_age_days > 0:
                     rows = await conn.fetch(
-                        """
-                        SELECT id, user_uuid, request_ip, user_agent, request_at
-                        FROM subscription_request_history
-                        WHERE user_uuid = $1 AND request_at >= NOW() - $2::interval
-                        ORDER BY request_at DESC
-                        LIMIT $3
-                        """,
+                        select_sql(
+                            SUBSCRIPTION_REQUEST_HISTORY_TABLE,
+                            "id, user_uuid, request_ip, user_agent, request_at",
+                            "WHERE user_uuid = $1 AND request_at >= NOW() - $2::interval ORDER BY request_at DESC LIMIT $3",
+                        ),
                         user_uuid, f"{max_age_days} days", limit,
                     )
                 else:
                     rows = await conn.fetch(
-                        """
-                        SELECT id, user_uuid, request_ip, user_agent, request_at
-                        FROM subscription_request_history
-                        WHERE user_uuid = $1
-                        ORDER BY request_at DESC
-                        LIMIT $2
-                        """,
+                        select_sql(
+                            SUBSCRIPTION_REQUEST_HISTORY_TABLE,
+                            "id, user_uuid, request_ip, user_agent, request_at",
+                            "WHERE user_uuid = $1 ORDER BY request_at DESC LIMIT $2",
+                        ),
                         user_uuid, limit,
                     )
             return [dict(r) for r in rows]
@@ -704,7 +711,7 @@ class NetworkMixin:
             return 0
         try:
             async with self.acquire() as conn:
-                val = await conn.fetchval("SELECT COALESCE(MAX(id), 0) FROM subscription_request_history")
+                val = await conn.fetchval(select_sql(SUBSCRIPTION_REQUEST_HISTORY_TABLE, "COALESCE(MAX(id), 0)"))
                 return int(val or 0)
         except Exception:
             return 0
@@ -716,7 +723,7 @@ class NetworkMixin:
         try:
             async with self.acquire() as conn:
                 result = await conn.execute(
-                    "DELETE FROM subscription_request_history WHERE request_at < NOW() - $1::interval",
+                    delete_sql(SUBSCRIPTION_REQUEST_HISTORY_TABLE, "request_at < NOW() - $1::interval"),
                     f"{keep_days} days",
                 )
                 deleted = int(result.split()[-1]) if result and result.split() else 0
@@ -738,7 +745,7 @@ class NetworkMixin:
         try:
             async with self.acquire() as conn:
                 rows = await conn.fetch(
-                    "SELECT user_uuid, COUNT(*) as cnt FROM user_hwid_devices GROUP BY user_uuid"
+                    select_sql(USER_HWID_DEVICES_TABLE, "user_uuid, COUNT(*) as cnt", "GROUP BY user_uuid")
                 )
                 return {str(row["user_uuid"]): row["cnt"] for row in rows}
 
@@ -771,7 +778,7 @@ class NetworkMixin:
                     # Получаем текущие HWID
                     current_hwids = set()
                     rows = await conn.fetch(
-                        "SELECT hwid FROM user_hwid_devices WHERE user_uuid = $1",
+                        select_sql(USER_HWID_DEVICES_TABLE, "hwid", "WHERE user_uuid = $1"),
                         user_uuid
                     )
                     current_hwids = {row['hwid'] for row in rows}
@@ -787,7 +794,7 @@ class NetworkMixin:
                     to_delete = current_hwids - new_hwids
                     if to_delete:
                         await conn.execute(
-                            "DELETE FROM user_hwid_devices WHERE user_uuid = $1 AND hwid = ANY($2)",
+                            delete_sql(USER_HWID_DEVICES_TABLE, "user_uuid = $1 AND hwid = ANY($2)"),
                             user_uuid, list(to_delete)
                         )
                         logger.debug("Deleted %d old HWID devices for user %s", len(to_delete), user_uuid)
@@ -813,18 +820,18 @@ class NetworkMixin:
                             updated_at = _parse_timestamp(device.get('updatedAt'))
 
                         await conn.execute(
-                            """
-                            INSERT INTO user_hwid_devices (
+                            f"""
+                            INSERT INTO {USER_HWID_DEVICES_TABLE} (
                                 user_uuid, hwid, platform, os_version, device_model,
                                 app_version, user_agent, created_at, updated_at, synced_at
                             )
                             VALUES ($1, $2, $3, $4, $5, $6, $7, COALESCE($8, NOW()), COALESCE($9, NOW()), NOW())
                             ON CONFLICT (user_uuid, hwid) DO UPDATE SET
-                                platform = COALESCE(EXCLUDED.platform, user_hwid_devices.platform),
-                                os_version = COALESCE(EXCLUDED.os_version, user_hwid_devices.os_version),
-                                device_model = COALESCE(EXCLUDED.device_model, user_hwid_devices.device_model),
-                                app_version = COALESCE(EXCLUDED.app_version, user_hwid_devices.app_version),
-                                user_agent = COALESCE(EXCLUDED.user_agent, user_hwid_devices.user_agent),
+                                platform = COALESCE(EXCLUDED.platform, {USER_HWID_DEVICES_TABLE}.platform),
+                                os_version = COALESCE(EXCLUDED.os_version, {USER_HWID_DEVICES_TABLE}.os_version),
+                                device_model = COALESCE(EXCLUDED.device_model, {USER_HWID_DEVICES_TABLE}.device_model),
+                                app_version = COALESCE(EXCLUDED.app_version, {USER_HWID_DEVICES_TABLE}.app_version),
+                                user_agent = COALESCE(EXCLUDED.user_agent, {USER_HWID_DEVICES_TABLE}.user_agent),
                                 updated_at = COALESCE(EXCLUDED.updated_at, NOW()),
                                 synced_at = NOW()
                             """,
@@ -853,24 +860,19 @@ class NetworkMixin:
             async with self.acquire() as conn:
                 # Общая статистика
                 stats = await conn.fetchrow(
-                    """
-                    SELECT
-                        COUNT(*) as total_devices,
-                        COUNT(DISTINCT user_uuid) as unique_users
-                    FROM user_hwid_devices
-                    """
+                    select_sql(
+                        USER_HWID_DEVICES_TABLE,
+                        "COUNT(*) as total_devices, COUNT(DISTINCT user_uuid) as unique_users",
+                    ),
                 )
 
                 # Статистика по платформам
                 platform_rows = await conn.fetch(
-                    """
-                    SELECT
-                        COALESCE(platform, 'unknown') as platform,
-                        COUNT(*) as count
-                    FROM user_hwid_devices
-                    GROUP BY platform
-                    ORDER BY count DESC
-                    """
+                    select_sql(
+                        USER_HWID_DEVICES_TABLE,
+                        "COALESCE(platform, 'unknown') as platform, COUNT(*) as count",
+                        "GROUP BY platform ORDER BY count DESC",
+                    ),
                 )
 
                 by_platform = {row['platform']: row['count'] for row in platform_rows}
@@ -908,10 +910,10 @@ class NetworkMixin:
         try:
             async with self.acquire() as conn:
                 rows = await conn.fetch(
-                    """
+                    f"""
                     WITH shared AS (
                         SELECT hwid
-                        FROM user_hwid_devices
+                        FROM {USER_HWID_DEVICES_TABLE}
                         GROUP BY hwid
                         HAVING COUNT(DISTINCT user_uuid) >= $1
                         ORDER BY COUNT(DISTINCT user_uuid) DESC
@@ -925,8 +927,8 @@ class NetworkMixin:
                            u.tag,
                            u.raw_data
                     FROM shared s
-                    JOIN user_hwid_devices h ON h.hwid = s.hwid
-                    JOIN users u ON h.user_uuid = u.uuid
+                    JOIN {USER_HWID_DEVICES_TABLE} h ON h.hwid = s.hwid
+                    JOIN {USERS_TABLE} u ON h.user_uuid = u.uuid
                     ORDER BY h.hwid, h.created_at ASC
                     """,
                     min_users, limit,
@@ -1011,17 +1013,17 @@ class NetworkMixin:
         try:
             async with self.acquire() as conn:
                 rows = await conn.fetch(
-                    """
+                    f"""
                     SELECT h2.hwid,
                            u.uuid::text  AS user_uuid,
                            u.username,
                            u.status,
                            u.telegram_id,
                            me.telegram_id AS self_telegram_id
-                    FROM user_hwid_devices h1
-                    JOIN users me ON me.uuid = h1.user_uuid
-                    JOIN user_hwid_devices h2 ON h1.hwid = h2.hwid AND h2.user_uuid != h1.user_uuid
-                    JOIN users u ON h2.user_uuid = u.uuid
+                    FROM {USER_HWID_DEVICES_TABLE} h1
+                    JOIN {USERS_TABLE} me ON me.uuid = h1.user_uuid
+                    JOIN {USER_HWID_DEVICES_TABLE} h2 ON h1.hwid = h2.hwid AND h2.user_uuid != h1.user_uuid
+                    JOIN {USERS_TABLE} u ON h2.user_uuid = u.uuid
                     WHERE h1.user_uuid = $1
                     ORDER BY h2.hwid, u.username
                     """,
@@ -1065,7 +1067,7 @@ class NetworkMixin:
             where = "" if include_expired else "WHERE expires_at IS NULL OR expires_at > NOW()"
             async with self.acquire() as conn:
                 rows = await conn.fetch(
-                    f"SELECT * FROM blocked_ips {where} ORDER BY created_at DESC LIMIT $1 OFFSET $2",
+                    select_sql(BLOCKED_IPS_TABLE, "*", f"{where} ORDER BY created_at DESC LIMIT $1 OFFSET $2"),
                     limit, offset,
                 )
                 return [dict(r) for r in rows]
@@ -1080,7 +1082,7 @@ class NetworkMixin:
         try:
             where = "" if include_expired else "WHERE expires_at IS NULL OR expires_at > NOW()"
             async with self.acquire() as conn:
-                return await conn.fetchval(f"SELECT COUNT(*) FROM blocked_ips {where}") or 0
+                return await conn.fetchval(select_sql(BLOCKED_IPS_TABLE, "COUNT(*)", where)) or 0
         except Exception as e:
             logger.error("Error getting blocked IPs count: %s", e)
             return 0
@@ -1099,9 +1101,9 @@ class NetworkMixin:
         try:
             async with self.acquire() as conn:
                 row = await conn.fetchrow(
-                    """
-                    INSERT INTO blocked_ips (ip_cidr, reason, added_by_admin_id, added_by_username,
-                                             country_code, asn_org, expires_at)
+                    f"""
+                    INSERT INTO {BLOCKED_IPS_TABLE} (ip_cidr, reason, added_by_admin_id, added_by_username,
+                                                     country_code, asn_org, expires_at)
                     VALUES ($1::cidr, $2, $3, $4, $5, $6, $7)
                     ON CONFLICT (ip_cidr) DO NOTHING
                     RETURNING *
@@ -1118,7 +1120,7 @@ class NetworkMixin:
         """Remove blocked IP by id."""
         try:
             async with self.acquire() as conn:
-                result = await conn.execute("DELETE FROM blocked_ips WHERE id = $1", ip_id)
+                result = await conn.execute(delete_sql(BLOCKED_IPS_TABLE, "id = $1"), ip_id)
                 return "DELETE 1" in result
         except Exception as e:
             logger.error("Error removing blocked IP %d: %s", ip_id, e)
@@ -1128,7 +1130,7 @@ class NetworkMixin:
         """Remove blocked IP by CIDR string."""
         try:
             async with self.acquire() as conn:
-                result = await conn.execute("DELETE FROM blocked_ips WHERE ip_cidr = $1::cidr", ip_cidr)
+                result = await conn.execute(delete_sql(BLOCKED_IPS_TABLE, "ip_cidr = $1::cidr"), ip_cidr)
                 return "DELETE 1" in result
         except Exception as e:
             logger.error("Error removing blocked IP %s: %s", ip_cidr, e)
@@ -1141,7 +1143,7 @@ class NetworkMixin:
         try:
             async with self.acquire() as conn:
                 rows = await conn.fetch(
-                    "SELECT ip_cidr::text FROM blocked_ips WHERE expires_at IS NULL OR expires_at > NOW()"
+                    select_sql(BLOCKED_IPS_TABLE, "ip_cidr::text", "WHERE expires_at IS NULL OR expires_at > NOW()")
                 )
                 return [r["ip_cidr"] for r in rows]
         except Exception as e:
@@ -1153,7 +1155,7 @@ class NetworkMixin:
         try:
             async with self.acquire() as conn:
                 result = await conn.execute(
-                    "DELETE FROM blocked_ips WHERE expires_at IS NOT NULL AND expires_at < NOW()"
+                    delete_sql(BLOCKED_IPS_TABLE, "expires_at IS NOT NULL AND expires_at < NOW()")
                 )
                 count = int(result.split()[-1]) if result else 0
                 if count > 0:
@@ -1169,7 +1171,7 @@ class NetworkMixin:
         """Get all blacklisted HWIDs."""
         async with self.acquire() as conn:
             rows = await conn.fetch(
-                "SELECT * FROM hwid_blacklist ORDER BY created_at DESC"
+                select_sql(HWID_BLACKLIST_TABLE, "*", "ORDER BY created_at DESC")
             )
             return [dict(r) for r in rows]
 
@@ -1177,7 +1179,7 @@ class NetworkMixin:
         """Check if a specific HWID is blacklisted. Returns the entry or None."""
         async with self.acquire() as conn:
             row = await conn.fetchrow(
-                "SELECT * FROM hwid_blacklist WHERE hwid = $1", hwid
+                select_sql(HWID_BLACKLIST_TABLE, "*", "WHERE hwid = $1"), hwid
             )
             return dict(row) if row else None
 
@@ -1187,7 +1189,7 @@ class NetworkMixin:
             return []
         async with self.acquire() as conn:
             rows = await conn.fetch(
-                "SELECT * FROM hwid_blacklist WHERE hwid = ANY($1::text[])", hwids
+                select_sql(HWID_BLACKLIST_TABLE, "*", "WHERE hwid = ANY($1::text[])"), hwids
             )
             return [dict(r) for r in rows]
 
@@ -1202,8 +1204,8 @@ class NetworkMixin:
         """Add HWID to blacklist. Returns created entry or None if already exists."""
         async with self.acquire() as conn:
             row = await conn.fetchrow(
-                """
-                INSERT INTO hwid_blacklist (hwid, action, reason, added_by_admin_id, added_by_username)
+                f"""
+                INSERT INTO {HWID_BLACKLIST_TABLE} (hwid, action, reason, added_by_admin_id, added_by_username)
                 VALUES ($1, $2, $3, $4, $5)
                 ON CONFLICT (hwid) DO UPDATE SET
                     action = EXCLUDED.action,
@@ -1220,7 +1222,7 @@ class NetworkMixin:
         """Remove HWID from blacklist. Returns True if deleted."""
         async with self.acquire() as conn:
             result = await conn.execute(
-                "DELETE FROM hwid_blacklist WHERE hwid = $1", hwid
+                delete_sql(HWID_BLACKLIST_TABLE, "hwid = $1"), hwid
             )
             return "DELETE 1" in result
 
@@ -1228,11 +1230,11 @@ class NetworkMixin:
         """Find all users that have a specific HWID."""
         async with self.acquire() as conn:
             rows = await conn.fetch(
-                """
+                f"""
                 SELECT h.user_uuid, u.username, u.status, h.platform, h.device_model,
                        h.created_at as hwid_first_seen, h.updated_at as hwid_last_seen
-                FROM user_hwid_devices h
-                LEFT JOIN users u ON u.uuid = h.user_uuid
+                FROM {USER_HWID_DEVICES_TABLE} h
+                LEFT JOIN {USERS_TABLE} u ON u.uuid = h.user_uuid
                 WHERE h.hwid = $1
                 ORDER BY h.updated_at DESC
                 """,
@@ -1247,12 +1249,12 @@ class NetworkMixin:
         async with self.acquire() as conn:
             if source:
                 rows = await conn.fetch(
-                    "SELECT * FROM user_blacklist WHERE source = $1 ORDER BY created_at DESC LIMIT $2 OFFSET $3",
+                    select_sql(USER_BLACKLIST_TABLE, "*", "WHERE source = $1 ORDER BY created_at DESC LIMIT $2 OFFSET $3"),
                     source, limit, offset,
                 )
             else:
                 rows = await conn.fetch(
-                    "SELECT * FROM user_blacklist ORDER BY created_at DESC LIMIT $1 OFFSET $2",
+                    select_sql(USER_BLACKLIST_TABLE, "*", "ORDER BY created_at DESC LIMIT $1 OFFSET $2"),
                     limit, offset,
                 )
             return [dict(r) for r in rows]
@@ -1262,15 +1264,15 @@ class NetworkMixin:
         async with self.acquire() as conn:
             if source:
                 return await conn.fetchval(
-                    "SELECT COUNT(*) FROM user_blacklist WHERE source = $1", source
+                    select_sql(USER_BLACKLIST_TABLE, "COUNT(*)", "WHERE source = $1"), source
                 ) or 0
-            return await conn.fetchval("SELECT COUNT(*) FROM user_blacklist") or 0
+            return await conn.fetchval(select_sql(USER_BLACKLIST_TABLE, "COUNT(*)")) or 0
 
     async def is_telegram_id_blacklisted(self, telegram_id: int) -> dict | None:
         """Check if a Telegram ID is in the blacklist. Returns entry or None."""
         async with self.acquire() as conn:
             row = await conn.fetchrow(
-                "SELECT * FROM user_blacklist WHERE telegram_id = $1", telegram_id
+                select_sql(USER_BLACKLIST_TABLE, "*", "WHERE telegram_id = $1"), telegram_id
             )
             return dict(row) if row else None
 
@@ -1280,7 +1282,7 @@ class NetworkMixin:
             return []
         async with self.acquire() as conn:
             rows = await conn.fetch(
-                "SELECT * FROM user_blacklist WHERE telegram_id = ANY($1::bigint[])",
+                select_sql(USER_BLACKLIST_TABLE, "*", "WHERE telegram_id = ANY($1::bigint[])"),
                 telegram_ids,
             )
             return [dict(r) for r in rows]
@@ -1291,7 +1293,7 @@ class NetworkMixin:
         async with self.acquire() as conn:
             try:
                 await conn.execute(
-                    """INSERT INTO user_blacklist (telegram_id, reason, source, added_by_username)
+                    f"""INSERT INTO {USER_BLACKLIST_TABLE} (telegram_id, reason, source, added_by_username)
                        VALUES ($1, $2, $3, $4)
                        ON CONFLICT (telegram_id) DO UPDATE SET reason = $2, source = $3""",
                     telegram_id, reason, source, added_by,
@@ -1307,7 +1309,7 @@ class NetworkMixin:
             return 0
         async with self.acquire() as conn:
             result = await conn.executemany(
-                """INSERT INTO user_blacklist (telegram_id, reason, source)
+                f"""INSERT INTO {USER_BLACKLIST_TABLE} (telegram_id, reason, source)
                    VALUES ($1, $2, $3)
                    ON CONFLICT (telegram_id) DO UPDATE SET reason = $2, source = $3""",
                 entries,
@@ -1318,7 +1320,7 @@ class NetworkMixin:
         """Remove a Telegram ID from the blacklist."""
         async with self.acquire() as conn:
             result = await conn.execute(
-                "DELETE FROM user_blacklist WHERE telegram_id = $1", telegram_id
+                delete_sql(USER_BLACKLIST_TABLE, "telegram_id = $1"), telegram_id
             )
             return "DELETE 1" in result
 
@@ -1326,7 +1328,7 @@ class NetworkMixin:
         """Remove all entries from a specific source. Returns count deleted."""
         async with self.acquire() as conn:
             result = await conn.execute(
-                "DELETE FROM user_blacklist WHERE source = $1", source
+                delete_sql(USER_BLACKLIST_TABLE, "source = $1"), source
             )
             # Extract count from "DELETE N"
             try:
@@ -1338,8 +1340,11 @@ class NetworkMixin:
         """Get distinct sources with entry counts."""
         async with self.acquire() as conn:
             rows = await conn.fetch(
-                """SELECT source, COUNT(*) as count, MAX(created_at) as last_updated
-                   FROM user_blacklist GROUP BY source ORDER BY count DESC"""
+                select_sql(
+                    USER_BLACKLIST_TABLE,
+                    "source, COUNT(*) as count, MAX(created_at) as last_updated",
+                    "GROUP BY source ORDER BY count DESC",
+                ),
             )
             return [dict(r) for r in rows]
 
@@ -1357,8 +1362,8 @@ class NetworkMixin:
             return
         async with self.acquire() as conn:
             await conn.executemany(
-                """
-                INSERT INTO node_traffic_snapshots (node_uuid, traffic_bytes, created_at)
+                f"""
+                INSERT INTO {NODE_TRAFFIC_SNAPSHOTS_TABLE} (node_uuid, traffic_bytes, created_at)
                 VALUES ($1::uuid, $2, NOW())
                 """,
                 snapshots,
@@ -1380,7 +1385,7 @@ class NetworkMixin:
         until = until or datetime.now(timezone.utc)
         async with self.acquire() as conn:
             rows = await conn.fetch(
-                """
+                f"""
                 SELECT
                     date_trunc('hour', created_at)
                         + INTERVAL '1 minute' * ($3 * FLOOR(
@@ -1388,7 +1393,7 @@ class NetworkMixin:
                           )) AS bucket,
                     node_uuid::text,
                     MAX(traffic_bytes) AS traffic_bytes
-                FROM node_traffic_snapshots
+                FROM {NODE_TRAFFIC_SNAPSHOTS_TABLE}
                 WHERE created_at >= $1 AND created_at < $2
                 GROUP BY bucket, node_uuid
                 ORDER BY bucket
@@ -1403,7 +1408,7 @@ class NetworkMixin:
             return 0
         async with self.acquire() as conn:
             result = await conn.execute(
-                "DELETE FROM node_traffic_snapshots WHERE created_at < NOW() - INTERVAL '1 day' * $1",
+                delete_sql(NODE_TRAFFIC_SNAPSHOTS_TABLE, "created_at < NOW() - INTERVAL '1 day' * $1"),
                 keep_days,
             )
             return int(result.split()[-1]) if result else 0
@@ -1416,7 +1421,7 @@ class NetworkMixin:
             return
         async with self.acquire() as conn:
             await conn.execute(
-                "INSERT INTO online_users_snapshots (total) VALUES ($1)",
+                insert_sql(ONLINE_USERS_SNAPSHOTS_TABLE, ["total"]),
                 int(total),
             )
 
@@ -1444,7 +1449,7 @@ class NetworkMixin:
                             EXTRACT(MINUTE FROM ts) / $3
                           )) AS bucket,
                     {agg_sql} AS value
-                FROM online_users_snapshots
+                FROM {ONLINE_USERS_SNAPSHOTS_TABLE}
                 WHERE ts >= $1 AND ts < $2
                 GROUP BY bucket
                 ORDER BY bucket
@@ -1459,7 +1464,7 @@ class NetworkMixin:
             return 0
         async with self.acquire() as conn:
             result = await conn.execute(
-                "DELETE FROM online_users_snapshots WHERE ts < NOW() - INTERVAL '1 day' * $1",
+                delete_sql(ONLINE_USERS_SNAPSHOTS_TABLE, "ts < NOW() - INTERVAL '1 day' * $1"),
                 keep_days,
             )
             return int(result.split()[-1]) if result else 0
@@ -1477,10 +1482,10 @@ class NetworkMixin:
             return {}
         async with self.acquire() as conn:
             rows = await conn.fetch(
-                """
+                f"""
                 SELECT node_uuid::text AS node_uuid,
                        MAX(traffic_bytes) AS traffic_bytes
-                FROM node_traffic_snapshots
+                FROM {NODE_TRAFFIC_SNAPSHOTS_TABLE}
                 WHERE created_at >= $1 AND created_at < $2
                 GROUP BY node_uuid
                 """,
@@ -1496,11 +1501,11 @@ class NetworkMixin:
             return []
         async with self.acquire() as conn:
             rows = await conn.fetch(
-                """
+                f"""
                 SELECT COALESCE(n.name, s.node_uuid::text) AS name,
                        MAX(s.traffic_bytes) AS traffic_bytes
-                FROM node_traffic_snapshots s
-                LEFT JOIN nodes n ON n.uuid = s.node_uuid
+                FROM {NODE_TRAFFIC_SNAPSHOTS_TABLE} s
+                LEFT JOIN {NODES_TABLE} n ON n.uuid = s.node_uuid
                 WHERE s.created_at >= $1 AND s.created_at < $2
                 GROUP BY s.node_uuid, n.name
                 ORDER BY traffic_bytes DESC
@@ -1518,7 +1523,7 @@ class NetworkMixin:
             return 0
         async with self.acquire() as conn:
             val = await conn.fetchval(
-                "SELECT COUNT(*) FROM users WHERE created_at >= $1 AND created_at < $2",
+                select_sql(USERS_TABLE, "COUNT(*)", "WHERE created_at >= $1 AND created_at < $2"),
                 start, end,
             )
             return int(val or 0)
@@ -1531,7 +1536,7 @@ class NetworkMixin:
             return 0
         async with self.acquire() as conn:
             val = await conn.fetchval(
-                "SELECT COUNT(*) FROM users WHERE expire_at >= $1 AND expire_at < $2",
+                select_sql(USERS_TABLE, "COUNT(*)", "WHERE expire_at >= $1 AND expire_at < $2"),
                 start, end,
             )
             return int(val or 0)
@@ -1543,17 +1548,17 @@ class NetworkMixin:
             return []
         async with self.acquire() as conn:
             rows = await conn.fetch(
-                """
+                f"""
                 SELECT p.id, p.name, p.description, p.created_by, p.created_at, p.updated_at,
                        COALESCE(rc.cnt, 0) AS rules_count,
                        COALESCE(rl.cnt, 0) AS roles_count,
                        COALESCE(ad.cnt, 0) AS admins_count
-                FROM access_policies p
-                LEFT JOIN (SELECT policy_id, COUNT(*) cnt FROM access_policy_rules GROUP BY policy_id) rc
+                FROM {ACCESS_POLICIES_TABLE} p
+                LEFT JOIN (SELECT policy_id, COUNT(*) cnt FROM {ACCESS_POLICY_RULES_TABLE} GROUP BY policy_id) rc
                        ON rc.policy_id = p.id
-                LEFT JOIN (SELECT policy_id, COUNT(*) cnt FROM role_access_policies GROUP BY policy_id) rl
+                LEFT JOIN (SELECT policy_id, COUNT(*) cnt FROM {ROLE_ACCESS_POLICIES_TABLE} GROUP BY policy_id) rl
                        ON rl.policy_id = p.id
-                LEFT JOIN (SELECT policy_id, COUNT(*) cnt FROM admin_access_policies GROUP BY policy_id) ad
+                LEFT JOIN (SELECT policy_id, COUNT(*) cnt FROM {ADMIN_ACCESS_POLICIES_TABLE} GROUP BY policy_id) ad
                        ON ad.policy_id = p.id
                 ORDER BY p.name
                 """
@@ -1565,22 +1570,28 @@ class NetworkMixin:
             return None
         async with self.acquire() as conn:
             policy = await conn.fetchrow(
-                "SELECT * FROM access_policies WHERE id = $1", policy_id,
+                select_sql(ACCESS_POLICIES_TABLE, "*", "WHERE id = $1"), policy_id,
             )
             if not policy:
                 return None
             rules = await conn.fetch(
-                """
-                SELECT id, resource_type, scope_type, scope_value, actions
-                FROM access_policy_rules WHERE policy_id = $1 ORDER BY id
-                """,
+                select_sql(
+                    ACCESS_POLICY_RULES_TABLE,
+                    "id, resource_type, scope_type, scope_value, actions",
+                    "WHERE policy_id = $1 ORDER BY id",
+                ),
                 policy_id,
             )
             roles = await conn.fetch(
-                "SELECT role_id FROM role_access_policies WHERE policy_id = $1", policy_id,
+                select_sql(ROLE_ACCESS_POLICIES_TABLE, "role_id", "WHERE policy_id = $1"), policy_id,
             )
             admins = await conn.fetch(
-                "SELECT admin_id FROM admin_access_policies WHERE policy_id = $1", policy_id,
+                select_sql(
+                    ADMIN_ACCESS_POLICIES_TABLE,
+                    "admin_id",
+                    "WHERE policy_id = $1",
+                ),
+                policy_id,
             )
             return {
                 **dict(policy),
@@ -1596,8 +1607,8 @@ class NetworkMixin:
         async with self.acquire() as conn:
             async with conn.transaction():
                 row = await conn.fetchrow(
-                    """
-                    INSERT INTO access_policies (name, description, created_by)
+                    f"""
+                    INSERT INTO {ACCESS_POLICIES_TABLE} (name, description, created_by)
                     VALUES ($1, $2, $3) RETURNING id
                     """,
                     name, description, created_by,
@@ -1605,8 +1616,8 @@ class NetworkMixin:
                 policy_id = int(row["id"])
                 for rule in rules:
                     await conn.execute(
-                        """
-                        INSERT INTO access_policy_rules
+                        f"""
+                        INSERT INTO {ACCESS_POLICY_RULES_TABLE}
                             (policy_id, resource_type, scope_type, scope_value, actions)
                         VALUES ($1, $2, $3, $4, $5)
                         """,
@@ -1625,23 +1636,21 @@ class NetworkMixin:
             async with conn.transaction():
                 if name is not None or description is not None:
                     await conn.execute(
-                        """
-                        UPDATE access_policies
-                        SET name = COALESCE($2, name),
-                            description = COALESCE($3, description),
-                            updated_at = NOW()
-                        WHERE id = $1
-                        """,
+                        update_sql(
+                            ACCESS_POLICIES_TABLE,
+                            "name = COALESCE($2, name), description = COALESCE($3, description), updated_at = NOW()",
+                            "WHERE id = $1",
+                        ),
                         policy_id, name, description,
                     )
                 if rules is not None:
                     await conn.execute(
-                        "DELETE FROM access_policy_rules WHERE policy_id = $1", policy_id,
+                        delete_sql(ACCESS_POLICY_RULES_TABLE, "policy_id = $1"), policy_id,
                     )
                     for rule in rules:
                         await conn.execute(
-                            """
-                            INSERT INTO access_policy_rules
+                            f"""
+                            INSERT INTO {ACCESS_POLICY_RULES_TABLE}
                                 (policy_id, resource_type, scope_type, scope_value, actions)
                             VALUES ($1, $2, $3, $4, $5)
                             """,
@@ -1654,7 +1663,7 @@ class NetworkMixin:
     async def delete_access_policy(self, policy_id: int) -> bool:
         async with self.acquire() as conn:
             result = await conn.execute(
-                "DELETE FROM access_policies WHERE id = $1", policy_id,
+                delete_sql(ACCESS_POLICIES_TABLE, "id = $1"), policy_id,
             )
             return "DELETE 1" in (result or "")
 
@@ -1662,12 +1671,12 @@ class NetworkMixin:
         async with self.acquire() as conn:
             async with conn.transaction():
                 await conn.execute(
-                    "DELETE FROM role_access_policies WHERE role_id = $1", role_id,
+                    delete_sql(ROLE_ACCESS_POLICIES_TABLE, "role_id = $1"), role_id,
                 )
                 for pid in policy_ids:
                     await conn.execute(
-                        """
-                        INSERT INTO role_access_policies (role_id, policy_id)
+                        f"""
+                        INSERT INTO {ROLE_ACCESS_POLICIES_TABLE} (role_id, policy_id)
                         VALUES ($1, $2) ON CONFLICT DO NOTHING
                         """,
                         role_id, pid,
@@ -1677,14 +1686,19 @@ class NetworkMixin:
         async with self.acquire() as conn:
             async with conn.transaction():
                 await conn.execute(
-                    "DELETE FROM admin_access_policies WHERE admin_id = $1", admin_id,
+                    delete_sql(
+                        ADMIN_ACCESS_POLICIES_TABLE,
+                        "admin_id = $1",
+                    ),
+                    admin_id,
                 )
                 for pid in policy_ids:
                     await conn.execute(
-                        """
-                        INSERT INTO admin_access_policies (admin_id, policy_id)
-                        VALUES ($1, $2) ON CONFLICT DO NOTHING
-                        """,
+                        insert_sql(
+                            ADMIN_ACCESS_POLICIES_TABLE,
+                            ["admin_id", "policy_id"],
+                            suffix="ON CONFLICT DO NOTHING",
+                        ),
                         admin_id, pid,
                     )
 
@@ -1700,14 +1714,14 @@ class NetworkMixin:
             return []
         async with self.acquire() as conn:
             rows = await conn.fetch(
-                """
+                f"""
                 WITH effective AS (
-                    SELECT policy_id FROM role_access_policies WHERE role_id = $1
+                    SELECT policy_id FROM {ROLE_ACCESS_POLICIES_TABLE} WHERE role_id = $1
                     UNION
-                    SELECT policy_id FROM admin_access_policies WHERE admin_id = $2
+                    SELECT policy_id FROM {ADMIN_ACCESS_POLICIES_TABLE} WHERE admin_id = $2
                 )
                 SELECT r.resource_type, r.scope_type, r.scope_value, r.actions
-                FROM access_policy_rules r
+                FROM {ACCESS_POLICY_RULES_TABLE} r
                 JOIN effective e ON e.policy_id = r.policy_id
                 """,
                 role_id, admin_id,
@@ -1725,11 +1739,11 @@ class NetworkMixin:
         try:
             async with self.acquire() as conn:
                 rows = await conn.fetch(
-                    """
-                    SELECT DISTINCT user_uuid::text AS uuid
-                    FROM user_node_traffic
-                    WHERE node_uuid = ANY($1::uuid[])
-                    """,
+                    select_sql(
+                        USER_NODE_TRAFFIC_TABLE,
+                        "DISTINCT user_uuid::text AS uuid",
+                        "WHERE node_uuid = ANY($1::uuid[])",
+                    ),
                     node_uuids,
                 )
                 return {r["uuid"].lower() for r in rows if r["uuid"]}
@@ -1749,7 +1763,7 @@ class NetworkMixin:
         try:
             async with self.acquire() as conn:
                 rows = await conn.fetch(
-                    "SELECT uuid::text AS uuid, raw_data FROM users WHERE raw_data IS NOT NULL"
+                    select_sql(USERS_TABLE, "uuid::text AS uuid, raw_data", "WHERE raw_data IS NOT NULL")
                 )
         except Exception as e:
             logger.debug("get_user_uuids_by_squads fetch failed: %s", e)
@@ -1788,9 +1802,9 @@ class NetworkMixin:
         if not self.is_connected:
             return []
         if resource_type == "node":
-            table = "nodes"
+            table = NODES_TABLE
         elif resource_type == "host":
-            table = "hosts"
+            table = HOSTS_TABLE
         else:
             return []
         try:
@@ -1822,8 +1836,8 @@ class NetworkMixin:
             return
         async with self.acquire() as conn:
             await conn.executemany(
-                """
-                INSERT INTO user_node_traffic_history
+                f"""
+                INSERT INTO {USER_NODE_TRAFFIC_HISTORY_TABLE}
                     (user_uuid, node_uuid, delta_bytes, recorded_at)
                 VALUES ($1::uuid, $2::uuid, $3, NOW())
                 """,
@@ -1846,13 +1860,13 @@ class NetworkMixin:
         async with self.acquire() as conn:
             if node_uuid:
                 rows = await conn.fetch(
-                    """
+                    f"""
                     SELECT h.user_uuid, u.username,
                            n.name AS node_name,
                            SUM(h.delta_bytes) AS traffic_bytes
-                    FROM user_node_traffic_history h
-                    JOIN users u ON u.uuid = h.user_uuid
-                    JOIN nodes n ON n.uuid = h.node_uuid
+                    FROM {USER_NODE_TRAFFIC_HISTORY_TABLE} h
+                    JOIN {USERS_TABLE} u ON u.uuid = h.user_uuid
+                    JOIN {NODES_TABLE} n ON n.uuid = h.node_uuid
                     WHERE h.recorded_at >= date_trunc('day', NOW() AT TIME ZONE 'UTC')
                       AND h.node_uuid = $1::uuid
                       AND u.status NOT IN ('EXPIRED', 'DISABLED', 'LIMITED')
@@ -1864,13 +1878,13 @@ class NetworkMixin:
                 )
             else:
                 rows = await conn.fetch(
-                    """
+                    f"""
                     SELECT h.user_uuid, u.username,
                            n.name AS node_name, h.node_uuid,
                            SUM(h.delta_bytes) AS traffic_bytes
-                    FROM user_node_traffic_history h
-                    JOIN users u ON u.uuid = h.user_uuid
-                    JOIN nodes n ON n.uuid = h.node_uuid
+                    FROM {USER_NODE_TRAFFIC_HISTORY_TABLE} h
+                    JOIN {USERS_TABLE} u ON u.uuid = h.user_uuid
+                    JOIN {NODES_TABLE} n ON n.uuid = h.node_uuid
                     WHERE h.recorded_at >= date_trunc('day', NOW() AT TIME ZONE 'UTC')
                       AND u.status NOT IN ('EXPIRED', 'DISABLED', 'LIMITED')
                     GROUP BY h.user_uuid, u.username, h.node_uuid, n.name

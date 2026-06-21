@@ -5,6 +5,8 @@ from typing import Optional
 from fastapi import APIRouter, Depends, Query
 
 from web.backend.api.deps import require_permission, AdminUser
+from shared.db_schema import AUDIT_TABLE
+from shared.db_query import select_sql
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -31,7 +33,7 @@ async def get_audit_logs(
     - cursor-based (efficient): ?limit=50&cursor=12345
       Returns next_cursor for fetching the next page.
     """
-    from web.backend.core.rbac import get_audit_logs as _get_logs
+    from web.backend.core.audit import get_audit_logs as _get_logs
 
     items, total = await _get_logs(
         limit=limit,
@@ -66,7 +68,7 @@ async def get_distinct_actions(
     admin: AdminUser = Depends(require_permission("audit", "view")),
 ):
     """Get distinct action names for filter dropdown."""
-    from web.backend.core.rbac import get_audit_distinct_actions
+    from web.backend.core.audit import get_audit_distinct_actions
     actions = await get_audit_distinct_actions()
     return actions
 
@@ -79,7 +81,7 @@ async def get_resource_history(
     admin: AdminUser = Depends(require_permission("audit", "view")),
 ):
     """Get audit history for a specific resource (e.g., user change history)."""
-    from web.backend.core.rbac import get_audit_logs_for_resource
+    from web.backend.core.audit import get_audit_logs_for_resource
 
     items = await get_audit_logs_for_resource(resource, resource_id, limit)
 
@@ -102,27 +104,39 @@ async def get_audit_stats(
 
         async with db_service.acquire() as conn:
             # Total count
-            total = await conn.fetchval("SELECT COUNT(*) FROM admin_audit_log")
+            total = await conn.fetchval(
+                select_sql(
+                    AUDIT_TABLE,
+                    "COUNT(*)",
+                ),
+            )
 
             # Today's count
             today = await conn.fetchval(
-                "SELECT COUNT(*) FROM admin_audit_log "
-                "WHERE created_at >= CURRENT_DATE"
+                select_sql(
+                    AUDIT_TABLE,
+                    "COUNT(*)",
+                    "WHERE created_at >= CURRENT_DATE",
+                ),
             )
 
             # By resource
             resource_rows = await conn.fetch(
-                "SELECT resource, COUNT(*) as count FROM admin_audit_log "
-                "WHERE resource IS NOT NULL "
-                "GROUP BY resource ORDER BY count DESC"
+                select_sql(
+                    AUDIT_TABLE,
+                    "resource, COUNT(*) as count",
+                    "WHERE resource IS NOT NULL GROUP BY resource ORDER BY count DESC",
+                ),
             )
             by_resource = {r["resource"]: r["count"] for r in resource_rows}
 
             # Top admins today
             admin_rows = await conn.fetch(
-                "SELECT admin_username, COUNT(*) as count FROM admin_audit_log "
-                "WHERE created_at >= CURRENT_DATE "
-                "GROUP BY admin_username ORDER BY count DESC LIMIT 10"
+                select_sql(
+                    AUDIT_TABLE,
+                    "admin_username, COUNT(*) as count",
+                    "WHERE created_at >= CURRENT_DATE GROUP BY admin_username ORDER BY count DESC LIMIT 10",
+                ),
             )
             by_admin = [
                 {"username": r["admin_username"], "count": r["count"]}

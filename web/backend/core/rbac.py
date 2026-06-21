@@ -1,324 +1,48 @@
 """RBAC — Role-Based Access Control core module.
 
 Provides:
-- Database operations for roles, permissions, and admin accounts
-- Permission checking helpers
+- Database operations for roles and permissions
+- Permission checking helpers (re-exported from shared/rbac.py)
 - Caching layer for frequently-accessed permission data
+- Access policy resolvers (scope, check, filter)
+
+Admin account CRUD → core/admin_accounts.py
+Audit log          → core/audit.py
 """
 import logging
-import time
 from typing import Optional, Dict, List, Set, Tuple
 
+from shared.rbac import (
+    _ensure_cache,
+    _permissions_cache,
+    invalidate_cache,
+    has_permission,
+    get_role_permissions,
+    get_all_permissions_for_role_id,
+    get_admin_account_by_telegram_id,
+    get_admin_account_by_id as _get_admin_account_by_id_shared,
+    get_scope as _get_scope_shared,
+    filter_by_scope as _filter_by_scope_shared,
+    get_visible_user_uuids as _get_visible_user_uuids_shared,
+    invalidate_scope_cache,
+    check_quota as _check_quota_shared,
+)
+from shared.db_schema import ADMIN_TABLE, ADMIN_ROLES_TABLE, ADMIN_PERMISSIONS_TABLE
+from shared.db_query import select_sql, insert_sql, update_sql, delete_sql, left_join_sql, join_sql
+
+# Re-export from shared/rbac.py so callers can import from here
+from shared.rbac import (  # noqa: F401
+    _ensure_cache,
+    _permissions_cache,
+    invalidate_cache,
+    has_permission,
+    get_role_permissions,
+    get_all_permissions_for_role_id,
+    get_admin_account_by_telegram_id,
+    invalidate_scope_cache,
+)
+
 logger = logging.getLogger(__name__)
-
-# ── In-memory permission cache ──────────────────────────────────
-# role_id -> {("resource", "action"), ...}
-_permissions_cache: Dict[int, Set[Tuple[str, str]]] = {}
-_cache_ts: float = 0
-_CACHE_TTL = 60  # seconds
-
-
-async def _ensure_cache() -> None:
-    """Reload permission cache if stale."""
-    global _permissions_cache, _cache_ts
-
-    if time.time() - _cache_ts < _CACHE_TTL and _permissions_cache:
-        return
-
-    try:
-        from shared.database import db_service
-        if not db_service.is_connected:
-            return
-        async with db_service.acquire() as conn:
-            rows = await conn.fetch(
-                "SELECT role_id, resource, action FROM admin_permissions"
-            )
-            new_cache: Dict[int, Set[Tuple[str, str]]] = {}
-            for row in rows:
-                rid = row["role_id"]
-                new_cache.setdefault(rid, set()).add((row["resource"], row["action"]))
-            _permissions_cache = new_cache
-            _cache_ts = time.time()
-    except Exception as e:
-        logger.warning("Failed to reload permissions cache: %s", e)
-
-
-def invalidate_cache() -> None:
-    """Force cache invalidation (call after role/permission changes)."""
-    global _cache_ts
-    _cache_ts = 0
-
-
-# ── Permission checking ─────────────────────────────────────────
-
-async def has_permission(role_id: Optional[int], resource: str, action: str) -> bool:
-    """Check whether a role has a specific permission."""
-    if role_id is None:
-        return False
-    await _ensure_cache()
-    perms = _permissions_cache.get(role_id, set())
-    return (resource, action) in perms
-
-
-async def get_role_permissions(role_id: int) -> List[dict]:
-    """Return all permissions for a role as list of {resource, action}."""
-    await _ensure_cache()
-    perms = _permissions_cache.get(role_id, set())
-    return [{"resource": r, "action": a} for r, a in sorted(perms)]
-
-
-async def get_all_permissions_for_role_id(role_id: int) -> Set[Tuple[str, str]]:
-    """Return set of (resource, action) for a role."""
-    await _ensure_cache()
-    return _permissions_cache.get(role_id, set())
-
-
-# ── Admin account database operations ───────────────────────────
-
-async def get_admin_account_by_username(username: str) -> Optional[dict]:
-    """Fetch admin account by username (case-insensitive)."""
-    try:
-        from shared.database import db_service
-        if not db_service.is_connected:
-            return None
-        async with db_service.acquire() as conn:
-            row = await conn.fetchrow(
-                """
-                SELECT a.*, r.name as role_name, r.display_name as role_display_name
-                FROM admin_accounts a
-                LEFT JOIN admin_roles r ON r.id = a.role_id
-                WHERE LOWER(a.username) = LOWER($1)
-                """,
-                username,
-            )
-            return dict(row) if row else None
-    except Exception as e:
-        logger.error("get_admin_account_by_username failed: %s", e)
-        return None
-
-
-async def get_admin_account_by_email(email: str) -> Optional[dict]:
-    """Fetch admin account by email (case-insensitive)."""
-    try:
-        from shared.database import db_service
-        if not db_service.is_connected:
-            return None
-        async with db_service.acquire() as conn:
-            row = await conn.fetchrow(
-                """
-                SELECT a.*, r.name as role_name, r.display_name as role_display_name
-                FROM admin_accounts a
-                LEFT JOIN admin_roles r ON r.id = a.role_id
-                WHERE LOWER(a.email) = LOWER($1)
-                """,
-                email,
-            )
-            return dict(row) if row else None
-    except Exception as e:
-        logger.error("get_admin_account_by_email failed: %s", e)
-        return None
-
-
-async def get_admin_account_by_telegram_id(telegram_id: int) -> Optional[dict]:
-    """Fetch admin account by Telegram ID."""
-    try:
-        from shared.database import db_service
-        if not db_service.is_connected:
-            return None
-        async with db_service.acquire() as conn:
-            row = await conn.fetchrow(
-                """
-                SELECT a.*, r.name as role_name, r.display_name as role_display_name
-                FROM admin_accounts a
-                LEFT JOIN admin_roles r ON r.id = a.role_id
-                WHERE a.telegram_id = $1
-                """,
-                telegram_id,
-            )
-            return dict(row) if row else None
-    except Exception as e:
-        logger.error("get_admin_account_by_telegram_id failed: %s", e)
-        return None
-
-
-async def get_admin_account_by_id(admin_id: int) -> Optional[dict]:
-    """Fetch admin account by ID."""
-    try:
-        from shared.database import db_service
-        if not db_service.is_connected:
-            return None
-        async with db_service.acquire() as conn:
-            row = await conn.fetchrow(
-                """
-                SELECT a.*, r.name as role_name, r.display_name as role_display_name
-                FROM admin_accounts a
-                LEFT JOIN admin_roles r ON r.id = a.role_id
-                WHERE a.id = $1
-                """,
-                admin_id,
-            )
-            return dict(row) if row else None
-    except Exception as e:
-        logger.error("get_admin_account_by_id failed: %s", e)
-        return None
-
-
-async def list_admin_accounts() -> List[dict]:
-    """List all admin accounts with role info."""
-    try:
-        from shared.database import db_service
-        if not db_service.is_connected:
-            return []
-        async with db_service.acquire() as conn:
-            rows = await conn.fetch(
-                """
-                SELECT a.*, r.name as role_name, r.display_name as role_display_name
-                FROM admin_accounts a
-                LEFT JOIN admin_roles r ON r.id = a.role_id
-                ORDER BY a.created_at ASC
-                """
-            )
-            return [dict(r) for r in rows]
-    except Exception as e:
-        logger.error("list_admin_accounts failed: %s", e)
-        return []
-
-
-async def create_admin_account(
-    username: str,
-    password_hash: Optional[str],
-    telegram_id: Optional[int],
-    role_id: int,
-    max_users: Optional[int] = None,
-    max_traffic_gb: Optional[int] = None,
-    max_nodes: Optional[int] = None,
-    max_hosts: Optional[int] = None,
-    is_generated_password: bool = False,
-    created_by: Optional[int] = None,
-    email: Optional[str] = None,
-) -> Optional[dict]:
-    """Create a new admin account. Returns the created record."""
-    try:
-        from shared.database import db_service
-        if not db_service.is_connected:
-            return None
-        async with db_service.acquire() as conn:
-            row = await conn.fetchrow(
-                """
-                INSERT INTO admin_accounts
-                    (username, password_hash, telegram_id, role_id,
-                     max_users, max_traffic_gb, max_nodes, max_hosts,
-                     is_generated_password, created_by, email)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-                RETURNING *
-                """,
-                username, password_hash, telegram_id, role_id,
-                max_users, max_traffic_gb, max_nodes, max_hosts,
-                is_generated_password, created_by, email,
-            )
-            return dict(row) if row else None
-    except Exception as e:
-        logger.error("create_admin_account failed: %s", e)
-        return None
-
-
-async def update_admin_account(
-    admin_id: int,
-    **fields,
-) -> Optional[dict]:
-    """Update admin account fields. Returns updated record."""
-    if not fields:
-        return await get_admin_account_by_id(admin_id)
-
-    allowed = {
-        "username", "password_hash", "telegram_id", "role_id",
-        "max_users", "max_traffic_gb", "max_nodes", "max_hosts",
-        "is_active", "is_generated_password",
-        "totp_secret", "totp_enabled", "backup_codes",
-        "email",
-    }
-    filtered = {k: v for k, v in fields.items() if k in allowed}
-    if not filtered:
-        return await get_admin_account_by_id(admin_id)
-
-    set_parts = []
-    values = []
-    idx = 1
-    for key, val in filtered.items():
-        set_parts.append(f"{key} = ${idx}")
-        values.append(val)
-        idx += 1
-    set_parts.append(f"updated_at = NOW()")
-
-    values.append(admin_id)
-    query = (
-        f"UPDATE admin_accounts SET {', '.join(set_parts)} "
-        f"WHERE id = ${idx} RETURNING *"
-    )
-
-    try:
-        from shared.database import db_service
-        if not db_service.is_connected:
-            return None
-        async with db_service.acquire() as conn:
-            row = await conn.fetchrow(query, *values)
-            return dict(row) if row else None
-    except Exception as e:
-        logger.error("update_admin_account failed: %s", e)
-        return None
-
-
-async def delete_admin_account(admin_id: int) -> bool:
-    """Delete admin account by ID."""
-    try:
-        from shared.database import db_service
-        if not db_service.is_connected:
-            return False
-        async with db_service.acquire() as conn:
-            result = await conn.execute(
-                "DELETE FROM admin_accounts WHERE id = $1", admin_id
-            )
-            return "DELETE 1" in result
-    except Exception as e:
-        logger.error("delete_admin_account failed: %s", e)
-        return False
-
-
-async def increment_usage_counter(admin_id: int, counter: str, amount: int = 1) -> bool:
-    """Increment a usage counter (users_created, nodes_created, etc.)."""
-    _COUNTER_QUERIES = {
-        "users_created": "UPDATE admin_accounts SET users_created = users_created + $1 WHERE id = $2",
-        "traffic_used_bytes": "UPDATE admin_accounts SET traffic_used_bytes = traffic_used_bytes + $1 WHERE id = $2",
-        "nodes_created": "UPDATE admin_accounts SET nodes_created = nodes_created + $1 WHERE id = $2",
-        "hosts_created": "UPDATE admin_accounts SET hosts_created = hosts_created + $1 WHERE id = $2",
-    }
-    query = _COUNTER_QUERIES.get(counter)
-    if not query:
-        return False
-    try:
-        from shared.database import db_service
-        if not db_service.is_connected:
-            return False
-        async with db_service.acquire() as conn:
-            await conn.execute(query, amount, admin_id)
-            return True
-    except Exception as e:
-        logger.error("increment_usage_counter failed: %s", e)
-        return False
-
-
-async def admin_account_exists() -> bool:
-    """Check if any admin account exists."""
-    try:
-        from shared.database import db_service
-        if not db_service.is_connected:
-            return False
-        async with db_service.acquire() as conn:
-            row = await conn.fetchrow("SELECT 1 FROM admin_accounts LIMIT 1")
-            return row is not None
-    except Exception as e:
-        logger.error("admin_account_exists failed: %s", e)
-        return False
 
 
 # ── Role database operations ────────────────────────────────────
@@ -331,16 +55,16 @@ async def list_roles() -> List[dict]:
             return []
         async with db_service.acquire() as conn:
             rows = await conn.fetch(
-                """
-                SELECT r.*,
-                       COUNT(p.id) as permissions_count,
-                       COUNT(DISTINCT a.id) as admins_count
-                FROM admin_roles r
-                LEFT JOIN admin_permissions p ON p.role_id = r.id
-                LEFT JOIN admin_accounts a ON a.role_id = r.id
-                GROUP BY r.id
-                ORDER BY r.id ASC
-                """
+                select_sql(
+                    ADMIN_ROLES_TABLE,
+                    "r.*, COUNT(p.id) as permissions_count, COUNT(DISTINCT a.id) as admins_count",
+                    (
+                        f"r "
+                        f"{left_join_sql(ADMIN_PERMISSIONS_TABLE, 'p', 'p.role_id = r.id')} "
+                        f"{left_join_sql(ADMIN_TABLE, 'a', 'a.role_id = r.id')} "
+                        f"GROUP BY r.id ORDER BY r.id ASC"
+                    ),
+                )
             )
             return [dict(r) for r in rows]
     except Exception as e:
@@ -356,12 +80,21 @@ async def get_role_by_id(role_id: int) -> Optional[dict]:
             return None
         async with db_service.acquire() as conn:
             role = await conn.fetchrow(
-                "SELECT * FROM admin_roles WHERE id = $1", role_id
+                select_sql(
+                    ADMIN_ROLES_TABLE,
+                    "*",
+                    "WHERE id = $1",
+                ),
+                role_id,
             )
             if not role:
                 return None
             perms = await conn.fetch(
-                "SELECT resource, action FROM admin_permissions WHERE role_id = $1",
+                select_sql(
+                    ADMIN_PERMISSIONS_TABLE,
+                    "resource, action",
+                    "WHERE role_id = $1",
+                ),
                 role_id,
             )
             result = dict(role)
@@ -380,7 +113,12 @@ async def get_role_by_name(name: str) -> Optional[dict]:
             return None
         async with db_service.acquire() as conn:
             row = await conn.fetchrow(
-                "SELECT * FROM admin_roles WHERE name = $1", name
+                select_sql(
+                    ADMIN_ROLES_TABLE,
+                    "*",
+                    "WHERE name = $1",
+                ),
+                name,
             )
             return dict(row) if row else None
     except Exception as e:
@@ -402,22 +140,23 @@ async def create_role(
         async with db_service.acquire() as conn:
             async with conn.transaction():
                 row = await conn.fetchrow(
-                    """
-                    INSERT INTO admin_roles (name, display_name, description, is_system)
-                    VALUES ($1, $2, $3, false)
-                    RETURNING *
-                    """,
+                    insert_sql(
+                        ADMIN_ROLES_TABLE,
+                        ["name", "display_name", "description", "is_system"],
+                        values="$1, $2, $3, false",
+                        returning="*",
+                    ),
                     name, display_name, description,
                 )
                 role = dict(row)
                 if permissions:
                     for p in permissions:
                         await conn.execute(
-                            """
-                            INSERT INTO admin_permissions (role_id, resource, action)
-                            VALUES ($1, $2, $3)
-                            ON CONFLICT DO NOTHING
-                            """,
+                            insert_sql(
+                                ADMIN_PERMISSIONS_TABLE,
+                                ["role_id", "resource", "action"],
+                                suffix="ON CONFLICT DO NOTHING",
+                            ),
                             role["id"], p["resource"], p["action"],
                         )
                 invalidate_cache()
@@ -441,7 +180,6 @@ async def update_role(
             return None
         async with db_service.acquire() as conn:
             async with conn.transaction():
-                # Update role fields
                 if display_name is not None or description is not None:
                     sets = []
                     vals = []
@@ -456,21 +194,28 @@ async def update_role(
                         idx += 1
                     vals.append(role_id)
                     await conn.execute(
-                        f"UPDATE admin_roles SET {', '.join(sets)} WHERE id = ${idx}",
+                        update_sql(
+                            ADMIN_ROLES_TABLE,
+                            ', '.join(sets),
+                            f"id = ${idx}",
+                        ),
                         *vals,
                     )
 
-                # Replace permissions if provided
                 if permissions is not None:
                     await conn.execute(
-                        "DELETE FROM admin_permissions WHERE role_id = $1", role_id
+                        delete_sql(
+                            ADMIN_PERMISSIONS_TABLE,
+                            "role_id = $1",
+                        ),
+                        role_id,
                     )
                     for p in permissions:
                         await conn.execute(
-                            """
-                            INSERT INTO admin_permissions (role_id, resource, action)
-                            VALUES ($1, $2, $3)
-                            """,
+                            insert_sql(
+                                ADMIN_PERMISSIONS_TABLE,
+                                ["role_id", "resource", "action"],
+                            ),
                             role_id, p["resource"], p["action"],
                         )
                     invalidate_cache()
@@ -489,7 +234,11 @@ async def delete_role(role_id: int) -> bool:
             return False
         async with db_service.acquire() as conn:
             result = await conn.execute(
-                "DELETE FROM admin_roles WHERE id = $1 AND is_system = false", role_id
+                delete_sql(
+                    ADMIN_ROLES_TABLE,
+                    "id = $1 AND is_system = false",
+                ),
+                role_id,
             )
             if "DELETE 1" in result:
                 invalidate_cache()
@@ -500,229 +249,11 @@ async def delete_role(role_id: int) -> bool:
         return False
 
 
-# ── Audit log ───────────────────────────────────────────────────
-
-async def write_audit_log(
-    admin_id: Optional[int],
-    admin_username: str,
-    action: str,
-    resource: Optional[str] = None,
-    resource_id: Optional[str] = None,
-    details: Optional[str] = None,
-    ip_address: Optional[str] = None,
-) -> None:
-    """Write an entry to the audit log."""
-    try:
-        from shared.database import db_service
-        if not db_service.is_connected:
-            return
-        async with db_service.acquire() as conn:
-            await conn.execute(
-                """
-                INSERT INTO admin_audit_log
-                    (admin_id, admin_username, action, resource, resource_id, details, ip_address)
-                VALUES ($1, $2, $3, $4, $5, $6, $7)
-                """,
-                admin_id, admin_username, action, resource, resource_id, details, ip_address,
-            )
-    except Exception as e:
-        logger.warning("write_audit_log failed: %s", e)
-
-
-async def get_audit_logs(
-    limit: int = 50,
-    offset: int = 0,
-    admin_id: Optional[int] = None,
-    action: Optional[str] = None,
-    resource: Optional[str] = None,
-    resource_id: Optional[str] = None,
-    date_from: Optional[str] = None,
-    date_to: Optional[str] = None,
-    search: Optional[str] = None,
-    cursor: Optional[int] = None,
-) -> Tuple[List[dict], int]:
-    """Fetch audit logs with optional filters.
-
-    Supports two pagination modes:
-    - offset-based (legacy): limit + offset
-    - cursor-based (efficient): cursor = last seen id, returns next `limit` rows
-
-    Returns (logs, total_count).
-    """
-    try:
-        from shared.database import db_service
-        if not db_service.is_connected:
-            return [], 0
-
-        where_parts = []
-        params = []
-        idx = 1
-
-        # Cursor-based pagination: fetch rows with id < cursor
-        if cursor is not None:
-            where_parts.append(f"id < ${idx}")
-            params.append(cursor)
-            idx += 1
-
-        if admin_id is not None:
-            where_parts.append(f"admin_id = ${idx}")
-            params.append(admin_id)
-            idx += 1
-        if action:
-            where_parts.append(f"action ILIKE ${idx}")
-            params.append(f"%{action}%")
-            idx += 1
-        if resource:
-            where_parts.append(f"resource = ${idx}")
-            params.append(resource)
-            idx += 1
-        if resource_id:
-            where_parts.append(f"resource_id = ${idx}")
-            params.append(resource_id)
-            idx += 1
-        if date_from:
-            where_parts.append(f"created_at >= ${idx}::timestamptz")
-            params.append(date_from)
-            idx += 1
-        if date_to:
-            where_parts.append(f"created_at <= ${idx}::timestamptz")
-            params.append(date_to)
-            idx += 1
-        if search:
-            where_parts.append(
-                f"(admin_username ILIKE ${idx} OR action ILIKE ${idx} OR "
-                f"resource_id ILIKE ${idx} OR details ILIKE ${idx})"
-            )
-            params.append(f"%{search}%")
-            idx += 1
-
-        where_clause = ""
-        if where_parts:
-            where_clause = "WHERE " + " AND ".join(where_parts)
-
-        async with db_service.acquire() as conn:
-            # Count query (without cursor filter for accurate total)
-            count_where_parts = [p for p in where_parts]
-            count_params = list(params)
-            if cursor is not None:
-                # Remove cursor condition from count query
-                count_where_parts = count_where_parts[1:]
-                count_params = count_params[1:]
-            count_where = ""
-            if count_where_parts:
-                # Re-number parameters for count query
-                count_where = "WHERE " + " AND ".join(count_where_parts)
-                # Fix parameter indices
-                renumbered = []
-                for i, part in enumerate(count_where_parts):
-                    renumbered.append(part)
-                count_where = "WHERE " + " AND ".join(renumbered)
-
-            count_row = await conn.fetchrow(
-                f"SELECT COUNT(*) FROM admin_audit_log {count_where}", *count_params
-            )
-            total = count_row[0] if count_row else 0
-
-            if cursor is not None:
-                # Cursor-based: no OFFSET needed, just LIMIT
-                params.append(limit)
-                rows = await conn.fetch(
-                    f"""
-                    SELECT * FROM admin_audit_log
-                    {where_clause}
-                    ORDER BY id DESC
-                    LIMIT ${idx}
-                    """,
-                    *params,
-                )
-            else:
-                # Legacy offset-based
-                params.append(limit)
-                params.append(offset)
-                rows = await conn.fetch(
-                    f"""
-                    SELECT * FROM admin_audit_log
-                    {where_clause}
-                    ORDER BY id DESC
-                    LIMIT ${idx} OFFSET ${idx + 1}
-                    """,
-                    *params,
-                )
-            return [dict(r) for r in rows], total
-    except Exception as e:
-        logger.error("get_audit_logs failed: %s", e)
-        return [], 0
-
-
-async def get_audit_logs_for_resource(
-    resource: str,
-    resource_id: str,
-    limit: int = 50,
-) -> List[dict]:
-    """Fetch audit logs for a specific resource (e.g., user history)."""
-    try:
-        from shared.database import db_service
-        if not db_service.is_connected:
-            return []
-
-        async with db_service.acquire() as conn:
-            rows = await conn.fetch(
-                """
-                SELECT * FROM admin_audit_log
-                WHERE resource = $1 AND resource_id = $2
-                ORDER BY created_at DESC
-                LIMIT $3
-                """,
-                resource, resource_id, limit,
-            )
-            return [dict(r) for r in rows]
-    except Exception as e:
-        logger.error("get_audit_logs_for_resource failed: %s", e)
-        return []
-
-
-async def get_audit_distinct_actions() -> List[str]:
-    """Get distinct action names for filter dropdowns."""
-    try:
-        from shared.database import db_service
-        if not db_service.is_connected:
-            return []
-
-        async with db_service.acquire() as conn:
-            rows = await conn.fetch(
-                "SELECT DISTINCT action FROM admin_audit_log ORDER BY action"
-            )
-            return [r["action"] for r in rows]
-    except Exception as e:
-        logger.error("get_audit_distinct_actions failed: %s", e)
-        return []
-
-
 # ── Quota checking ──────────────────────────────────────────────
 
 async def check_quota(admin_id: int, resource: str) -> Tuple[bool, str]:
-    """Check if admin is within their resource quota.
-
-    Returns (allowed, error_message).
-    """
-    account = await get_admin_account_by_id(admin_id)
-    if not account:
-        return False, "Admin account not found"
-    if not account["is_active"]:
-        return False, "Admin account is disabled"
-
-    limit_field = f"max_{resource}"
-    counter_field = f"{resource}_created"
-
-    limit_val = account.get(limit_field)
-    if limit_val is None:
-        return True, ""  # Unlimited
-
-    current = account.get(counter_field, 0)
-    if current >= limit_val:
-        return False, f"Quota exceeded: {resource} ({current}/{limit_val})"
-
-    return True, ""
+    """Check if admin is within their resource quota. Delegates to shared."""
+    return await _check_quota_shared(admin_id, resource)
 
 
 # ── First-run RBAC setup ───────────────────────────────────────
@@ -737,7 +268,6 @@ async def ensure_rbac_tables() -> None:
         if not db_service.is_connected:
             return
         async with db_service.acquire() as conn:
-            # Just check if the table exists
             row = await conn.fetchrow(
                 "SELECT 1 FROM information_schema.tables "
                 "WHERE table_name = 'admin_accounts'"
@@ -752,27 +282,22 @@ async def ensure_rbac_tables() -> None:
 
 
 async def sync_superadmin_permissions() -> None:
-    """Ensure the superadmin system role has ALL permissions, including plugin-contributed ones.
-
-    This runs on every startup so that when new resources/actions are added
-    (either in core code or by an installed plugin), the superadmin role in
-    the database is automatically updated without requiring a manual
-    migration or database edit.
-    """
+    """Ensure the superadmin system role has ALL permissions, including plugin-contributed ones."""
     try:
         from shared.database import db_service
         if not db_service.is_connected:
             return
 
-        # Use the merged map (built-in + plugin extras) so superadmin always
-        # gets full coverage even when plugins contribute new resources.
         from web.backend.api.v2.roles import get_resources_map
         resources_map = get_resources_map()
 
         async with db_service.acquire() as conn:
-            # Get the superadmin role
             role_row = await conn.fetchrow(
-                "SELECT id FROM admin_roles WHERE name = 'superadmin'"
+                select_sql(
+                    ADMIN_ROLES_TABLE,
+                    "id",
+                    "WHERE name = 'superadmin'",
+                ),
             )
             if not role_row:
                 logger.debug("sync_superadmin_permissions: superadmin role not found, skipping")
@@ -780,30 +305,33 @@ async def sync_superadmin_permissions() -> None:
 
             role_id = role_row["id"]
 
-            # Get current permissions for superadmin
             existing = await conn.fetch(
-                "SELECT resource, action FROM admin_permissions WHERE role_id = $1",
+                select_sql(
+                    ADMIN_PERMISSIONS_TABLE,
+                    "resource, action",
+                    "WHERE role_id = $1",
+                ),
                 role_id,
             )
             existing_set = {(row["resource"], row["action"]) for row in existing}
 
-            # Build the full set of permissions from the merged resources map
             full_set = set()
             for resource, actions in resources_map.items():
                 for action in actions:
                     full_set.add((resource, action))
 
-            # Find missing permissions
             missing = full_set - existing_set
             if not missing:
                 return
 
-            # Insert missing permissions
             async with conn.transaction():
                 for resource, action in sorted(missing):
                     await conn.execute(
-                        "INSERT INTO admin_permissions (role_id, resource, action) "
-                        "VALUES ($1, $2, $3) ON CONFLICT DO NOTHING",
+                        insert_sql(
+                            ADMIN_PERMISSIONS_TABLE,
+                            ["role_id", "resource", "action"],
+                            suffix="ON CONFLICT DO NOTHING",
+                        ),
                         role_id, resource, action,
                     )
 
@@ -820,97 +348,23 @@ async def sync_superadmin_permissions() -> None:
 
 # ── Access policies — scope resolver ─────────────────────────────
 
-# Cache: (admin_id, role_id) -> {(resource_type, action): allowed_uuids_or_None}
-# None means "full access" (no policies attached), set[uuid] means whitelist.
-_scope_cache: Dict[Tuple[Optional[int], Optional[int]], Dict[Tuple[str, str], Optional[Set[str]]]] = {}
-_scope_cache_ts: float = 0
-_SCOPE_CACHE_TTL = 30  # seconds
-
-
-def invalidate_scope_cache() -> None:
-    """Force scope cache reset (call after policy changes)."""
-    global _scope_cache_ts, _scope_cache
-    _scope_cache.clear()
-    _scope_cache_ts = 0
-
-
 async def get_scope(
     admin, resource_type: str, action: str = "view",
 ) -> Optional[Set[str]]:
     """Resolve allowed resource UUIDs for an admin on (resource_type, action).
 
+    AdminUser-aware wrapper around shared/rbac.py get_scope().
+
     Returns:
         None — full access (superadmin, legacy admin, or no policies attached)
         set[str] — whitelist of UUIDs (may be empty -> no access)
-
-    Resource types: 'node', 'host', 'squad'.
-    Actions: 'view', 'edit', 'delete' (view is implied by edit/delete).
     """
-    # Superadmin and legacy admins (no account_id) bypass policy checks
     if admin is None:
         return None
     role = getattr(admin, "role", None)
     account_id = getattr(admin, "account_id", None)
     role_id = getattr(admin, "role_id", None)
-    if role == "superadmin" or account_id is None:
-        return None
-
-    global _scope_cache_ts, _scope_cache
-    if time.time() - _scope_cache_ts > _SCOPE_CACHE_TTL:
-        _scope_cache.clear()
-        _scope_cache_ts = time.time()
-
-    cache_key = (account_id, role_id)
-    per_admin = _scope_cache.get(cache_key)
-    if per_admin is not None:
-        cached = per_admin.get((resource_type, action), "MISS")
-        if cached != "MISS":
-            return cached
-
-    try:
-        from shared.database import db_service
-        if not db_service.is_connected:
-            return None
-
-        rules = await db_service.get_effective_policy_rules(account_id, role_id)
-        # If no policies at all -> full access (backwards compatible)
-        if not rules:
-            _scope_cache.setdefault(cache_key, {})[(resource_type, action)] = None
-            return None
-
-        # Admin has policies, but maybe none for this resource_type
-        relevant = [r for r in rules if r["resource_type"] == resource_type]
-        if not relevant:
-            _scope_cache.setdefault(cache_key, {})[(resource_type, action)] = set()
-            return set()
-
-        # Collect UUIDs from rules that cover the requested action.
-        # edit/delete imply view — if the admin can edit a node, they can
-        # obviously see it in the list too. Otherwise granting "edit only"
-        # would hide the resource entirely and make editing impossible.
-        def _rule_covers(rule_actions: List[str]) -> bool:
-            if action == "view":
-                # any action implies view
-                return bool(rule_actions)
-            return action in rule_actions
-
-        allowed: Set[str] = set()
-        for r in relevant:
-            if not _rule_covers(r.get("actions") or []):
-                continue
-            scope_type = r.get("scope_type")
-            scope_value = r.get("scope_value", "")
-            if scope_type == "uuid":
-                allowed.add(scope_value.lower())
-            elif scope_type == "tag":
-                uuids = await db_service.get_uuids_by_tag(resource_type, scope_value)
-                allowed.update(u.lower() for u in uuids)
-
-        _scope_cache.setdefault(cache_key, {})[(resource_type, action)] = allowed
-        return allowed
-    except Exception as e:
-        logger.warning("get_scope failed for admin=%s rt=%s: %s", account_id, resource_type, e)
-        return None  # fail-open to avoid locking out admins on DB glitches
+    return await _get_scope_shared(account_id, role_id, role, resource_type, action)
 
 
 async def check_access(
@@ -924,55 +378,20 @@ async def check_access(
 
 
 def filter_by_scope(items: List[dict], scope: Optional[Set[str]], uuid_key: str = "uuid") -> List[dict]:
-    """Filter a list of dicts (e.g. nodes) by an allowed-UUID scope.
-
-    If scope is None -> return items unchanged (full access).
-    """
-    if scope is None:
-        return items
-    return [it for it in items if str(it.get(uuid_key, "")).lower() in scope]
+    """Filter a list of dicts by an allowed-UUID scope. Delegates to shared."""
+    return _filter_by_scope_shared(items, scope, uuid_key)
 
 
 async def get_visible_user_uuids(admin) -> Optional[Set[str]]:
-    """Resolve which user UUIDs an admin can see based on node+squad scopes.
+    """Resolve which user UUIDs an admin can see.
 
-    Returns:
-        None — no restrictions (superadmin, legacy admin, or no policies)
-        set[str] — whitelist of user UUIDs (lowercase)
-
-    A user is visible if they have activity on an allowed node
-    (via user_node_traffic) OR belong to an allowed internal squad
-    (via raw_data.activeInternalSquads).
-
-    Union — if either condition is met the user is visible.
+    AdminUser-aware wrapper around shared/rbac.py get_visible_user_uuids().
     """
     if admin is None:
         return None
     role = getattr(admin, "role", None)
     account_id = getattr(admin, "account_id", None)
-    if role == "superadmin" or account_id is None:
-        return None
-
-    node_scope = await get_scope(admin, "node", "view")
-    squad_scope = await get_scope(admin, "squad", "view")
-
-    # If both are None — no user restriction
-    if node_scope is None and squad_scope is None:
-        return None
-
-    try:
-        from shared.database import db_service
-        if not db_service.is_connected:
-            return None
-        allowed: Set[str] = set()
-        if node_scope is not None and node_scope:
-            allowed.update(await db_service.get_user_uuids_by_nodes(list(node_scope)))
-        if squad_scope is not None and squad_scope:
-            allowed.update(await db_service.get_user_uuids_by_squads(list(squad_scope)))
-        return allowed
-    except Exception as e:
-        logger.warning("get_visible_user_uuids failed: %s", e)
-        return None  # fail-open
+    return await _get_visible_user_uuids_shared(account_id, role)
 
 
 async def resolve_allowed_actions_map(
@@ -986,7 +405,6 @@ async def resolve_allowed_actions_map(
     """
     view_scope = await get_scope(admin, resource_type, "view")
     if view_scope is None:
-        # No restrictions — full access to all actions
         return {u.lower(): None for u in uuids}
     edit_scope = await get_scope(admin, resource_type, "edit")
     delete_scope = await get_scope(admin, resource_type, "delete")
@@ -1002,3 +420,28 @@ async def resolve_allowed_actions_map(
             actions.append("delete")
         result[key] = actions
     return result
+
+
+# ── Backward-compat re-exports ───────────────────────────────────
+# These functions moved to core/admin_accounts.py and core/audit.py.
+# Import from the new location for new code.
+
+from web.backend.core.admin_accounts import (  # noqa: E402, F401
+    invalidate_admin_cache,
+    get_admin_account_by_username,
+    get_admin_account_by_email,
+    get_admin_account_by_id,
+    list_admin_accounts,
+    create_admin_account,
+    update_admin_account,
+    delete_admin_account,
+    increment_usage_counter,
+    admin_account_exists,
+    get_admin_usernames,
+)
+from web.backend.core.audit import (  # noqa: E402, F401
+    write_audit_log,
+    get_audit_logs,
+    get_audit_logs_for_resource,
+    get_audit_distinct_actions,
+)

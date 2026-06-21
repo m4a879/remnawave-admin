@@ -147,6 +147,7 @@ services:
       REDIS_URL: '${REDIS_URL:-}'
       WEBHOOK_SECRET: '${WEBHOOK_SECRET:-}'
       BOT_WEBHOOK_URL: 'http://bot:${WEBHOOK_PORT:-8080}/webhook'
+      BOT_CALLBACK_URL: 'http://bot:${WEBHOOK_PORT:-8080}/internal/panel-event'
       MAXMIND_CITY_DB: /app/geoip/GeoLite2-City.mmdb
       MAXMIND_ASN_DB: /app/geoip/GeoLite2-ASN.mmdb
     command: ["python", "-m", "uvicorn", "web.backend.main:app", "--host", "0.0.0.0", "--port", "8081", "--no-access-log", "--log-level", "warning"]

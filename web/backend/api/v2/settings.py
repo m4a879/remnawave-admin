@@ -13,9 +13,12 @@ from pydantic import BaseModel
 # Add src to path for importing bot services
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent.parent))
 
+from shared.db_schema import BOT_CONFIG_TABLE, SYNC_METADATA_TABLE
+from shared.db_query import select_sql, update_sql
+
 from web.backend.api.deps import get_current_admin, AdminUser, require_permission, get_client_ip
 from web.backend.core.errors import api_error, E
-from web.backend.core.rbac import write_audit_log
+from web.backend.core.audit import write_audit_log
 
 logger = logging.getLogger(__name__)
 
@@ -106,14 +109,9 @@ async def get_all_settings(
 
         async with db_service.acquire() as conn:
             rows = await conn.fetch(
-                """
-                SELECT key, value, value_type, category, subcategory,
-                       display_name, description, default_value, env_var_name,
-                       is_secret, is_readonly, validation_regex, options_json,
-                       sort_order, created_at, updated_at
-                FROM bot_config
-                ORDER BY category, sort_order, key
-                """
+                select_sql(BOT_CONFIG_TABLE,
+                    "key, value, value_type, category, subcategory, display_name, description, default_value, env_var_name, is_secret, is_readonly, validation_regex, options_json, sort_order, created_at, updated_at",
+                    "ORDER BY category, sort_order, key")
             )
 
         categories: Dict[str, List[ConfigItemResponse]] = {}
@@ -233,7 +231,7 @@ async def update_setting(
         # Check if setting exists and is editable
         async with db_service.acquire() as conn:
             row = await conn.fetchrow(
-                "SELECT key, is_readonly, env_var_name, is_secret FROM bot_config WHERE key = $1",
+                select_sql(BOT_CONFIG_TABLE, "key, is_readonly, env_var_name, is_secret", "WHERE key = $1"),
                 key
             )
 
@@ -246,7 +244,7 @@ async def update_setting(
         # Update in DB (no env blocking — DB takes priority now)
         async with db_service.acquire() as conn:
             await conn.execute(
-                "UPDATE bot_config SET value = $2, updated_at = NOW() WHERE key = $1",
+                update_sql(BOT_CONFIG_TABLE, "value = $2, updated_at = NOW()", "key = $1"),
                 key, data.value
             )
 
@@ -295,7 +293,7 @@ async def reset_setting(
 
         async with db_service.acquire() as conn:
             row = await conn.fetchrow(
-                "SELECT key, is_readonly FROM bot_config WHERE key = $1",
+                select_sql(BOT_CONFIG_TABLE, "key, is_readonly", "WHERE key = $1"),
                 key
             )
 
@@ -308,7 +306,7 @@ async def reset_setting(
         # Set value to NULL — fallback to .env or default
         async with db_service.acquire() as conn:
             await conn.execute(
-                "UPDATE bot_config SET value = NULL, updated_at = NOW() WHERE key = $1",
+                update_sql(BOT_CONFIG_TABLE, "value = NULL, updated_at = NOW()", "key = $1"),
                 key
             )
 
@@ -419,7 +417,7 @@ async def get_sync_status(
 
         async with db_service.acquire() as conn:
             rows = await conn.fetch(
-                "SELECT * FROM sync_metadata ORDER BY key"
+                select_sql(SYNC_METADATA_TABLE, "*", "ORDER BY key")
             )
 
         return {

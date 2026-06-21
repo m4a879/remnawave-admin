@@ -1,5 +1,6 @@
 import { lazy, Suspense, useEffect, useState } from 'react'
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
+import { useTranslation } from 'react-i18next'
 import { useAuthStore } from './store/authStore'
 import { usePermissionStore } from './store/permissionStore'
 import { AppearanceProvider } from './components/AppearanceProvider'
@@ -118,11 +119,14 @@ function ProtectedShell() {
 
 /**
  * Protected route wrapper - redirects to login if not authenticated.
- * Also loads RBAC permissions on first mount.
+ * Also loads RBAC permissions on first mount and waits for them to resolve
+ * before rendering children, so child components (Dashboard, Sidebar, etc.)
+ * can read permission flags synchronously on first render.
  */
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { isAuthenticated } = useAuthStore()
-  const { isLoaded, loadPermissions, mustChangePassword } = usePermissionStore()
+  const { isLoaded, loadError, loadPermissions, mustChangePassword } = usePermissionStore()
+  const { t } = useTranslation()
 
   useEffect(() => {
     if (isAuthenticated && !isLoaded) {
@@ -136,6 +140,40 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
 
   if (isLoaded && mustChangePassword) {
     return <ForcePasswordChange />
+  }
+
+  // Wait for permissions to resolve before rendering children.
+  // Without this guard, child components render with `isLoaded=false`
+  // and `hasPermission(...)` returns false for everything (deny-by-default),
+  // which can cause React Query `enabled` flags to flip and queries to be
+  // skipped on first render — leading to empty UI until reload.
+  if (!isLoaded) {
+    // On failure, surface the error and let the user retry instead of
+    // spinning forever. The retry button re-invokes `loadPermissions`
+    // directly; on success the children render on the next state update.
+    if (loadError) {
+      return (
+        <div className="flex flex-col items-center justify-center h-screen gap-4 px-4">
+          <div className="text-sm text-red-400 text-center max-w-md">
+            {t('login.permissionsLoadFailed', { defaultValue: 'Failed to load permissions. Please try again.' })}
+          </div>
+          <div className="text-xs text-dark-300 text-center max-w-md break-all">
+            {loadError}
+          </div>
+          <button
+            onClick={() => { void loadPermissions() }}
+            className="px-6 py-2 rounded-lg bg-teal-600 hover:bg-teal-500 text-white text-sm font-medium transition-colors"
+          >
+            {t('login.retry', 'Retry')}
+          </button>
+        </div>
+      )
+    }
+    return (
+      <div className="flex items-center justify-center h-screen">
+        <div className="w-8 h-8 rounded-full border-2 border-primary/30 border-t-primary animate-spin" />
+      </div>
+    )
   }
 
   return <>{children}</>

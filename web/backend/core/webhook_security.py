@@ -18,6 +18,9 @@ import time
 from typing import Optional, Tuple
 from urllib.parse import urlparse
 
+from shared.db_schema import WEBHOOK_DELIVERIES_TABLE, WEBHOOK_SUBSCRIPTIONS_TABLE, WEBHOOK_RETRY_QUEUE_TABLE
+from shared.db_query import select_sql, insert_sql, update_sql
+
 import httpx
 
 logger = logging.getLogger(__name__)
@@ -122,18 +125,17 @@ async def _log_delivery(
             return
         async with db_service.acquire() as conn:
             await conn.execute(
-                "INSERT INTO webhook_deliveries "
-                "(webhook_id, event, status_code, response_body, error, duration_ms) "
-                "VALUES ($1, $2, $3, $4, $5, $6)",
+                insert_sql(WEBHOOK_DELIVERIES_TABLE,
+                    ["webhook_id", "event", "status_code", "response_body", "error", "duration_ms"]),
                 webhook_id, event, status_code,
                 (response_body[:5000] if response_body else None),
                 (error[:500] if error else None),
                 duration_ms,
             )
             await conn.execute(
-                "DELETE FROM webhook_deliveries WHERE webhook_id = $1 "
-                "AND id NOT IN (SELECT id FROM webhook_deliveries "
-                "WHERE webhook_id = $1 ORDER BY sent_at DESC LIMIT 200)",
+                f"DELETE FROM {WEBHOOK_DELIVERIES_TABLE} WHERE webhook_id = $1 "
+                f"AND id NOT IN (SELECT id FROM {WEBHOOK_DELIVERIES_TABLE} "
+                f"WHERE webhook_id = $1 ORDER BY sent_at DESC LIMIT 200)",
                 webhook_id,
             )
     except Exception as e:
@@ -150,21 +152,18 @@ async def _bump_failure(webhook_id: int) -> bool:
         return False
     async with db_service.acquire() as conn:
         row = await conn.fetchrow(
-            "UPDATE webhook_subscriptions "
-            "SET failure_count = failure_count + 1, "
-            "    consecutive_failures = consecutive_failures + 1 "
-            "WHERE id = $1 RETURNING consecutive_failures, is_active",
+            update_sql(WEBHOOK_SUBSCRIPTIONS_TABLE,
+                "failure_count = failure_count + 1, consecutive_failures = consecutive_failures + 1",
+                "id = $1", returning="consecutive_failures, is_active"),
             webhook_id,
         )
         if not row:
             return False
         if row["is_active"] and row["consecutive_failures"] >= WEBHOOK_AUTO_DISABLE_AFTER:
             await conn.execute(
-                "UPDATE webhook_subscriptions "
-                "SET is_active = false, "
-                "    auto_disabled_at = NOW(), "
-                "    disabled_reason = $2 "
-                "WHERE id = $1",
+                update_sql(WEBHOOK_SUBSCRIPTIONS_TABLE,
+                    "is_active = false, auto_disabled_at = NOW(), disabled_reason = $2",
+                    "id = $1"),
                 webhook_id,
                 f"Auto-disabled after {WEBHOOK_AUTO_DISABLE_AFTER} consecutive failures",
             )
@@ -179,9 +178,9 @@ async def _mark_success(webhook_id: int) -> None:
         return
     async with db_service.acquire() as conn:
         await conn.execute(
-            "UPDATE webhook_subscriptions "
-            "SET last_triggered_at = NOW(), consecutive_failures = 0 "
-            "WHERE id = $1",
+            update_sql(WEBHOOK_SUBSCRIPTIONS_TABLE,
+                "last_triggered_at = NOW(), consecutive_failures = 0",
+                "id = $1"),
             webhook_id,
         )
 
@@ -198,9 +197,9 @@ async def _enqueue_retry(
         return
     async with db_service.acquire() as conn:
         await conn.execute(
-            "INSERT INTO webhook_retry_queue "
-            "(webhook_id, event, payload, attempt, max_attempts, next_try_at, last_error) "
-            "VALUES ($1, $2, $3::jsonb, $4, $5, NOW() + ($6 || ' seconds')::interval, $7)",
+            insert_sql(WEBHOOK_RETRY_QUEUE_TABLE,
+                ["webhook_id", "event", "payload", "attempt", "max_attempts", "next_try_at", "last_error"],
+                values="$1, $2, $3::jsonb, $4, $5, NOW() + ($6 || ' seconds')::interval, $7"),
             webhook_id, event, json.dumps(payload, default=str),
             attempt + 1, WEBHOOK_MAX_ATTEMPTS, str(delay), error[:500],
         )
@@ -265,8 +264,9 @@ async def dispatch_event(event: str, payload: dict) -> None:
             return
         async with db_service.acquire() as conn:
             rows = await conn.fetch(
-                "SELECT id, url, secret, signature_version FROM webhook_subscriptions "
-                "WHERE is_active = true AND $1 = ANY(events)",
+                select_sql(WEBHOOK_SUBSCRIPTIONS_TABLE,
+                    "id, url, secret, signature_version",
+                    "WHERE is_active = true AND $1 = ANY(events)"),
                 event,
             )
         if not rows:
@@ -319,10 +319,10 @@ async def _process_retry_batch() -> int:
         return 0
     async with db_service.acquire() as conn:
         rows = await conn.fetch(
-            """
-            DELETE FROM webhook_retry_queue
+            f"""
+            DELETE FROM {WEBHOOK_RETRY_QUEUE_TABLE}
             WHERE id IN (
-                SELECT id FROM webhook_retry_queue
+                SELECT id FROM {WEBHOOK_RETRY_QUEUE_TABLE}
                 WHERE next_try_at <= NOW()
                 ORDER BY next_try_at ASC
                 LIMIT 20
@@ -338,8 +338,9 @@ async def _process_retry_batch() -> int:
         webhook_id = row["webhook_id"]
         async with db_service.acquire() as conn:
             wh = await conn.fetchrow(
-                "SELECT url, secret, signature_version, is_active "
-                "FROM webhook_subscriptions WHERE id = $1",
+                select_sql(WEBHOOK_SUBSCRIPTIONS_TABLE,
+                    "url, secret, signature_version, is_active",
+                    "WHERE id = $1"),
                 webhook_id,
             )
         if not wh or not wh["is_active"]:

@@ -1558,7 +1558,7 @@ function ProvidersCard() {
                   <div className="space-y-1.5 max-h-64 overflow-y-auto">
                     {flagAsnData.asn_list.map((asn) => (
                       <div key={asn.asn} className="flex items-center gap-2 text-xs">
-                        <span className="text-muted-foreground w-16 shrink-0">AS{asn.asn}</span>
+                        <span className="text-muted-foreground w-16 shrink-0">{t('analytics.nodes.as')}{asn.asn}</span>
                         <span className="text-white flex-1 truncate">{asn.org}</span>
                         <span className="text-muted-foreground">{asn.count.toLocaleString()}</span>
                         <span className="text-muted-foreground w-12 text-right">{asn.percent}%</span>
@@ -1827,11 +1827,11 @@ function IpExportDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (
               <table className="w-full text-xs">
                 <thead className="sticky top-0 bg-[var(--glass-bg)]">
                   <tr className="text-muted-foreground">
-                    <th className="text-left p-1.5 pl-2">IP</th>
-                    <th className="text-left p-1.5">User</th>
-                    <th className="text-left p-1.5">Node</th>
-                    <th className="text-left p-1.5">Country</th>
-                    <th className="text-left p-1.5">Provider</th>
+                    <th className="text-left p-1.5 pl-2">{t('analytics.ipPreview.ip')}</th>
+                    <th className="text-left p-1.5">{t('analytics.ipPreview.user')}</th>
+                    <th className="text-left p-1.5">{t('analytics.ipPreview.node')}</th>
+                    <th className="text-left p-1.5">{t('analytics.ipPreview.country')}</th>
+                    <th className="text-left p-1.5">{t('analytics.ipPreview.provider')}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -2115,13 +2115,13 @@ function NodesCard() {
                 <TableRow>
                   <SortHeader field="name">{t('analytics.nodes.name', { defaultValue: 'Node' })}</SortHeader>
                   <TableHead className="text-xs">{t('analytics.topUsers.status')}</TableHead>
-                  <SortHeader field="cpu">CPU</SortHeader>
-                  <SortHeader field="ram">RAM</SortHeader>
+                  <SortHeader field="cpu">{t('analytics.nodes.cpu')}</SortHeader>
+                  <SortHeader field="ram">{t('analytics.nodes.ram')}</SortHeader>
                   <SortHeader field="disk">{t('analytics.nodes.disk', { defaultValue: 'Disk' })}</SortHeader>
                   <SortHeader field="users">{t('analytics.nodes.users', { defaultValue: 'Users' })}</SortHeader>
                   <SortHeader field="traffic">{t('analytics.nodes.traffic', { defaultValue: 'Traffic' })}</SortHeader>
                   <SortHeader field="speed">{t('analytics.nodes.speed', { defaultValue: 'Speed' })}</SortHeader>
-                  <TableHead className="text-xs hidden lg:table-cell">Uptime</TableHead>
+                  <TableHead className="text-xs hidden lg:table-cell">{t('analytics.nodes.uptime')}</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -2838,7 +2838,7 @@ function GeoBalanceCard() {
                     <TableHead className="text-xs">{t('analytics.geoBalance.node', { defaultValue: 'Node' })}</TableHead>
                     <TableHead className="text-xs text-center">CPU</TableHead>
                     <TableHead className="text-xs text-center">RAM</TableHead>
-                    <TableHead className="text-xs text-center">Disk</TableHead>
+                    <TableHead className="text-xs text-center">{t('analytics.nodes.disk', { defaultValue: 'Disk' })}</TableHead>
                     <TableHead className="text-xs text-right">{t('analytics.geoBalance.online', { defaultValue: 'Online' })}</TableHead>
                     <TableHead className="text-xs hidden sm:table-cell">{t('analytics.geoBalance.topCountries', { defaultValue: 'Top Countries' })}</TableHead>
                   </TableRow>

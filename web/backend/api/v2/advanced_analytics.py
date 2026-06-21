@@ -10,7 +10,16 @@ from web.backend.api.deps import require_permission, AdminUser
 from web.backend.core.cache import cached, CACHE_TTL_LONG
 from web.backend.core.rate_limit import limiter, RATE_ANALYTICS
 
+from shared.db_schema import (
+    USERS_TABLE, NODES_TABLE, HOSTS_TABLE, USER_CONNECTIONS_TABLE,
+    IP_METADATA_TABLE, VIOLATIONS_TABLE, NODE_METRICS_SNAPSHOTS_TABLE,
+    USER_NODE_TRAFFIC_TABLE,
+)
+from shared.db_query import select_sql
+
 logger = logging.getLogger(__name__)
+
+NODE_TRAFFIC_SNAPSHOTS_TABLE = "node_traffic_snapshots"
 router = APIRouter()
 
 
@@ -69,14 +78,11 @@ async def _compute_geo(period: str = "7d", date_from: Optional[str] = None, date
         async with db_service.acquire() as conn:
             # Get country distribution from ip_metadata table
             country_rows = await conn.fetch(
-                """
-                SELECT country_name, country_code, COUNT(*) as count
-                FROM ip_metadata
-                WHERE created_at >= $1 AND country_name IS NOT NULL
-                GROUP BY country_name, country_code
-                ORDER BY count DESC
-                LIMIT 50
-                """,
+                select_sql(
+                    IP_METADATA_TABLE,
+                    "country_name, country_code, COUNT(*) as count",
+                    "WHERE created_at >= $1 AND country_name IS NOT NULL GROUP BY country_name, country_code ORDER BY count DESC LIMIT 50",
+                ),
                 since,
             )
 
@@ -91,17 +97,11 @@ async def _compute_geo(period: str = "7d", date_from: Optional[str] = None, date
 
             # Get city distribution (AVG coords to merge same city with different lat/lon)
             city_rows = await conn.fetch(
-                """
-                SELECT city, country_name,
-                       AVG(latitude) as latitude,
-                       AVG(longitude) as longitude,
-                       COUNT(*) as count
-                FROM ip_metadata
-                WHERE created_at >= $1 AND city IS NOT NULL AND latitude IS NOT NULL
-                GROUP BY city, country_name
-                ORDER BY count DESC
-                LIMIT 100
-                """,
+                select_sql(
+                    IP_METADATA_TABLE,
+                    "city, country_name, AVG(latitude) as latitude, AVG(longitude) as longitude, COUNT(*) as count",
+                    "WHERE created_at >= $1 AND city IS NOT NULL AND latitude IS NOT NULL GROUP BY city, country_name ORDER BY count DESC LIMIT 100",
+                ),
                 since,
             )
 
@@ -113,15 +113,15 @@ async def _compute_geo(period: str = "7d", date_from: Optional[str] = None, date
                 # Join user_connections (INET) with ip_metadata (VARCHAR)
                 # Use host() to strip CIDR mask from INET, with text fallback
                 user_city_rows = await conn.fetch(
-                    """
+                    f"""
                     SELECT im.city, im.country_name,
                            u.username, u.uuid::text as uuid, u.status,
                            COUNT(uc.id) as connections,
                            array_agg(DISTINCT SPLIT_PART(uc.ip_address::text, '/', 1)) as ips
-                    FROM user_connections uc
-                    JOIN ip_metadata im
+                    FROM {USER_CONNECTIONS_TABLE} uc
+                    JOIN {IP_METADATA_TABLE} im
                         ON SPLIT_PART(uc.ip_address::text, '/', 1) = TRIM(im.ip_address)
-                    JOIN users u ON uc.user_uuid = u.uuid
+                    JOIN {USERS_TABLE} u ON uc.user_uuid = u.uuid
                     WHERE im.city IS NOT NULL AND im.country_name IS NOT NULL
                           AND im.created_at >= $1
                     GROUP BY im.city, im.country_name, u.uuid, u.username, u.status
@@ -214,21 +214,23 @@ async def get_top_users_by_traffic(
     admin: AdminUser = Depends(require_permission("analytics", "view")),
 ):
     """Get top users by traffic consumption, optionally for a date range."""
+    from web.backend.core.rbac import get_visible_user_uuids
+    visible = await get_visible_user_uuids(admin)
+
     if date_from and date_to:
         date_from = date_from[:10]
         date_to = date_to[:10]
         result = await _compute_top_users_range(date_from, date_to, limit)
+        if visible is not None and isinstance(result, dict):
+            items = result.get("items") or []
+            result = {**result, "items": [
+                it for it in items if str(it.get("uuid", "")).lower() in visible
+            ]}
     else:
-        result = await _compute_top_users(limit=limit)
-
-    # Access-policy: filter items by visible users
-    from web.backend.core.rbac import get_visible_user_uuids
-    visible = await get_visible_user_uuids(admin)
-    if visible is not None and isinstance(result, dict):
-        items = result.get("items") or []
-        result = {**result, "items": [
-            it for it in items if str(it.get("uuid", "")).lower() in visible
-        ]}
+        if visible is not None:
+            result = await _compute_top_users_scoped(list(visible), limit)
+        else:
+            result = await _compute_top_users(limit=limit)
     return result
 
 
@@ -242,19 +244,12 @@ async def _compute_top_users(limit: int = 20):
 
         async with db_service.acquire() as conn:
             rows = await conn.fetch(
-                """
-                SELECT uuid, username, status,
-                       used_traffic_bytes,
-                       traffic_limit_bytes,
-                       COALESCE(
-                           raw_data->'userTraffic'->>'onlineAt',
-                           raw_data->>'onlineAt'
-                       ) as online_at
-                FROM users
-                WHERE used_traffic_bytes > 0
-                ORDER BY used_traffic_bytes DESC
-                LIMIT $1
-                """,
+                select_sql(
+                    USERS_TABLE,
+                    "uuid, username, status, used_traffic_bytes, traffic_limit_bytes, "
+                    "COALESCE(raw_data->'userTraffic'->>'onlineAt', raw_data->>'onlineAt') as online_at",
+                    "WHERE used_traffic_bytes > 0 ORDER BY used_traffic_bytes DESC LIMIT $1",
+                ),
                 limit,
             )
 
@@ -280,6 +275,50 @@ async def _compute_top_users(limit: int = 20):
 
     except Exception as e:
         logger.error("get_top_users_by_traffic failed: %s", e)
+        return {"items": []}
+
+
+async def _compute_top_users_scoped(uuids: list[str], limit: int = 20):
+    """Compute top users by traffic scoped to a set of user UUIDs."""
+    try:
+        from shared.database import db_service
+        if not db_service.is_connected or not uuids:
+            return {"items": []}
+
+        async with db_service.acquire() as conn:
+            rows = await conn.fetch(
+                select_sql(
+                    USERS_TABLE,
+                    "uuid, username, status, used_traffic_bytes, traffic_limit_bytes, "
+                    "COALESCE(raw_data->'userTraffic'->>'onlineAt', raw_data->>'onlineAt') as online_at",
+                    "WHERE used_traffic_bytes > 0 AND uuid = ANY($1::uuid[]) ORDER BY used_traffic_bytes DESC LIMIT $2",
+                ),
+                uuids,
+                limit,
+            )
+
+            items = []
+            for r in rows:
+                used = r["used_traffic_bytes"] or 0
+                limit_bytes = r["traffic_limit_bytes"]
+                usage_pct = None
+                if limit_bytes and limit_bytes > 0:
+                    usage_pct = round((used / limit_bytes) * 100, 1)
+
+                items.append({
+                    "uuid": str(r["uuid"]),
+                    "username": r["username"],
+                    "status": r["status"],
+                    "used_traffic_bytes": used,
+                    "traffic_limit_bytes": limit_bytes,
+                    "usage_percent": usage_pct,
+                    "online_at": r["online_at"],
+                })
+
+            return {"items": items}
+
+    except Exception as e:
+        logger.error("_compute_top_users_scoped failed: %s", e)
         return {"items": []}
 
 
@@ -331,7 +370,7 @@ async def _compute_top_users_range(date_from: str, date_to: str, limit: int = 20
             usernames = [u[0] for u in sorted_users]
             async with db_service.acquire() as conn:
                 rows = await conn.fetch(
-                    "SELECT uuid, username, status, traffic_limit_bytes FROM users WHERE username = ANY($1)",
+                    select_sql(USERS_TABLE, "uuid, username, status, traffic_limit_bytes", "WHERE username = ANY($1)"),
                     usernames,
                 )
                 user_map = {r["username"]: r for r in rows}
@@ -392,7 +431,7 @@ async def get_nodes_traffic(
         if db_service.is_connected:
             try:
                 async with db_service.acquire() as conn:
-                    rows = await conn.fetch("SELECT uuid, name FROM nodes")
+                    rows = await conn.fetch(select_sql(NODES_TABLE, "uuid, name"))
                     node_names = {str(r["uuid"]): r["name"] for r in rows}
             except Exception:
                 pass
@@ -480,56 +519,54 @@ async def _compute_trends(
             if metric == "users":
                 if user_uuid_whitelist is not None:
                     rows = await conn.fetch(
-                        """
-                        SELECT DATE(created_at) as day, COUNT(*) as count
-                        FROM users
-                        WHERE created_at >= $1 AND uuid::text = ANY($2)
-                        GROUP BY DATE(created_at) ORDER BY day
-                        """,
+                        select_sql(
+                            USERS_TABLE,
+                            "DATE(created_at) as day, COUNT(*) as count",
+                            "WHERE created_at >= $1 AND uuid::text = ANY($2) GROUP BY DATE(created_at) ORDER BY day",
+                        ),
                         since, user_uuid_whitelist,
                     )
                     total_before = await conn.fetchval(
-                        "SELECT COUNT(*) FROM users WHERE created_at < $1 AND uuid::text = ANY($2)",
+                        select_sql(USERS_TABLE, "COUNT(*)", "WHERE created_at < $1 AND uuid::text = ANY($2)"),
                         since, user_uuid_whitelist,
                     )
                     total_now = await conn.fetchval(
-                        "SELECT COUNT(*) FROM users WHERE uuid::text = ANY($1)",
+                        select_sql(USERS_TABLE, "COUNT(*)", "WHERE uuid::text = ANY($1)"),
                         user_uuid_whitelist,
                     )
                 else:
                     rows = await conn.fetch(
-                        """
-                        SELECT DATE(created_at) as day, COUNT(*) as count
-                        FROM users WHERE created_at >= $1
-                        GROUP BY DATE(created_at) ORDER BY day
-                        """,
+                        select_sql(
+                            USERS_TABLE,
+                            "DATE(created_at) as day, COUNT(*) as count",
+                            "WHERE created_at >= $1 GROUP BY DATE(created_at) ORDER BY day",
+                        ),
                         since,
                     )
                     total_before = await conn.fetchval(
-                        "SELECT COUNT(*) FROM users WHERE created_at < $1", since
+                        select_sql(USERS_TABLE, "COUNT(*)", "WHERE created_at < $1"), since
                     )
-                    total_now = await conn.fetchval("SELECT COUNT(*) FROM users")
+                    total_now = await conn.fetchval(select_sql(USERS_TABLE, "COUNT(*)"))
                 series = [{"date": str(r["day"]), "value": r["count"]} for r in rows]
                 growth = total_now - (total_before or 0)
 
             elif metric == "violations":
                 if user_uuid_whitelist is not None:
                     rows = await conn.fetch(
-                        """
-                        SELECT DATE(detected_at) as day, COUNT(*) as count
-                        FROM violations
-                        WHERE detected_at >= $1 AND user_uuid::text = ANY($2)
-                        GROUP BY DATE(detected_at) ORDER BY day
-                        """,
+                        select_sql(
+                            VIOLATIONS_TABLE,
+                            "DATE(detected_at) as day, COUNT(*) as count",
+                            "WHERE detected_at >= $1 AND user_uuid::text = ANY($2) GROUP BY DATE(detected_at) ORDER BY day",
+                        ),
                         since, user_uuid_whitelist,
                     )
                 else:
                     rows = await conn.fetch(
-                        """
-                        SELECT DATE(detected_at) as day, COUNT(*) as count
-                        FROM violations WHERE detected_at >= $1
-                        GROUP BY DATE(detected_at) ORDER BY day
-                        """,
+                        select_sql(
+                            VIOLATIONS_TABLE,
+                            "DATE(detected_at) as day, COUNT(*) as count",
+                            "WHERE detected_at >= $1 GROUP BY DATE(detected_at) ORDER BY day",
+                        ),
                         since,
                     )
                 series = [{"date": str(r["day"]), "value": r["count"]} for r in rows]
@@ -544,13 +581,13 @@ async def _compute_trends(
                 # duplicating the absolute-traffic chart on the dashboard.
                 if node_uuid_whitelist is not None:
                     rows = await conn.fetch(
-                        """
+                        f"""
                         SELECT day, SUM(per_node) AS total_bytes
                         FROM (
                             SELECT DATE(created_at AT TIME ZONE 'UTC') AS day,
                                    node_uuid,
                                    MAX(traffic_bytes) AS per_node
-                            FROM node_traffic_snapshots
+                            FROM {NODE_TRAFFIC_SNAPSHOTS_TABLE}
                             WHERE created_at >= $1 AND node_uuid::text = ANY($2)
                             GROUP BY DATE(created_at AT TIME ZONE 'UTC'), node_uuid
                         ) t
@@ -560,13 +597,13 @@ async def _compute_trends(
                     )
                 else:
                     rows = await conn.fetch(
-                        """
+                        f"""
                         SELECT day, SUM(per_node) AS total_bytes
                         FROM (
                             SELECT DATE(created_at AT TIME ZONE 'UTC') AS day,
                                    node_uuid,
                                    MAX(traffic_bytes) AS per_node
-                            FROM node_traffic_snapshots
+                            FROM {NODE_TRAFFIC_SNAPSHOTS_TABLE}
                             WHERE created_at >= $1
                             GROUP BY DATE(created_at AT TIME ZONE 'UTC'), node_uuid
                         ) t
@@ -653,20 +690,17 @@ async def _compute_providers(period: str = "7d"):
 
         async with db_service.acquire() as conn:
             total = await conn.fetchval(
-                "SELECT COUNT(*) FROM ip_metadata WHERE created_at >= $1",
+                select_sql(IP_METADATA_TABLE, "COUNT(*)", "WHERE created_at >= $1"),
                 since,
             ) or 1
 
             # Connection types distribution
             type_rows = await conn.fetch(
-                """
-                SELECT COALESCE(connection_type, 'unknown') as type,
-                       COUNT(*) as count
-                FROM ip_metadata
-                WHERE created_at >= $1
-                GROUP BY connection_type
-                ORDER BY count DESC
-                """,
+                select_sql(
+                    IP_METADATA_TABLE,
+                    "COALESCE(connection_type, 'unknown') as type, COUNT(*) as count",
+                    "WHERE created_at >= $1 GROUP BY connection_type ORDER BY count DESC",
+                ),
                 since,
             )
             connection_types = [
@@ -677,14 +711,11 @@ async def _compute_providers(period: str = "7d"):
 
             # Top ASN organizations
             asn_rows = await conn.fetch(
-                """
-                SELECT asn, asn_org, COUNT(*) as count
-                FROM ip_metadata
-                WHERE created_at >= $1 AND asn IS NOT NULL
-                GROUP BY asn, asn_org
-                ORDER BY count DESC
-                LIMIT 10
-                """,
+                select_sql(
+                    IP_METADATA_TABLE,
+                    "asn, asn_org, COUNT(*) as count",
+                    "WHERE created_at >= $1 AND asn IS NOT NULL GROUP BY asn, asn_org ORDER BY count DESC LIMIT 10",
+                ),
                 since,
             )
             top_asn = [
@@ -696,15 +727,14 @@ async def _compute_providers(period: str = "7d"):
 
             # Flags: VPN/Proxy/Tor/Hosting percentages
             flag_row = await conn.fetchrow(
-                """
-                SELECT
-                    COUNT(*) FILTER (WHERE is_vpn = true) as vpn,
-                    COUNT(*) FILTER (WHERE is_proxy = true) as proxy,
-                    COUNT(*) FILTER (WHERE is_tor = true) as tor,
-                    COUNT(*) FILTER (WHERE is_hosting = true) as hosting
-                FROM ip_metadata
-                WHERE created_at >= $1
-                """,
+                select_sql(
+                    IP_METADATA_TABLE,
+                    "COUNT(*) FILTER (WHERE is_vpn = true) as vpn, "
+                    "COUNT(*) FILTER (WHERE is_proxy = true) as proxy, "
+                    "COUNT(*) FILTER (WHERE is_tor = true) as tor, "
+                    "COUNT(*) FILTER (WHERE is_hosting = true) as hosting",
+                    "WHERE created_at >= $1",
+                ),
                 since,
             )
             flags = {
@@ -762,18 +792,16 @@ async def _compute_asn_full(period: str = "7d"):
 
         async with db_service.acquire() as conn:
             total = await conn.fetchval(
-                "SELECT COUNT(*) FROM ip_metadata WHERE created_at >= $1 AND asn IS NOT NULL",
+                select_sql(IP_METADATA_TABLE, "COUNT(*)", "WHERE created_at >= $1 AND asn IS NOT NULL"),
                 since,
             ) or 1
 
             rows = await conn.fetch(
-                """
-                SELECT asn, asn_org, COUNT(*) as count
-                FROM ip_metadata
-                WHERE created_at >= $1 AND asn IS NOT NULL
-                GROUP BY asn, asn_org
-                ORDER BY count DESC
-                """,
+                select_sql(
+                    IP_METADATA_TABLE,
+                    "asn, asn_org, COUNT(*) as count",
+                    "WHERE created_at >= $1 AND asn IS NOT NULL GROUP BY asn, asn_org ORDER BY count DESC",
+                ),
                 since,
             )
             return {
@@ -806,19 +834,16 @@ async def _compute_flag_asn(flag: str = "vpn", period: str = "7d"):
 
         async with db_service.acquire() as conn:
             total = await conn.fetchval(
-                f"SELECT COUNT(*) FROM ip_metadata WHERE created_at >= $1 AND {col} = true",
+                select_sql(IP_METADATA_TABLE, "COUNT(*)", f"WHERE created_at >= $1 AND {col} = true"),
                 since,
             ) or 1
 
             rows = await conn.fetch(
-                f"""
-                SELECT asn, asn_org, COUNT(*) as count
-                FROM ip_metadata
-                WHERE created_at >= $1 AND {col} = true AND asn IS NOT NULL
-                GROUP BY asn, asn_org
-                ORDER BY count DESC
-                LIMIT 20
-                """,
+                select_sql(
+                    IP_METADATA_TABLE,
+                    "asn, asn_org, COUNT(*) as count",
+                    f"WHERE created_at >= $1 AND {col} = true AND asn IS NOT NULL GROUP BY asn, asn_org ORDER BY count DESC LIMIT 20",
+                ),
                 since,
             )
             return {
@@ -860,7 +885,7 @@ async def _compute_retention(weeks: int = 12):
         async with db_service.acquire() as conn:
             # Get cohorts by registration week
             rows = await conn.fetch(
-                """
+                f"""
                 WITH cohorts AS (
                     SELECT
                         DATE_TRUNC('week', created_at)::date as cohort_week,
@@ -868,7 +893,7 @@ async def _compute_retention(weeks: int = 12):
                         status,
                         used_traffic_bytes,
                         expire_at
-                    FROM users
+                    FROM {USERS_TABLE}
                     WHERE created_at >= $1
                 )
                 SELECT
@@ -1119,7 +1144,7 @@ async def _compute_cohort_matrix(granularity: str = "week", months: int = 3):
                 f"""
                 WITH cohorts AS (
                     SELECT uuid, DATE_TRUNC('{trunc}', created_at)::date AS cohort
-                    FROM users
+                    FROM {USERS_TABLE}
                     WHERE created_at >= $1
                 ),
                 activity AS (
@@ -1128,7 +1153,7 @@ async def _compute_cohort_matrix(granularity: str = "week", months: int = 3):
                         DATE_TRUNC('{trunc}', uc.connected_at)::date AS activity_period,
                         COUNT(DISTINCT c.uuid) AS active_users
                     FROM cohorts c
-                    JOIN user_connections uc ON uc.user_uuid = c.uuid
+                    JOIN {USER_CONNECTIONS_TABLE} uc ON uc.user_uuid = c.uuid
                     WHERE uc.connected_at >= $1
                     GROUP BY c.cohort, activity_period
                 ),
@@ -1206,7 +1231,7 @@ async def _compute_churn(period: str = "month", months: int = 6):
                     SELECT
                         DATE_TRUNC('{trunc}', connected_at)::date AS p,
                         COUNT(DISTINCT user_uuid) AS active_users
-                    FROM user_connections
+                    FROM {USER_CONNECTIONS_TABLE}
                     WHERE connected_at >= $1
                     GROUP BY p
                     ORDER BY p
@@ -1215,7 +1240,7 @@ async def _compute_churn(period: str = "month", months: int = 6):
                     SELECT
                         DATE_TRUNC('{trunc}', created_at)::date AS p,
                         COUNT(*) AS new_users
-                    FROM users
+                    FROM {USERS_TABLE}
                     WHERE created_at >= $1
                     GROUP BY p
                 )
@@ -1280,7 +1305,7 @@ async def get_ltv_estimate(
         async with db_service.acquire() as conn:
             # Average user lifetime (days between created_at and last activity)
             lifetime_row = await conn.fetchrow(
-                """
+                f"""
                 SELECT
                     AVG(EXTRACT(EPOCH FROM (last_seen - created_at)) / 86400) AS avg_lifetime_days,
                     COUNT(*) AS sample_size
@@ -1288,8 +1313,8 @@ async def get_ltv_estimate(
                     SELECT
                         u.created_at,
                         MAX(uc.connected_at) AS last_seen
-                    FROM users u
-                    JOIN user_connections uc ON uc.user_uuid = u.uuid
+                    FROM {USERS_TABLE} u
+                    JOIN {USER_CONNECTIONS_TABLE} uc ON uc.user_uuid = u.uuid
                     WHERE u.created_at >= NOW() - INTERVAL '6 months'
                     GROUP BY u.uuid, u.created_at
                     HAVING MAX(uc.connected_at) > u.created_at
@@ -1354,26 +1379,25 @@ async def _compute_geo_balance(days: int = 7):
         async with db_service.acquire() as conn:
             # Node load + metrics (users_online is in raw_data, not a column)
             node_rows = await conn.fetch(
-                """
-                SELECT uuid::text, name, is_connected, is_disabled,
-                       cpu_usage, memory_usage, disk_usage,
-                       COALESCE((raw_data->>'usersOnline')::int, 0) AS users_online,
-                       traffic_used_bytes
-                FROM nodes ORDER BY name
-                """
+                select_sql(
+                    NODES_TABLE,
+                    "uuid::text, name, is_connected, is_disabled, cpu_usage, memory_usage, disk_usage, "
+                    "COALESCE((raw_data->>'usersOnline')::int, 0) AS users_online, traffic_used_bytes",
+                    "ORDER BY name",
+                )
             )
 
             # User distribution by country per node (from connections + ip_metadata)
             geo_rows = await conn.fetch(
-                """
+                f"""
                 SELECT
                     uc.node_uuid::text AS node_uuid,
                     COALESCE(im.country_code, '??') AS country_code,
                     COALESCE(im.country_name, 'Unknown') AS country_name,
                     COUNT(DISTINCT uc.user_uuid) AS user_count,
                     COUNT(*) AS connection_count
-                FROM user_connections uc
-                LEFT JOIN ip_metadata im
+                FROM {USER_CONNECTIONS_TABLE} uc
+                LEFT JOIN {IP_METADATA_TABLE} im
                     ON SPLIT_PART(uc.ip_address::text, '/', 1) = TRIM(im.ip_address)
                 WHERE uc.connected_at >= $1
                 GROUP BY uc.node_uuid, im.country_code, im.country_name
@@ -1384,13 +1408,13 @@ async def _compute_geo_balance(days: int = 7):
 
             # Total users per country (for unserved region detection)
             country_totals = await conn.fetch(
-                """
+                f"""
                 SELECT
                     COALESCE(im.country_code, '??') AS country_code,
                     COALESCE(im.country_name, 'Unknown') AS country_name,
                     COUNT(DISTINCT uc.user_uuid) AS user_count
-                FROM user_connections uc
-                LEFT JOIN ip_metadata im
+                FROM {USER_CONNECTIONS_TABLE} uc
+                LEFT JOIN {IP_METADATA_TABLE} im
                     ON SPLIT_PART(uc.ip_address::text, '/', 1) = TRIM(im.ip_address)
                 WHERE uc.connected_at >= $1
                 GROUP BY im.country_code, im.country_name
@@ -1562,10 +1586,10 @@ async def _compute_export_ips(
                 im.country_code, im.country_name, im.city,
                 im.asn, im.asn_org, im.connection_type,
                 im.is_vpn, im.is_proxy, im.is_tor, im.is_hosting
-            FROM user_connections uc
-            LEFT JOIN users u ON u.uuid = uc.user_uuid
-            LEFT JOIN nodes n ON n.uuid = uc.node_uuid
-            LEFT JOIN ip_metadata im ON im.ip_address = host(uc.ip_address::inet)
+            FROM {USER_CONNECTIONS_TABLE} uc
+            LEFT JOIN {USERS_TABLE} u ON u.uuid = uc.user_uuid
+            LEFT JOIN {NODES_TABLE} n ON n.uuid = uc.node_uuid
+            LEFT JOIN {IP_METADATA_TABLE} im ON im.ip_address = host(uc.ip_address::inet)
             WHERE {where}
             ORDER BY host(uc.ip_address::inet), uc.connected_at DESC
             """,

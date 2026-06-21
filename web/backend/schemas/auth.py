@@ -103,8 +103,21 @@ class AdminInfo(BaseModel):
     email: Optional[str] = None
     role: str
     role_id: Optional[int] = None
+    account_id: Optional[int] = None
+    # Quota limits (None = unlimited)
+    max_users: Optional[int] = None
+    max_traffic_gb: Optional[int] = None
+    max_nodes: Optional[int] = None
+    max_hosts: Optional[int] = None
+    # Quota counters
+    users_created: int = 0
+    traffic_used_bytes: int = 0
+    nodes_created: int = 0
+    hosts_created: int = 0
+    unlimited_traffic_policy: str = "allowed"
     auth_method: str = "telegram"
     password_is_generated: bool = False
+    unrestricted_user_access: bool = False
     permissions: List[PermissionEntry] = []
 
 

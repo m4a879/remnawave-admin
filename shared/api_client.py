@@ -1,107 +1,27 @@
-import asyncio
-
 import httpx
-from httpx import HTTPStatusError
 
 from shared.config import get_shared_settings as get_settings
 from shared.cache import CacheKeys, CacheManager, cache
+from shared.exceptions import (  # re-exported for backward compat
+    ApiClientError,
+    NotFoundError,
+    UnauthorizedError,
+    NetworkError,
+    TimeoutError,
+    RateLimitError,
+    ServerError,
+    ValidationError,
+)
+from shared.http_client import BaseHttpClient
 from shared.logger import logger
 
 
-class ApiClientError(Exception):
-    """Generic API error with error code support."""
-    
-    def __init__(self, message: str = "", code: str = "ERR_API_000", hint: str = ""):
-        self.message = message
-        self.code = code
-        self.hint = hint
-        super().__init__(message)
-    
-    def __str__(self) -> str:
-        return self.message or super().__str__()
-
-
-class NotFoundError(ApiClientError):
-    """404 error - resource not found."""
-    
-    def __init__(self, message: str = "Resource not found"):
-        super().__init__(message, code="ERR_404_001", hint="Check if the resource exists")
-
-
-class UnauthorizedError(ApiClientError):
-    """401/403 error - authentication/authorization failed."""
-    
-    def __init__(self, message: str = "Unauthorized"):
-        super().__init__(message, code="ERR_AUTH_001", hint="Check API token in settings")
-
-
-class NetworkError(ApiClientError):
-    """Network connectivity error."""
-    
-    def __init__(self, message: str = "Network error"):
-        super().__init__(message, code="ERR_NET_001", hint="Check network connection and API server availability")
-
-
-class TimeoutError(ApiClientError):
-    """Request timeout error."""
-    
-    def __init__(self, message: str = "Request timeout"):
-        super().__init__(message, code="ERR_TIMEOUT_001", hint="Server is slow or overloaded, try again later")
-
-
-class RateLimitError(ApiClientError):
-    """Rate limit exceeded error."""
-    
-    def __init__(self, message: str = "Rate limit exceeded"):
-        super().__init__(message, code="ERR_RATE_001", hint="Wait a moment before retrying")
-
-
-class ServerError(ApiClientError):
-    """Server error (5xx)."""
-    
-    def __init__(self, message: str = "Server error", status_code: int = 500):
-        self.status_code = status_code
-        code = f"ERR_SRV_{status_code}"
-        super().__init__(message, code=code, hint="Server is temporarily unavailable")
-
-
-class ValidationError(ApiClientError):
-    """Data validation error."""
-    
-    def __init__(self, message: str = "Validation error", field: str = ""):
-        self.field = field
-        hint = f"Check value for field: {field}" if field else "Check input data format"
-        super().__init__(message, code="ERR_VAL_001", hint=hint)
-
-
-class RemnawaveApiClient:
+class RemnawaveApiClient(BaseHttpClient):
     def __init__(self) -> None:
         self.settings = get_settings()
-        self._client = self._create_client()
-
-    def _create_client(self) -> httpx.AsyncClient:
-        """Create a new httpx.AsyncClient instance."""
-        timeout_config = httpx.Timeout(
-            connect=15.0,
-            read=60.0,
-            write=15.0,
-            pool=10.0,
-        )
         base_url = str(self.settings.api_base_url).rstrip("/")
-        return httpx.AsyncClient(
-            base_url=base_url,
-            headers=self._build_headers(),
-            timeout=timeout_config,
-            limits=httpx.Limits(max_keepalive_connections=10, max_connections=20),
-            follow_redirects=True,
-        )
-
-    async def _ensure_client(self) -> httpx.AsyncClient:
-        """Return the current client, recreating it if closed."""
-        if self._client is None or self._client.is_closed:
-            logger.warning("HTTPX client was closed, recreating")
-            self._client = self._create_client()
-        return self._client
+        headers = self._build_headers()
+        super().__init__(base_url, "", headers)
 
     def _build_headers(self) -> dict[str, str]:
         headers = {"Content-Type": "application/json"}
@@ -124,268 +44,16 @@ class RemnawaveApiClient:
         return headers
 
     async def _get(self, url: str, params: dict | None = None, max_retries: int = 3) -> dict:
-        """Выполняет GET запрос с retry для сетевых ошибок."""
-        from shared.logger import log_api_call, log_api_error
-        import time
-
-        last_exc = None
-        start_time = time.time()
-
-        for attempt in range(max_retries):
-            try:
-                response = await (await self._ensure_client()).get(url, params=params)
-                duration_ms = (time.time() - start_time) * 1000
-                response.raise_for_status()
-                log_api_call("GET", url, status_code=response.status_code, duration_ms=duration_ms)
-                return response.json()
-            except HTTPStatusError as exc:
-                log_api_error("GET", url, exc, status_code=exc.response.status_code)
-                status = exc.response.status_code
-                if status in (401, 403):
-                    raise UnauthorizedError(f"Access denied: {status}") from exc
-                if status == 404:
-                    raise NotFoundError(f"Resource not found: {url}") from exc
-                if status == 429:
-                    raise RateLimitError(f"Rate limit exceeded on {url}") from exc
-                if status >= 500:
-                    raise ServerError(f"Server error {status} on {url}", status_code=status) from exc
-                raise ApiClientError(f"API error {status}", code=f"ERR_API_{status}") from exc
-            except httpx.ReadTimeout as exc:
-                last_exc = exc
-                if attempt < max_retries - 1:
-                    delay = 0.5 * (2 ** attempt)
-                    logger.warning("⏳ Timeout GET %s (%d/%d), retry in %.1fs", url, attempt + 1, max_retries, delay)
-                    await asyncio.sleep(delay)
-                else:
-                    logger.error("❌ Timeout GET %s after %d attempts", url, max_retries)
-                    raise TimeoutError(f"Request timeout on {url}") from exc
-            except (httpx.RemoteProtocolError, httpx.ConnectError, RuntimeError) as exc:
-                last_exc = exc
-                if isinstance(exc, RuntimeError):
-                    try:
-                        await self._client.aclose()
-                    except Exception:
-                        pass
-                    self._client = self._create_client()
-                if attempt < max_retries - 1:
-                    delay = 0.5 * (2 ** attempt)
-                    logger.warning("⏳ Network error GET %s (%d/%d), retry in %.1fs", url, attempt + 1, max_retries, delay)
-                    await asyncio.sleep(delay)
-                else:
-                    logger.error("❌ Network error GET %s after %d attempts", url, max_retries)
-                    raise NetworkError(f"Connection failed to {url}") from exc
-            except httpx.HTTPError as exc:
-                raise ApiClientError(f"HTTP error: {type(exc).__name__}", code="ERR_HTTP_001") from exc
-
-        raise NetworkError(f"Failed to connect to {url} after {max_retries} attempts") from last_exc
+        return await super()._get(url, params=params, max_retries=max_retries)
 
     async def _post(self, url: str, json: dict | None = None, max_retries: int = 3) -> dict:
-        """Выполняет POST запрос с retry для сетевых ошибок."""
-        from shared.logger import log_api_call, log_api_error
-        import time
-
-        last_exc = None
-        start_time = time.time()
-
-        for attempt in range(max_retries):
-            try:
-                response = await (await self._ensure_client()).post(url, json=json)
-                duration_ms = (time.time() - start_time) * 1000
-                response.raise_for_status()
-                log_api_call("POST", url, status_code=response.status_code, duration_ms=duration_ms)
-                return response.json()
-            except HTTPStatusError as exc:
-                log_api_error("POST", url, exc, status_code=exc.response.status_code)
-                status = exc.response.status_code
-                if status in (401, 403):
-                    raise UnauthorizedError(f"Access denied: {status}") from exc
-                if status == 404:
-                    raise NotFoundError(f"Resource not found: {url}") from exc
-                if status == 429:
-                    raise RateLimitError(f"Rate limit exceeded on {url}") from exc
-                if status == 400 or status == 422:
-                    try:
-                        error_data = exc.response.json()
-                        error_msg = error_data.get("message", str(exc))
-                        field = error_data.get("field", "")
-                        raise ValidationError(error_msg, field=field) from exc
-                    except (ValueError, KeyError):
-                        raise ValidationError(f"Validation error on {url}") from exc
-                if status >= 500:
-                    raise ServerError(f"Server error {status} on {url}", status_code=status) from exc
-                raise ApiClientError(f"API error {status}", code=f"ERR_API_{status}") from exc
-            except httpx.ReadTimeout as exc:
-                last_exc = exc
-                if attempt < max_retries - 1:
-                    delay = 0.5 * (2 ** attempt)
-                    logger.warning("⏳ Timeout POST %s (%d/%d), retry in %.1fs", url, attempt + 1, max_retries, delay)
-                    await asyncio.sleep(delay)
-                else:
-                    logger.error("❌ Timeout POST %s after %d attempts", url, max_retries)
-                    raise TimeoutError(f"Request timeout on {url}") from exc
-            except (httpx.RemoteProtocolError, httpx.ConnectError) as exc:
-                last_exc = exc
-                if attempt < max_retries - 1:
-                    delay = 0.5 * (2 ** attempt)
-                    logger.warning("⏳ Network error POST %s (%d/%d), retry in %.1fs", url, attempt + 1, max_retries, delay)
-                    await asyncio.sleep(delay)
-                else:
-                    logger.error("❌ Network error POST %s after %d attempts", url, max_retries)
-                    raise NetworkError(f"Connection failed to {url}") from exc
-            except RuntimeError as exc:
-                last_exc = exc
-                try:
-                    await self._client.aclose()
-                except Exception:
-                    pass
-                self._client = self._create_client()
-                if attempt < max_retries - 1:
-                    delay = 0.5 * (2 ** attempt)
-                    logger.warning("⏳ Client closed POST %s (%d/%d), recreated, retry in %.1fs", url, attempt + 1, max_retries, delay)
-                    await asyncio.sleep(delay)
-                else:
-                    raise NetworkError(f"Client was closed for {url}") from exc
-            except httpx.HTTPError as exc:
-                raise ApiClientError(f"HTTP error: {type(exc).__name__}", code="ERR_HTTP_001") from exc
-
-        raise NetworkError(f"Failed to connect to {url} after {max_retries} attempts") from last_exc
+        return await super()._post(url, json=json, max_retries=max_retries)
 
     async def _patch(self, url: str, json: dict | None = None, max_retries: int = 3) -> dict:
-        """Выполняет PATCH запрос с retry для сетевых ошибок."""
-        from shared.logger import log_api_call, log_api_error
-        import time
-
-        last_exc = None
-        start_time = time.time()
-
-        for attempt in range(max_retries):
-            try:
-                response = await (await self._ensure_client()).patch(url, json=json)
-                duration_ms = (time.time() - start_time) * 1000
-                response.raise_for_status()
-                log_api_call("PATCH", url, status_code=response.status_code, duration_ms=duration_ms)
-                return response.json()
-            except HTTPStatusError as exc:
-                log_api_error("PATCH", url, exc, status_code=exc.response.status_code)
-                status = exc.response.status_code
-                if status in (401, 403):
-                    raise UnauthorizedError(f"Access denied: {status}") from exc
-                if status == 404:
-                    raise NotFoundError(f"Resource not found: {url}") from exc
-                if status == 429:
-                    raise RateLimitError(f"Rate limit exceeded on {url}") from exc
-                if status == 400 or status == 422:
-                    try:
-                        error_data = exc.response.json()
-                        error_msg = error_data.get("message", str(exc))
-                        field = error_data.get("field", "")
-                        raise ValidationError(error_msg, field=field) from exc
-                    except (ValueError, KeyError):
-                        raise ValidationError(f"Validation error on {url}") from exc
-                if status >= 500:
-                    raise ServerError(f"Server error {status} on {url}", status_code=status) from exc
-                raise ApiClientError(f"API error {status}", code=f"ERR_API_{status}") from exc
-            except httpx.ReadTimeout as exc:
-                last_exc = exc
-                if attempt < max_retries - 1:
-                    delay = 0.5 * (2 ** attempt)
-                    logger.warning("⏳ Timeout PATCH %s (%d/%d), retry in %.1fs", url, attempt + 1, max_retries, delay)
-                    await asyncio.sleep(delay)
-                else:
-                    logger.error("❌ Timeout PATCH %s after %d attempts", url, max_retries)
-                    raise TimeoutError(f"Request timeout on {url}") from exc
-            except (httpx.RemoteProtocolError, httpx.ConnectError) as exc:
-                last_exc = exc
-                if attempt < max_retries - 1:
-                    delay = 0.5 * (2 ** attempt)
-                    logger.warning("⏳ Network error PATCH %s (%d/%d), retry in %.1fs", url, attempt + 1, max_retries, delay)
-                    await asyncio.sleep(delay)
-                else:
-                    logger.error("❌ Network error PATCH %s after %d attempts", url, max_retries)
-                    raise NetworkError(f"Connection failed to {url}") from exc
-            except RuntimeError as exc:
-                last_exc = exc
-                try:
-                    await self._client.aclose()
-                except Exception:
-                    pass
-                self._client = self._create_client()
-                if attempt < max_retries - 1:
-                    delay = 0.5 * (2 ** attempt)
-                    logger.warning("⏳ Client closed PATCH %s (%d/%d), recreated, retry in %.1fs", url, attempt + 1, max_retries, delay)
-                    await asyncio.sleep(delay)
-                else:
-                    raise NetworkError(f"Client was closed for {url}") from exc
-            except httpx.HTTPError as exc:
-                raise ApiClientError(f"HTTP error: {type(exc).__name__}", code="ERR_HTTP_001") from exc
-
-        raise NetworkError(f"Failed to connect to {url} after {max_retries} attempts") from last_exc
+        return await super()._patch(url, json=json, max_retries=max_retries)
 
     async def _delete(self, url: str, json: dict | None = None, max_retries: int = 3) -> dict:
-        """Выполняет DELETE запрос с retry для сетевых ошибок."""
-        from shared.logger import log_api_call, log_api_error
-        import time
-
-        last_exc = None
-        start_time = time.time()
-
-        for attempt in range(max_retries):
-            try:
-                kwargs: dict = {}
-                if json is not None:
-                    kwargs["json"] = json
-                response = await (await self._ensure_client()).delete(url, **kwargs)
-                duration_ms = (time.time() - start_time) * 1000
-                response.raise_for_status()
-                log_api_call("DELETE", url, status_code=response.status_code, duration_ms=duration_ms)
-                return response.json()
-            except HTTPStatusError as exc:
-                log_api_error("DELETE", url, exc, status_code=exc.response.status_code)
-                status = exc.response.status_code
-                if status in (401, 403):
-                    raise UnauthorizedError(f"Access denied: {status}") from exc
-                if status == 404:
-                    raise NotFoundError(f"Resource not found: {url}") from exc
-                if status == 429:
-                    raise RateLimitError(f"Rate limit exceeded on {url}") from exc
-                if status >= 500:
-                    raise ServerError(f"Server error {status} on {url}", status_code=status) from exc
-                raise ApiClientError(f"API error {status}", code=f"ERR_API_{status}") from exc
-            except httpx.ReadTimeout as exc:
-                last_exc = exc
-                if attempt < max_retries - 1:
-                    delay = 0.5 * (2 ** attempt)
-                    logger.warning("⏳ Timeout DELETE %s (%d/%d), retry in %.1fs", url, attempt + 1, max_retries, delay)
-                    await asyncio.sleep(delay)
-                else:
-                    logger.error("❌ Timeout DELETE %s after %d attempts", url, max_retries)
-                    raise TimeoutError(f"Request timeout on {url}") from exc
-            except (httpx.RemoteProtocolError, httpx.ConnectError) as exc:
-                last_exc = exc
-                if attempt < max_retries - 1:
-                    delay = 0.5 * (2 ** attempt)
-                    logger.warning("⏳ Network error DELETE %s (%d/%d), retry in %.1fs", url, attempt + 1, max_retries, delay)
-                    await asyncio.sleep(delay)
-                else:
-                    logger.error("❌ Network error DELETE %s after %d attempts", url, max_retries)
-                    raise NetworkError(f"Connection failed to {url}") from exc
-            except RuntimeError as exc:
-                last_exc = exc
-                try:
-                    await self._client.aclose()
-                except Exception:
-                    pass
-                self._client = self._create_client()
-                if attempt < max_retries - 1:
-                    delay = 0.5 * (2 ** attempt)
-                    logger.warning("⏳ Client closed DELETE %s (%d/%d), recreated, retry in %.1fs", url, attempt + 1, max_retries, delay)
-                    await asyncio.sleep(delay)
-                else:
-                    raise NetworkError(f"Client was closed for {url}") from exc
-            except httpx.HTTPError as exc:
-                raise ApiClientError(f"HTTP error: {type(exc).__name__}", code="ERR_HTTP_001") from exc
-
-        raise NetworkError(f"Failed to connect to {url} after {max_retries} attempts") from last_exc
+        return await super()._delete(url, json=json, max_retries=max_retries)
 
     # --- Settings ---
     async def get_settings(self) -> dict:
@@ -495,69 +163,8 @@ class RemnawaveApiClient:
         return await self._get_with_timeout("/api/external-squads", timeout=30.0, max_retries=3)
 
     async def _get_with_timeout(self, url: str, timeout: float = 30.0, max_retries: int = 3, params: dict | None = None) -> dict:
-        """Выполняет GET запрос с кастомным таймаутом и retry для сетевых ошибок."""
-        from shared.logger import log_api_call, log_api_error
-        import time
-
-        last_exc = None
-        start_time = time.time()
-        custom_timeout = httpx.Timeout(timeout, connect=15.0, read=timeout, write=15.0, pool=10.0)
-
-        for attempt in range(max_retries):
-            try:
-                client = await self._ensure_client()
-                response = await client.get(url, timeout=custom_timeout, params=params)
-                duration_ms = (time.time() - start_time) * 1000
-                response.raise_for_status()
-                log_api_call("GET", url, status_code=response.status_code, duration_ms=duration_ms)
-                return response.json()
-            except HTTPStatusError as exc:
-                log_api_error("GET", url, exc, status_code=exc.response.status_code)
-                status = exc.response.status_code
-                if status in (401, 403):
-                    raise UnauthorizedError(f"Access denied: {status}") from exc
-                if status == 404:
-                    raise NotFoundError(f"Resource not found: {url}") from exc
-                if status == 429:
-                    raise RateLimitError(f"Rate limit exceeded on {url}") from exc
-                if status >= 500:
-                    raise ServerError(f"Server error {status} on {url}", status_code=status) from exc
-                raise ApiClientError(f"API error {status}", code=f"ERR_API_{status}") from exc
-            except httpx.ReadTimeout as exc:
-                last_exc = exc
-                if attempt < max_retries - 1:
-                    delay = 0.5 * (2 ** attempt)
-                    logger.warning("⏳ Timeout GET %s (%d/%d), retry in %.1fs", url, attempt + 1, max_retries, delay)
-                    await asyncio.sleep(delay)
-                else:
-                    logger.error("❌ Timeout GET %s after %d attempts", url, max_retries)
-                    raise TimeoutError(f"Request timeout on {url}") from exc
-            except (httpx.RemoteProtocolError, httpx.ConnectError) as exc:
-                last_exc = exc
-                if attempt < max_retries - 1:
-                    delay = 0.5 * (2 ** attempt)
-                    logger.warning("⏳ Network error GET %s (%d/%d), retry in %.1fs", url, attempt + 1, max_retries, delay)
-                    await asyncio.sleep(delay)
-                else:
-                    logger.error("❌ Network error GET %s after %d attempts", url, max_retries)
-                    raise NetworkError(f"Connection failed to {url}") from exc
-            except RuntimeError as exc:
-                last_exc = exc
-                try:
-                    await self._client.aclose()
-                except Exception:
-                    pass
-                self._client = self._create_client()
-                if attempt < max_retries - 1:
-                    delay = 0.5 * (2 ** attempt)
-                    logger.warning("⏳ Client closed GET %s (%d/%d), recreated, retry in %.1fs", url, attempt + 1, max_retries, delay)
-                    await asyncio.sleep(delay)
-                else:
-                    raise NetworkError(f"Client was closed for {url}") from exc
-            except httpx.HTTPError as exc:
-                raise ApiClientError(f"HTTP error: {type(exc).__name__}", code="ERR_HTTP_001") from exc
-
-        raise NetworkError(f"Failed to connect to {url} after {max_retries} attempts") from last_exc
+        custom_timeout = httpx.Timeout(connect=15.0, read=timeout, write=15.0, pool=10.0)
+        return await self._request("GET", url, params=params, max_retries=max_retries, timeout=custom_timeout)
 
     async def create_user(
         self,
@@ -569,7 +176,7 @@ class RemnawaveApiClient:
         description: str | None = None,
         external_squad_uuid: str | None = None,
         active_internal_squads: list[str] | None = None,
-        traffic_limit_strategy: str = "MONTH",
+        traffic_limit_strategy: str = "NO_RESET",
         status: str | None = None,
         tag: str | None = None,
         email: str | None = None,
@@ -1741,9 +1348,21 @@ class RemnawaveApiClient:
         """Возвращает статистику использования кэша."""
         return cache.get_stats()
 
+    async def request(self, method: str, url: str, **kwargs) -> dict:
+        """Generic HTTP request dispatching to the appropriate verb method."""
+        method_map = {
+            "GET": self._get,
+            "POST": self._post,
+            "PATCH": self._patch,
+            "DELETE": self._delete,
+        }
+        handler = method_map.get(method.upper())
+        if not handler:
+            raise ValueError(f"Unsupported HTTP method: {method}")
+        return await handler(url, **kwargs)
+
     async def close(self) -> None:
-        if self._client is not None and not self._client.is_closed:
-            await self._client.aclose()
+        return await super().close()
 
 
 # Single shared instance

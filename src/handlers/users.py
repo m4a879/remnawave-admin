@@ -1,14 +1,22 @@
 """Обработчики для работы с пользователями."""
 import asyncio
 import base64
-from datetime import datetime, timedelta
+import io
+import json
+from datetime import datetime, timedelta, timezone
 
+import qrcode
 from aiogram import F, Router
-from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
+from aiogram.types import BufferedInputFile, CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, InputMediaPhoto, Message
 from aiogram.utils.i18n import gettext as _
 
-from src.handlers.common import _cleanup_message, _edit_text_safe, _get_target_user_id, _not_admin, _send_clean_message
+from src.config import get_settings
+from src.utils.auth import BotAdmin
+from shared.rbac import filter_by_scope
+
+from src.handlers.common import _cleanup_message, _edit_text_safe, _get_target_user_id, _not_admin, _send_clean_message, require_permission
 from src.handlers.state import (
+    BOT_CREATING_USERS,
     MAX_SEARCH_RESULTS,
     PENDING_INPUT,
     SEARCH_PAGE_SIZE,
@@ -26,21 +34,28 @@ from src.keyboards.user_actions import (
 from src.keyboards.user_create import (
     user_create_confirm_keyboard,
     user_create_description_keyboard,
+    user_create_email_keyboard,
     user_create_expire_keyboard,
     user_create_hwid_keyboard,
     user_create_squad_keyboard,
+    user_create_tag_keyboard,
     user_create_telegram_keyboard,
     user_create_traffic_keyboard,
+    user_create_traffic_strategy_keyboard,
 )
 from src.keyboards.user_stats import user_stats_keyboard
 from src.keyboards.hwid_devices import hwid_devices_keyboard
 from src.keyboards.hwid_menu import hwid_management_keyboard
-from shared.api_client import ApiClientError, NotFoundError, UnauthorizedError, api_client
+from shared.internal_api import ApiClientError, NotFoundError, UnauthorizedError, ValidationError, internal_api_client
 from shared.database import db_service
+from shared.admin_quota import (
+    apply_user_delete_quotas,
+    apply_user_reset_traffic_quotas,
+    fetch_user_quota_data,
+)
 from src.services import data_access
 from src.utils.formatters import (
     _esc,
-    build_created_user,
     build_user_summary,
     format_bytes,
     format_datetime,
@@ -145,11 +160,11 @@ async def _fetch_user(query: str) -> dict:
     
     # Fallback на API
     if query.isdigit():
-        return await api_client.get_user_by_telegram_id(int(query))
-    return await api_client.get_user_by_username(query)
+        return await internal_api_client.get_user_by_telegram_id(int(query))
+    return await internal_api_client.get_user_by_username(query)
 
 
-async def _search_users(query: str) -> list[dict]:
+async def _search_users(query: str, admin: BotAdmin | None = None) -> list[dict]:
     """
     Ищет пользователей по запросу.
     
@@ -167,7 +182,7 @@ async def _search_users(query: str) -> list[dict]:
             if db_results:
                 # Данные из БД уже в формате API (через _db_row_to_api_format)
                 logger.debug("Found %d users in database for query: %s", len(db_results), search_term)
-                return db_results
+                return filter_by_scope(db_results, await admin.get_visible_user_uuids() if admin is not None else None, uuid_key="uuid")
         except Exception as e:
             logger.warning("Database search failed, falling back to API: %s", e)
     
@@ -175,8 +190,14 @@ async def _search_users(query: str) -> list[dict]:
     normalized = search_term.lower()
     matches: list[dict] = []
     start = 0
+    
+    # Определяем admin_id для фильтрации на бэкенде
+    admin_id_for_api = None
+    if admin and admin.account_id and not admin.is_superadmin and not admin.unrestricted_user_access:
+        admin_id_for_api = admin.account_id
+    
     while True:
-        data = await api_client.get_users(start=start, size=SEARCH_PAGE_SIZE)
+        data = await internal_api_client.get_users(start=start, size=SEARCH_PAGE_SIZE, admin_id=admin_id_for_api)
         payload = data.get("response", data)
         users = payload.get("users") or []
         total = payload.get("total", len(users))
@@ -223,13 +244,13 @@ async def _send_user_detail(
     await _send_user_summary(target, user, back_to=back_to)
 
 
-async def _send_user_summary(target: Message | CallbackQuery, user: dict, back_to: str) -> None:
+async def _send_user_summary(target: Message | CallbackQuery, user: dict, back_to: str, admin: BotAdmin | None = None) -> None:
     """Отправляет краткую информацию о пользователе."""
     summary = build_user_summary(user, _)
     info = user.get("response", user)
     status = info.get("status", "UNKNOWN")
     uuid = info.get("uuid")
-    reply_markup = user_actions_keyboard(uuid, status, back_to=back_to)
+    reply_markup = user_actions_keyboard(uuid, status, back_to=back_to, admin=admin)
     user_id = None
     if isinstance(target, CallbackQuery):
         await target.message.edit_text(summary, reply_markup=reply_markup, parse_mode="HTML")
@@ -241,13 +262,13 @@ async def _send_user_summary(target: Message | CallbackQuery, user: dict, back_t
         _store_user_detail_back_target(user_id, back_to)
 
 
-async def _start_user_search_flow(target: Message | CallbackQuery, preset_query: str | None = None) -> None:
+async def _start_user_search_flow(target: Message | CallbackQuery, preset_query: str | None = None, admin: BotAdmin | None = None) -> None:
     """Начинает процесс поиска пользователя."""
     user_id = _get_target_user_id(target)
     if user_id is None:
         return
     if preset_query:
-        await _run_user_search(target, preset_query)
+        await _run_user_search(target, preset_query, admin=admin)
     else:
         # Устанавливаем PENDING_INPUT, чтобы сообщения пользователя не удалялись сразу
         PENDING_INPUT[user_id] = {"action": "user_search"}
@@ -255,13 +276,13 @@ async def _start_user_search_flow(target: Message | CallbackQuery, preset_query:
         await _send_clean_message(target, _("user.search_prompt"), reply_markup=nav_keyboard(NavTarget.USERS_MENU))
 
 
-async def _run_user_search(target: Message | CallbackQuery, query: str) -> None:
+async def _run_user_search(target: Message | CallbackQuery, query: str, admin: BotAdmin | None = None) -> None:
     """Выполняет поиск пользователей."""
     user_id = _get_target_user_id(target)
     if user_id is None:
         return
     try:
-        matches = await _search_users(query)
+        matches = await _search_users(query, admin=admin)
     except UnauthorizedError:
         await _send_clean_message(target, _("errors.unauthorized"), reply_markup=nav_keyboard(NavTarget.USERS_MENU))
         return
@@ -316,7 +337,7 @@ async def _show_user_search_results(target: Message | CallbackQuery, query: str,
     await _send_clean_message(target, text, reply_markup=keyboard)
 
 
-async def _handle_user_search_input(message: Message, ctx: dict) -> None:
+async def _handle_user_search_input(message: Message, ctx: dict, admin: BotAdmin | None = None) -> None:
     """Обрабатывает ввод поискового запроса."""
     query = (message.text or "").strip()
     user_id = message.from_user.id
@@ -333,7 +354,7 @@ async def _handle_user_search_input(message: Message, ctx: dict) -> None:
         return
     
     # Выполняем поиск
-    await _run_user_search(message, query)
+    await _run_user_search(message, query, admin=admin)
     
     # Удаляем сообщение пользователя после обработки поиска
     asyncio.create_task(_cleanup_message(message, delay=0.5))
@@ -356,20 +377,24 @@ async def _delete_ctx_message(ctx: dict, bot) -> None:
         )
 
 
-_CREATE_STAGES = ["username", "description", "expire", "traffic", "hwid", "telegram", "squad", "confirm"]
+_CREATE_STAGES = [
+    "username", "description", "expire", "traffic", "traffic_strategy", "hwid", 
+    "telegram", "email", "tag", "squad", "confirm"
+]
 
 async def _send_user_create_prompt(
     target: Message | CallbackQuery,
     text: str,
     reply_markup: InlineKeyboardMarkup | None = None,
     ctx: dict | None = None,
+    admin: BotAdmin | None = None,
 ) -> None:
     """Отправляет промпт для создания пользователя с прогресс-индикатором."""
     if ctx and ctx.get("stage") in _CREATE_STAGES:
         idx = _CREATE_STAGES.index(ctx["stage"])
         total = len(_CREATE_STAGES)
         dots = "●" * (idx + 1) + "○" * (total - idx - 1)
-        text = f"<b>Шаг {idx + 1}/{total}</b>  {dots}\n\n{text}"
+        text = f"<b>{_('user.create_step').format(step=idx + 1, total=total)}</b>  {dots}\n\n{text}"
 
     bot = target.bot if isinstance(target, Message) else target.message.bot
     chat_id = target.chat.id if isinstance(target, Message) else target.message.chat.id
@@ -378,7 +403,7 @@ async def _send_user_create_prompt(
     if ctx and message_id:
         try:
             await bot.edit_message_text(
-                chat_id=chat_id, message_id=message_id, text=text, reply_markup=reply_markup
+                chat_id=chat_id, message_id=message_id, text=text, reply_markup=reply_markup, parse_mode="HTML"
             )
             return
         except Exception as exc:
@@ -394,7 +419,7 @@ async def _send_user_create_prompt(
                 pass
             ctx.pop("bot_message_id", None)
 
-    sent = await _send_clean_message(target, text, reply_markup=reply_markup)
+    sent = await _send_clean_message(target, text, reply_markup=reply_markup, parse_mode="HTML")
 
     if ctx is not None:
         ctx["bot_message_id"] = sent.message_id
@@ -411,19 +436,29 @@ def _build_user_create_preview(data: dict) -> str:
     telegram_id = data.get("telegram_id") or _("user.not_set")
     description = data.get("description") or _("user.not_set")
     squad = data.get("squad_uuid") or _("user.no_squad")
+    email = data.get("email") or _("user.not_set")
+    tag = data.get("tag") or _("user.not_set")
+    uuid_val = data.get("uuid") or _("user.auto")
+    status = data.get("status") or _("user.status_active")
+    traffic_strategy = data.get("traffic_limit_strategy") or _("user.strategy_no_reset")
 
     return _("user.create_preview").format(
         username=_esc(data.get("username", "n/a")),
         expire=expire_at,
         traffic=traffic_display,
+        traffic_strategy=traffic_strategy,
         hwid=hwid_display,
         telegramId=telegram_id,
         description=_esc(description),
         squad=_esc(squad),
+        email=_esc(email),
+        tag=_esc(tag),
+        uuid=_esc(uuid_val),
+        status=status,
     )
 
 
-async def _create_user(target: Message | CallbackQuery, data: dict) -> None:
+async def _create_user(target: Message | CallbackQuery, data: dict, admin: BotAdmin | None = None) -> dict | None:
     """Создает пользователя."""
     async def _respond(text: str, reply_markup: InlineKeyboardMarkup | None = None) -> None:
         await _send_clean_message(target, text, reply_markup=reply_markup)
@@ -437,61 +472,285 @@ async def _create_user(target: Message | CallbackQuery, data: dict) -> None:
     try:
         telegram_id = int(data["telegram_id"]) if data.get("telegram_id") not in (None, "") else None
     except (ValueError, TypeError):
-        await _respond(_("user.invalid_telegram"), reply_markup=users_menu_keyboard())
+        await _respond(_("user.invalid_telegram"), reply_markup=users_menu_keyboard(admin=admin))
         return
 
+    quota_incremented = False
+    if admin and admin.account_id and not admin.is_superadmin:
+        if admin.max_users is not None and admin.users_created >= admin.max_users:
+            remaining = max(0, admin.max_users - admin.users_created)
+            await _respond(
+                _("errors.quota_exceeded").format(remaining=remaining, resource=_("quota.users")),
+                reply_markup=main_menu_keyboard(admin=admin)
+            )
+            return
+
     try:
+        # Apply traffic policy for non-superadmin admins
+        traffic_limit_bytes = data.get("traffic_limit_bytes")
+        traffic_limit_strategy = data.get("traffic_limit_strategy", "NO_RESET")
+        if admin and admin.account_id and not admin.is_superadmin:
+            policy = admin.unlimited_traffic_policy or "allowed"
+            if policy == "disabled":
+                if traffic_limit_bytes is None or traffic_limit_bytes == 0:
+                    await _respond(_("user.traffic_limit_required"), reply_markup=users_menu_keyboard(admin=admin))
+                    return
+                max_traffic_gb = admin.max_traffic_gb
+                if max_traffic_gb is not None:
+                    current_used = admin.traffic_used_bytes
+                    max_allowed = max_traffic_gb * 1073741824
+                    if current_used + (traffic_limit_bytes or 0) > max_allowed:
+                        remaining_gb = (max_allowed - current_used) // 1073741824
+                        await _respond(
+                            _("user.traffic_quota_exceeded").format(remaining=remaining_gb),
+                            reply_markup=main_menu_keyboard(admin=admin)
+                        )
+                        return
+            elif policy == "enforced":
+                traffic_limit_bytes = 0
+                traffic_limit_strategy = "NO_RESET"
+            elif policy == "allowed" and traffic_limit_bytes and traffic_limit_bytes > 0:
+                max_traffic_gb = admin.max_traffic_gb
+                if max_traffic_gb is not None:
+                    current_used = admin.traffic_used_bytes
+                    max_allowed = max_traffic_gb * 1073741824
+                    if current_used + traffic_limit_bytes > max_allowed:
+                        remaining_gb = (max_allowed - current_used) // 1073741824
+                        await _respond(
+                            _("user.traffic_quota_exceeded").format(remaining=remaining_gb),
+                            reply_markup=main_menu_keyboard(admin=admin)
+                        )
+                        return
+
         squad_uuid = data.get("squad_uuid")
         squad_source = data.get("squad_source") or "internal"
         internal_squads = [squad_uuid] if squad_uuid and squad_source != "external" else None
         external_squad_uuid = squad_uuid if squad_uuid and squad_source == "external" else None
+        
+        status = data.get("status", "ACTIVE")
+        if isinstance(status, str):
+            status = status.upper()
+
+        if "created_at" not in data:
+            data["created_at"] = datetime.now(timezone.utc).isoformat()
+
         logger.info(
-            "👤 Creating user username=%s expire_at=%s traffic_bytes=%s hwid=%s telegram_id=%s squad_source=%s internal_squads=%s external_squad_uuid=%s actor_id=%s",
+            "👤 Creating user username=%s expire_at=%s traffic_bytes=%s hwid=%s telegram_id=%s "
+            "squad_source=%s internal_squads=%s external_squad_uuid=%s actor_id=%s status=%s "
+            "email=%s tag=%s uuid=%s traffic_strategy=%s",
             username,
             expire_at,
-            data.get("traffic_limit_bytes"),
+            traffic_limit_bytes,
             data.get("hwid_limit"),
             telegram_id,
             squad_source,
             internal_squads,
             external_squad_uuid,
             target.from_user.id if hasattr(target, "from_user") else "n/a",
+            status,
+            data.get("email"),
+            data.get("tag"),
+            data.get("uuid"),
+            traffic_limit_strategy,
         )
-        user = await api_client.create_user(
+        
+        BOT_CREATING_USERS.add(username)
+        user = await internal_api_client.create_user(
             username=username,
             expire_at=expire_at,
             telegram_id=telegram_id,
-            traffic_limit_bytes=data.get("traffic_limit_bytes"),
+            traffic_limit_bytes=traffic_limit_bytes,
             hwid_device_limit=data.get("hwid_limit"),
             description=data.get("description"),
             external_squad_uuid=external_squad_uuid,
             active_internal_squads=internal_squads,
-            traffic_limit_strategy="MONTH",
+            traffic_limit_strategy=traffic_limit_strategy,
+            status=status,
+            tag=data.get("tag"),
+            email=data.get("email"),
+            short_uuid=data.get("short_uuid"),
+            uuid=data.get("uuid"),
+            vless_uuid=data.get("vless_uuid"),
+            ss_password=data.get("ss_password"),
+            trojan_password=data.get("trojan_password"),
+            created_at=data.get("created_at"),
         )
+        
+        # Increment quota counter after successful API call
+        if admin and admin.account_id:
+            from shared.rbac import increment_usage_counter
+            quota_incremented = await increment_usage_counter(admin.account_id, "users_created")
+            if not quota_incremented:
+                # Rollback: delete the created user
+                info = user.get("response", user)
+                user_uuid = info.get("uuid", "")
+                if user_uuid:
+                    try:
+                        await internal_api_client.delete_user(user_uuid)
+                    except Exception:
+                        pass
+                remaining = max(0, (admin.max_users or 0) - admin.users_created)
+                await _respond(
+                    _("errors.quota_exceeded").format(remaining=remaining, resource=_("quota.users")),
+                    reply_markup=main_menu_keyboard(admin=admin)
+                )
+                BOT_CREATING_USERS.discard(username)
+                return
+            # Track traffic usage if the user has a non-zero limit. The
+            # counter must always be consistent with the user's actual
+            # allocation — otherwise subsequent edits and deletes subtract
+            # from a counter that was never incremented, driving it
+            # negative. If the increment fails (race condition, DB issue,
+            # etc.) we roll back the user we just created.
+            if traffic_limit_bytes and traffic_limit_bytes > 0:
+                from shared.rbac import increment_usage_counter
+                traffic_incremented = await increment_usage_counter(
+                    admin.account_id, "traffic_used_bytes", traffic_limit_bytes
+                )
+                if not traffic_incremented:
+                    # Rollback: delete the user so the counter math stays
+                    # consistent. Same pattern as the `users_created`
+                    # check above.
+                    info = user.get("response", user)
+                    user_uuid = info.get("uuid", "")
+                    if user_uuid:
+                        try:
+                            await internal_api_client.delete_user(user_uuid)
+                        except Exception:
+                            pass
+                    remaining_gb = max(0, (admin.max_traffic_gb or 0) - (admin.traffic_used_bytes // 1073741824))
+                    await _respond(
+                        _("user.traffic_quota_exceeded").format(remaining=remaining_gb),
+                        reply_markup=main_menu_keyboard(admin=admin)
+                    )
+                    BOT_CREATING_USERS.discard(username)
+                    return
+        
     except UnauthorizedError:
-        await _respond(_("errors.unauthorized"), reply_markup=users_menu_keyboard())
+        await _respond(_("errors.unauthorized"), reply_markup=users_menu_keyboard(admin=admin))
+        BOT_CREATING_USERS.discard(username)
+        return
+    except ValidationError as e:
+        msg = str(e)
+        if "already exists" in msg.lower() or "duplicate" in msg.lower():
+            await _respond(_("user.username_exists"), reply_markup=users_menu_keyboard(admin=admin))
+        else:
+            await _respond(_("errors.validation").format(detail=msg), reply_markup=users_menu_keyboard(admin=admin))
+        BOT_CREATING_USERS.discard(username)
         return
     except ApiClientError:
         logger.exception("❌ Create user failed")
-        await _respond(_("errors.generic"), reply_markup=users_menu_keyboard())
+        await _respond(_("errors.generic"), reply_markup=users_menu_keyboard(admin=admin))
+        BOT_CREATING_USERS.discard(username)
         return
 
-    summary = build_created_user(user, _)
+    logger.info("👤 User created successfully: %s", user)
     info = user.get("response", user)
     status = info.get("status", "UNKNOWN")
-    reply_markup = user_actions_keyboard(info.get("uuid", ""), status)
-    await _respond(summary, reply_markup)
+    logger.info("👤 Sending success message: status=%s uuid=%s", status, info.get("uuid", ""))
+    reply_markup = user_actions_keyboard(info.get("uuid", ""), status, admin=admin)
+    detail = build_user_summary(user, _)
+    await _respond(detail, reply_markup)
+    logger.info("👤 Success message sent")
     
+    # Persist to local DB (same as panel does)
+    try:
+        if db_service.is_connected:
+            await db_service.upsert_user(user)
+            if admin and admin.account_id:
+                async with db_service.acquire() as conn:
+                    user_uuid = info.get("uuid", "")
+                    if user_uuid:
+                        await conn.execute(
+                            "UPDATE users SET created_by_admin_id = $1 WHERE uuid = $2",
+                            admin.account_id, user_uuid,
+                        )
+    except Exception:
+        logger.exception("Failed to persist user to local DB")
+
+    # Audit log
+    if admin and admin.account_id:
+        try:
+            from shared.rbac import write_audit_log
+            user_uuid = info.get("uuid", "")
+            await write_audit_log(
+                admin_id=admin.account_id,
+                admin_username=admin.username,
+                action="user.create",
+                resource="users",
+                resource_id=str(user_uuid),
+                details=json.dumps({"username": username}),
+                ip_address=None,  # Bot context doesn't have IP
+            )
+        except Exception:
+            logger.debug("Failed to write audit log for user creation")
+
+    BOT_CREATING_USERS.discard(username)
+
+    # Отправляем уведомление в чат нотификаций (лог для менеджера)
+    try:
+        settings = get_settings()
+        notif_chat_id = settings.notifications_chat_id
+        if notif_chat_id is not None:
+            bot = target.bot if isinstance(target, Message) else target.message.bot
+            topic_id = settings.get_topic_for_users()
+            notification_lines = [
+                _("notification.user_created_title"),
+                "",
+                f"👤 Username: <code>{_esc(info.get('username', 'n/a'))}</code>",
+                f"🆔 Short UUID: <code>{info.get('shortUuid', '') or info.get('uuid', '')[:8]}</code>",
+                "",
+                f"<b>{_('user.edit_section_traffic')}</b>",
+                f"   {_('user.edit_traffic_limit')}: <code>{format_bytes(traffic_limit_bytes) if traffic_limit_bytes else _('user.unlimited')}</code>",
+                f"   {_('user.edit_expire')}: <code>{format_datetime(info.get('expireAt')) if info.get('expireAt') else '—'}</code>",
+                f"   {_('user.edit_strategy')}: <code>{info.get('trafficLimitStrategy') or 'NO_RESET'}</code>",
+            ]
+            hwid = info.get("hwidDeviceLimit")
+            if hwid is not None:
+                notification_lines.append(f"   {_('user.edit_hwid')}: <code>{'∞' if hwid == 0 else hwid}</code>")
+            notification_lines.append("")
+            sub_url = info.get("subscriptionUrl")
+            if sub_url:
+                url_display = _esc(sub_url[:80]) + ("..." if len(sub_url) > 80 else "")
+                notification_lines.append(f"🔗 Subscription: <code>{url_display}</code>")
+            active_squads = info.get("activeInternalSquads", [])
+            if active_squads:
+                squad_names = []
+                for sq in active_squads:
+                    if isinstance(sq, dict):
+                        squad_names.append(sq.get("name", sq.get("uuid", "?")))
+                    else:
+                        squad_names.append(str(sq))
+                notification_lines.append(f"{_('user.edit_section_squad')}: <code>{_esc(', '.join(squad_names))}</code>")
+            telegram_id = info.get("telegramId")
+            if telegram_id is not None:
+                notification_lines.append(f"{_('user.edit_telegram')}: <code>{telegram_id}</code>")
+            email = info.get("email")
+            if email:
+                notification_lines.append(f"{_('user.edit_email')}: <code>{_esc(email)}</code>")
+            desc = info.get("description")
+            if desc:
+                notification_lines.append(f"{_('user.edit_description')}: <code>{_esc(desc[:100])}</code>")
+            if admin:
+                notification_lines.append("")
+                notification_lines.append(_("notification.user_created_created_by").format(created_by=_esc(admin.username)))
+            notif_text = "\n".join(notification_lines)
+            kwargs = {
+                "chat_id": notif_chat_id,
+                "text": notif_text,
+                "parse_mode": "HTML",
+            }
+            if topic_id is not None:
+                kwargs["message_thread_id"] = topic_id
+            await bot.send_message(**kwargs)
+    except Exception:
+        logger.exception("Failed to send user creation notification")
+
     # Удаляем сообщение пользователя после создания (только для Message, не для CallbackQuery)
     if isinstance(target, Message):
         asyncio.create_task(_cleanup_message(target, delay=0.5))
-    
-    # Отправляем уведомление о создании пользователя
-    try:
-        bot = target.bot if isinstance(target, Message) else target.message.bot
-        await send_user_notification(bot, "created", user)
-    except Exception:
-        logger.exception("Failed to send user creation notification")
+
+    return info
 
 
 def _get_protocol_type(link: str) -> str:
@@ -612,8 +871,35 @@ def _current_user_edit_values(info: dict) -> dict[str, str]:
     }
 
 
-async def _apply_user_update(target: Message | CallbackQuery, user_uuid: str, payload: dict, back_to: str) -> None:
+async def _apply_user_update(target: Message | CallbackQuery, user_uuid: str, payload: dict, back_to: str, admin: BotAdmin | None = None) -> None:
     """Применяет обновление пользователя."""
+    # Check traffic quota before applying if traffic limit is changing
+    if admin and admin.account_id and "trafficLimitBytes" in payload:
+        try:
+            old_user_data = await data_access.get_user_by_uuid_wrapped(user_uuid)
+            old_info = old_user_data.get("response", old_user_data)
+            old_limit = old_info.get("trafficLimitBytes") or 0
+            new_limit = payload.get("trafficLimitBytes") or 0
+            delta = new_limit - old_limit
+            if delta > 0 and not admin.is_superadmin:
+                max_traffic_gb = admin.max_traffic_gb
+                if max_traffic_gb is not None:
+                    current_used = admin.traffic_used_bytes
+                    max_allowed = max_traffic_gb * 1073741824
+                    if current_used + delta > max_allowed:
+                        remaining_gb = (max_allowed - current_used) // 1073741824
+                        msg = _("user.traffic_quota_exceeded").format(remaining=remaining_gb)
+                        if isinstance(target, CallbackQuery):
+                            await target.message.edit_text(msg, reply_markup=main_menu_keyboard(), parse_mode="HTML")
+                        else:
+                            await _send_clean_message(target, msg, reply_markup=main_menu_keyboard(), parse_mode="HTML")
+                        return
+        except Exception:
+            logger.debug("Failed to calculate traffic delta for user_uuid=%s", user_uuid)
+            delta = 0
+    else:
+        delta = 0
+
     try:
         # Получаем старое значение пользователя перед обновлением
         old_user = None
@@ -622,17 +908,30 @@ async def _apply_user_update(target: Message | CallbackQuery, user_uuid: str, pa
         except Exception:
             logger.debug("Failed to get old user data for notification user_uuid=%s", user_uuid)
         
-        await api_client.update_user(user_uuid, **payload)
+        await internal_api_client.update_user(user_uuid, **payload)
         user = await data_access.get_user_by_uuid_wrapped(user_uuid)
         info = user.get("response", user)
         text = _format_user_edit_snapshot(info, _)
-        markup = user_edit_keyboard(user_uuid, back_to=back_to)
+        markup = user_edit_keyboard(user_uuid, back_to=back_to, admin=admin)
         if isinstance(target, CallbackQuery):
             await target.message.edit_text(text, reply_markup=markup, parse_mode="HTML")
         else:
             await _send_clean_message(target, text, reply_markup=markup, parse_mode="HTML")
             # Удаляем сообщение пользователя после обработки (только для Message, не для CallbackQuery)
             asyncio.create_task(_cleanup_message(target, delay=0.5))
+        
+        # Adjust traffic counter if traffic limit changed.
+        # Attribute the counter change to the OWNER (creator) of the user, not
+        # the acting admin. This ensures that when a higher-access admin edits
+        # a user that was created by a less-privileged admin, the counter
+        # change goes to the correct owner.
+        if delta != 0:
+            try:
+                from shared.admin_quota import fetch_user_quota_data, apply_user_limit_edit_quotas
+                creator_admin_id, _limit, _used = await fetch_user_quota_data(user_uuid)
+                await apply_user_limit_edit_quotas(creator_admin_id, delta)
+            except Exception:
+                logger.debug("Failed to adjust traffic_used_bytes for user edit user_uuid=%s", user_uuid)
         
         # Отправляем уведомление об изменении пользователя
         try:
@@ -661,7 +960,7 @@ async def _apply_user_update(target: Message | CallbackQuery, user_uuid: str, pa
             await _send_clean_message(target, _("errors.generic"), reply_markup=reply_markup)
 
 
-async def _handle_user_edit_input(message: Message, ctx: dict) -> None:
+async def _handle_user_edit_input(message: Message, ctx: dict, admin: BotAdmin | None = None) -> None:
     """Обрабатывает ввод значений при редактировании пользователя."""
     import asyncio
     import re
@@ -752,7 +1051,7 @@ async def _handle_user_edit_input(message: Message, ctx: dict) -> None:
         asyncio.create_task(_cleanup_message(message, delay=0.5))
         return
 
-    await _apply_user_update(message, user_uuid, payload, back_to=back_to)
+    await _apply_user_update(message, user_uuid, payload, back_to=back_to, admin=admin)
 
 
 async def _handle_user_create_input(message: Message, ctx: dict) -> None:
@@ -808,23 +1107,65 @@ async def _handle_user_create_input(message: Message, ctx: dict) -> None:
         data["expire_at"] = text
         ctx["stage"] = "traffic"
         PENDING_INPUT[user_id] = ctx
+        
+        # Determine traffic policy for this admin
+        traffic_policy = admin.unlimited_traffic_policy if admin and admin.unlimited_traffic_policy else "allowed"
+        ctx["traffic_policy"] = traffic_policy
+        
+        # For enforced policy: auto-set unlimited and skip to strategy
+        if traffic_policy == "enforced":
+            data["traffic_limit_bytes"] = 0
+            data["traffic_limit_strategy"] = "NO_RESET"
+            ctx["stage"] = "traffic_strategy"
+            PENDING_INPUT[user_id] = ctx
+            await _send_user_create_prompt(message, _("user.prompt_traffic_strategy"), user_create_traffic_strategy_keyboard(), ctx=ctx)
+            asyncio.create_task(_cleanup_message(message, delay=0.5))
+            return
+        
         await _send_user_create_prompt(
-            message, _("user.prompt_traffic"), user_create_traffic_keyboard(), ctx=ctx
+            message, _("user.prompt_traffic"), user_create_traffic_keyboard(traffic_policy), ctx=ctx
         )
         asyncio.create_task(_cleanup_message(message, delay=0.5))
         return
 
     if stage == "traffic":
+        traffic_policy = ctx.get("traffic_policy", "allowed")
         try:
             gb = float(text)
+            if gb < 0:
+                raise ValueError
         except ValueError:
             PENDING_INPUT[user_id] = ctx
             await _send_user_create_prompt(
-                message, _("user.invalid_traffic"), user_create_traffic_keyboard(), ctx=ctx
+                message, _("user.invalid_traffic_custom"), user_create_traffic_keyboard(traffic_policy), ctx=ctx
             )
             asyncio.create_task(_cleanup_message(message, delay=0.5))
             return
+        
+        if traffic_policy == "disabled" and gb == 0:
+            PENDING_INPUT[user_id] = ctx
+            await _send_user_create_prompt(
+                message, _("user.traffic_unlimited_not_allowed"), user_create_traffic_keyboard(traffic_policy), ctx=ctx
+            )
+            asyncio.create_task(_cleanup_message(message, delay=0.5))
+            return
+        
         data["traffic_limit_bytes"] = int(gb * 1024 * 1024 * 1024)
+        ctx["stage"] = "traffic_strategy"
+        PENDING_INPUT[user_id] = ctx
+        await _send_user_create_prompt(message, _("user.prompt_traffic_strategy"), user_create_traffic_strategy_keyboard(), ctx=ctx)
+        asyncio.create_task(_cleanup_message(message, delay=0.5))
+        return
+
+    if stage == "traffic_strategy":
+        if text not in ("NO_RESET", "MONTHLY", "WEEKLY", "DAILY"):
+            PENDING_INPUT[user_id] = ctx
+            await _send_user_create_prompt(
+                message, _("user.invalid_traffic_strategy"), user_create_traffic_strategy_keyboard(), ctx=ctx
+            )
+            asyncio.create_task(_cleanup_message(message, delay=0.5))
+            return
+        data["traffic_limit_strategy"] = text
         ctx["stage"] = "hwid"
         PENDING_INPUT[user_id] = ctx
         await _send_user_create_prompt(message, _("user.prompt_hwid"), user_create_hwid_keyboard(), ctx=ctx)
@@ -832,12 +1173,19 @@ async def _handle_user_create_input(message: Message, ctx: dict) -> None:
         return
 
     if stage == "hwid":
+        if text == "custom":
+            PENDING_INPUT[user_id] = ctx
+            await _send_user_create_prompt(
+                message, _("user.prompt_hwid_custom"), None, ctx=ctx
+            )
+            asyncio.create_task(_cleanup_message(message, delay=0.5))
+            return
         try:
             hwid = int(text)
         except ValueError:
             PENDING_INPUT[user_id] = ctx
             await _send_user_create_prompt(
-                message, _("user.invalid_hwid"), user_create_hwid_keyboard(), ctx=ctx
+                message, _("user.invalid_hwid_custom"), user_create_hwid_keyboard(), ctx=ctx
             )
             asyncio.create_task(_cleanup_message(message, delay=0.5))
             return
@@ -863,10 +1211,37 @@ async def _handle_user_create_input(message: Message, ctx: dict) -> None:
                 return
         else:
             data["telegram_id"] = None
+        ctx["stage"] = "email"
+        PENDING_INPUT[user_id] = ctx
+        await _send_user_create_prompt(
+            message, _("user.prompt_email"), user_create_email_keyboard(), ctx=ctx
+        )
+        asyncio.create_task(_cleanup_message(message, delay=0.5))
+        return
+
+    if stage == "email":
+        if text and "@" not in text:
+            PENDING_INPUT[user_id] = ctx
+            await _send_user_create_prompt(
+                message, _("user.invalid_email"), user_create_email_keyboard(), ctx=ctx
+            )
+            asyncio.create_task(_cleanup_message(message, delay=0.5))
+            return
+        data["email"] = text or None
+        ctx["stage"] = "tag"
+        PENDING_INPUT[user_id] = ctx
+        await _send_user_create_prompt(
+            message, _("user.prompt_tag"), user_create_tag_keyboard(), ctx=ctx
+        )
+        asyncio.create_task(_cleanup_message(message, delay=0.5))
+        return
+
+    if stage == "tag":
+        data["tag"] = text or None
         ctx["stage"] = "squad"
         PENDING_INPUT[user_id] = ctx
         try:
-            await _send_squad_prompt(message, ctx)
+            await _send_squad_prompt(message, ctx, admin=admin)
         except Exception:
             logger.exception("⚠️ Squad prompt failed, falling back to manual entry")
             await _send_user_create_prompt(
@@ -893,7 +1268,7 @@ async def _handle_user_create_input(message: Message, ctx: dict) -> None:
         )
 
 
-async def _handle_user_create_callback(callback: CallbackQuery) -> None:
+async def _handle_user_create_callback(callback: CallbackQuery, admin: BotAdmin | None = None) -> None:
     """Обрабатывает callback'и в процессе создания пользователя."""
     user_id = callback.from_user.id
     ctx = PENDING_INPUT.get(user_id, {"action": "user_create", "data": {}, "stage": "username"})
@@ -915,10 +1290,26 @@ async def _handle_user_create_callback(callback: CallbackQuery) -> None:
             return
         if field == "telegram":
             data["telegram_id"] = None
+            ctx["stage"] = "email"
+            PENDING_INPUT[user_id] = ctx
+            await _send_user_create_prompt(
+                callback, _("user.prompt_email"), user_create_email_keyboard(), ctx=ctx
+            )
+            return
+        if field == "email":
+            data["email"] = None
+            ctx["stage"] = "tag"
+            PENDING_INPUT[user_id] = ctx
+            await _send_user_create_prompt(
+                callback, _("user.prompt_tag"), user_create_tag_keyboard(), ctx=ctx
+            )
+            return
+        if field == "tag":
+            data["tag"] = None
             ctx["stage"] = "squad"
             PENDING_INPUT[user_id] = ctx
             try:
-                await _send_squad_prompt(callback, ctx)
+                await _send_squad_prompt(callback, ctx, admin=admin)
             except Exception:
                 logger.exception("⚠️ Squad prompt failed from callback, falling back to manual entry")
                 await _send_user_create_prompt(
@@ -938,7 +1329,6 @@ async def _handle_user_create_callback(callback: CallbackQuery) -> None:
         try:
             days = int(parts[2])
             if days == 2099:
-                # Как в Панели: текущий день/месяц, год 2099
                 now = datetime.utcnow()
                 data["expire_at"] = now.replace(year=2099, microsecond=0).isoformat() + "Z"
             else:
@@ -947,30 +1337,78 @@ async def _handle_user_create_callback(callback: CallbackQuery) -> None:
             pass
         ctx["stage"] = "traffic"
         PENDING_INPUT[user_id] = ctx
+        
+        # Determine traffic policy for this admin
+        traffic_policy = admin.unlimited_traffic_policy if admin and admin.unlimited_traffic_policy else "allowed"
+        ctx["traffic_policy"] = traffic_policy
+        
+        # For enforced policy: auto-set unlimited and skip to strategy
+        if traffic_policy == "enforced":
+            data["traffic_limit_bytes"] = 0
+            data["traffic_limit_strategy"] = "NO_RESET"
+            ctx["stage"] = "traffic_strategy"
+            PENDING_INPUT[user_id] = ctx
+            await _send_user_create_prompt(callback, _("user.prompt_traffic_strategy"), user_create_traffic_strategy_keyboard(), ctx=ctx)
+            return
+        
         await _send_user_create_prompt(
-            callback, _("user.prompt_traffic"), user_create_traffic_keyboard(), ctx=ctx
+            callback, _("user.prompt_traffic"), user_create_traffic_keyboard(traffic_policy), ctx=ctx
         )
         return
 
     if action == "traffic" and len(parts) >= 3:
+        traffic_policy = ctx.get("traffic_policy", "allowed")
         value = parts[2]
+        
+        if value == "custom":
+            # Prompt for manual input - no keyboard
+            await _send_user_create_prompt(
+                callback, _("user.prompt_traffic_custom"), None, ctx=ctx
+            )
+            return
+        
         if value == "unlimited":
+            if traffic_policy == "disabled":
+                await callback.answer(_("user.traffic_unlimited_not_allowed"), show_alert=True)
+                return
             data["traffic_limit_bytes"] = 0
         else:
             try:
                 gb = float(value)
+                if gb < 0:
+                    raise ValueError
                 data["traffic_limit_bytes"] = int(gb * 1024 * 1024 * 1024)
             except ValueError:
                 data["traffic_limit_bytes"] = None
+        
+        if data["traffic_limit_bytes"] is None:
+            await callback.answer(_("user.invalid_traffic"), show_alert=True)
+            return
+        
+        ctx["stage"] = "traffic_strategy"
+        PENDING_INPUT[user_id] = ctx
+        await _send_user_create_prompt(callback, _("user.prompt_traffic_strategy"), user_create_traffic_strategy_keyboard(), ctx=ctx)
+        return
+
+    if action == "traffic_strategy" and len(parts) >= 3:
+        value = parts[2]
+        if value in ("NO_RESET", "MONTHLY", "WEEKLY", "DAILY"):
+            data["traffic_limit_strategy"] = value
         ctx["stage"] = "hwid"
         PENDING_INPUT[user_id] = ctx
         await _send_user_create_prompt(callback, _("user.prompt_hwid"), user_create_hwid_keyboard(), ctx=ctx)
         return
 
     if action == "hwid" and len(parts) >= 3:
+        value = parts[2]
+        if value == "custom":
+            await _send_user_create_prompt(
+                callback, _("user.prompt_hwid_custom"), None, ctx=ctx
+            )
+            return
         try:
-            hwid = int(parts[2])
-            data["hwid_limit"] = hwid if hwid > 0 else None
+            hwid = int(value)
+            data["hwid_limit"] = hwid
         except ValueError:
             data["hwid_limit"] = None
         ctx["stage"] = "telegram"
@@ -980,10 +1418,34 @@ async def _handle_user_create_callback(callback: CallbackQuery) -> None:
         )
         return
 
+    if action == "email" and len(parts) >= 3:
+        # Email is entered via text input, not callback
+        pass
+
+    if action == "tag" and len(parts) >= 3:
+        # Tag is entered via text input, not callback
+        pass
+
+    if action == "uuid" and len(parts) >= 3:
+        value = parts[2]
+        if value == "auto":
+            data["uuid"] = None
+        else:
+            data["uuid"] = value
+        ctx["stage"] = "squad"
+        PENDING_INPUT[user_id] = ctx
+        try:
+            await _send_squad_prompt(callback, ctx, admin=admin)
+        except Exception:
+            logger.exception("⚠️ Squad prompt failed from callback, falling back to manual entry")
+            await _send_user_create_prompt(
+                callback, _("user.squad_load_failed"), user_create_squad_keyboard([]), ctx=ctx
+            )
+        return
+
     if action == "confirm":
         try:
-            await _create_user(callback, data)
-            await _delete_ctx_message(ctx, callback.message.bot)
+            await _create_user(callback, data, admin=admin)
             PENDING_INPUT.pop(user_id, None)
         except Exception:
             PENDING_INPUT[user_id] = ctx
@@ -1004,12 +1466,17 @@ async def _handle_user_create_callback(callback: CallbackQuery) -> None:
         )
 
 
-async def _send_squad_prompt(target: Message | CallbackQuery, ctx: dict) -> None:
+async def _send_squad_prompt(target: Message | CallbackQuery, ctx: dict, admin: BotAdmin | None = None) -> None:
     """Отправляет промпт для выбора сквада."""
     data = ctx.setdefault("data", {})
-    # Получаем squads из БД с fallback на API
+    # Получаем squads с учетом scope админа
     try:
-        squads, squad_source = await data_access.get_all_squads()
+        if admin and admin.account_id:
+            squads, squad_source = await data_access.get_squads_for_admin(
+                admin.account_id, admin.role_id, admin.role_name
+            )
+        else:
+            squads, squad_source = await data_access.get_all_squads()
         logger.info("📥 Loaded %s %s squads for user_id=%s", len(squads), squad_source, target.from_user.id)
     except UnauthorizedError:
         await _send_user_create_prompt(target, _("errors.unauthorized"), users_menu_keyboard(), ctx=ctx)
@@ -1039,15 +1506,20 @@ async def _send_squad_prompt(target: Message | CallbackQuery, ctx: dict) -> None
     await _send_user_create_prompt(target, text, markup, ctx=ctx)
 
 
-async def _show_squad_selection_for_edit(callback: CallbackQuery, user_uuid: str, back_to: str) -> None:
+async def _show_squad_selection_for_edit(callback: CallbackQuery, user_uuid: str, back_to: str, admin: BotAdmin | None = None) -> None:
     """Показывает список сквадов для выбора при редактировании пользователя."""
     squads: list[dict] = []
-    # Получаем squads из БД с fallback на API
+    # Получаем squads с учетом scope админа
     try:
-        squads, squad_type = await data_access.get_all_squads()
+        if admin and admin.account_id:
+            squads, squad_type = await data_access.get_squads_for_admin(
+                admin.account_id, admin.role_id, admin.role_name
+            )
+        else:
+            squads, squad_type = await data_access.get_all_squads()
         logger.info("📥 Loaded %s %s squads for edit user_id=%s", len(squads), squad_type, callback.from_user.id)
     except UnauthorizedError:
-        await callback.message.edit_text(_("errors.unauthorized"), reply_markup=user_edit_keyboard(user_uuid, back_to=back_to))
+        await callback.message.edit_text(_("errors.unauthorized"), reply_markup=user_edit_keyboard(user_uuid, back_to=back_to, admin=admin))
         return
     except Exception as exc:
         logger.warning("⚠️ Failed to load squads: %s", exc)
@@ -1057,7 +1529,7 @@ async def _show_squad_selection_for_edit(callback: CallbackQuery, user_uuid: str
     if not squads:
         await callback.message.edit_text(
             _("user.squad_load_failed"),
-            reply_markup=user_edit_keyboard(user_uuid, back_to=back_to)
+            reply_markup=user_edit_keyboard(user_uuid, back_to=back_to, admin=admin)
         )
         return
 
@@ -1080,7 +1552,7 @@ async def _show_squad_selection_for_edit(callback: CallbackQuery, user_uuid: str
 
 
 @router.callback_query(F.data == "menu:create_user")
-async def cb_create_user(callback: CallbackQuery) -> None:
+async def cb_create_user(callback: CallbackQuery, admin: BotAdmin) -> None:
     """Обработчик кнопки 'Создать пользователя'."""
     if await _not_admin(callback):
         return
@@ -1088,30 +1560,32 @@ async def cb_create_user(callback: CallbackQuery) -> None:
     logger.info("🚀 User create flow started by user_id=%s", callback.from_user.id)
     ctx = {"action": "user_create", "stage": "username", "data": {}}
     PENDING_INPUT[callback.from_user.id] = ctx
-    await _send_user_create_prompt(callback, _("user.prompt_username"), ctx=ctx)
+    await _send_user_create_prompt(callback, _("user.prompt_username"), ctx=ctx, admin=admin)
 
 
 @router.callback_query(F.data.startswith("user_create:"))
-async def cb_user_create_flow(callback: CallbackQuery) -> None:
+async def cb_user_create_flow(callback: CallbackQuery, admin: BotAdmin) -> None:
     """Обработчик callback'ов в процессе создания пользователя."""
     if await _not_admin(callback):
         return
     await callback.answer()
+    if not await require_permission(callback, admin, "users", "create"):
+        return
     logger.info("🔄 User create callback action=%s user_id=%s", callback.data, callback.from_user.id)
-    await _handle_user_create_callback(callback)
+    await _handle_user_create_callback(callback, admin=admin)
 
 
 @router.callback_query(F.data == "menu:find_user")
-async def cb_find_user(callback: CallbackQuery) -> None:
+async def cb_find_user(callback: CallbackQuery, admin: BotAdmin) -> None:
     """Обработчик кнопки 'Найти пользователя'."""
     if await _not_admin(callback):
         return
     await callback.answer()
-    await _start_user_search_flow(callback)
+    await _start_user_search_flow(callback, admin=admin)
 
 
 @router.callback_query(F.data.startswith("user_search:view:"))
-async def cb_user_search_view(callback: CallbackQuery) -> None:
+async def cb_user_search_view(callback: CallbackQuery, admin: BotAdmin) -> None:
     """Обработчик просмотра пользователя из результатов поиска."""
     if await _not_admin(callback):
         return
@@ -1131,15 +1605,17 @@ async def cb_user_search_view(callback: CallbackQuery) -> None:
         await callback.message.edit_text(_("errors.generic"), reply_markup=nav_keyboard(back_to))
         return
 
-    await _send_user_summary(callback, user, back_to=back_to)
+    await _send_user_summary(callback, user, back_to=back_to, admin=admin)
 
 
 @router.callback_query(F.data.startswith("user:"))
-async def cb_user_actions(callback: CallbackQuery) -> None:
+async def cb_user_actions(callback: CallbackQuery, admin: BotAdmin) -> None:
     """Обработчик действий с пользователем (enable, disable, reset, revoke) или возврата в профиль."""
     if await _not_admin(callback):
         return
     await callback.answer()
+    if not await require_permission(callback, admin, "users", "edit"):
+        return
     parts = callback.data.split(":")
     if len(parts) < 2:
         await callback.answer(_("errors.generic"), show_alert=True)
@@ -1153,7 +1629,7 @@ async def cb_user_actions(callback: CallbackQuery) -> None:
     if not action:
         try:
             user = await data_access.get_user_by_uuid_wrapped(user_uuid)
-            await _send_user_summary(callback, user, back_to=back_to)
+            await _send_user_summary(callback, user, back_to=back_to, admin=admin)
         except UnauthorizedError:
             await callback.message.edit_text(_("errors.unauthorized"), reply_markup=main_menu_keyboard())
         except NotFoundError:
@@ -1165,7 +1641,7 @@ async def cb_user_actions(callback: CallbackQuery) -> None:
     
     try:
         if action == "enable":
-            await api_client.enable_user(user_uuid)
+            await internal_api_client.enable_user(user_uuid)
         elif action == "disable":
             if "confirm" not in callback.data:
                 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
@@ -1177,9 +1653,17 @@ async def cb_user_actions(callback: CallbackQuery) -> None:
                 ])
                 await _edit_text_safe(callback.message, f"⚠️ <b>{_('user.disable_confirm', default='Отключить пользователя?')}</b>", reply_markup=keyboard, parse_mode="HTML")
                 return
-            await api_client.disable_user(user_uuid)
+            await internal_api_client.disable_user(user_uuid)
         elif action == "reset":
-            await api_client.reset_user_traffic(user_uuid)
+            # Apply quota counter changes via shared helper
+            try:
+                # Fetch used_traffic_bytes BEFORE the reset so the counter
+                # is incremented by the correct amount.
+                creator_id, _limit, used_bytes = await fetch_user_quota_data(user_uuid)
+                await internal_api_client.reset_user_traffic(user_uuid)
+                await apply_user_reset_traffic_quotas(creator_id, used_bytes)
+            except Exception:
+                logger.debug("Failed to update usage counters on single reset user_uuid=%s", user_uuid)
         elif action == "revoke":
             # Показываем подтверждение перед отзывом подписки
             try:
@@ -1212,7 +1696,7 @@ async def cb_user_actions(callback: CallbackQuery) -> None:
                 return
         elif action == "revoke_confirm":
             # Подтвержденное отзыв подписки
-            await api_client.revoke_user_subscription(user_uuid)
+            await internal_api_client.revoke_user_subscription(user_uuid)
         else:
             await callback.answer(_("errors.generic"), show_alert=True)
             return
@@ -1222,7 +1706,7 @@ async def cb_user_actions(callback: CallbackQuery) -> None:
         await _edit_text_safe(
             callback.message,
             summary,
-            reply_markup=user_actions_keyboard(user_uuid, status, back_to=back_to),
+            reply_markup=user_actions_keyboard(user_uuid, status, back_to=back_to, admin=admin),
             parse_mode="HTML"
         )
         _store_user_detail_back_target(callback.from_user.id, back_to)
@@ -1293,11 +1777,13 @@ async def cb_user_edit_menu(callback: CallbackQuery) -> None:
 
 
 @router.callback_query(F.data.startswith("uef:"))
-async def cb_user_edit_field(callback: CallbackQuery) -> None:
+async def cb_user_edit_field(callback: CallbackQuery, admin: BotAdmin) -> None:
     """Обработчик редактирования полей пользователя."""
     if await _not_admin(callback):
         return
     await callback.answer()
+    if not await require_permission(callback, admin, "users", "edit"):
+        return
     parts = callback.data.split(":")
     # patterns:
     # uef:status:ACTIVE:{uuid}
@@ -1326,10 +1812,10 @@ async def cb_user_edit_field(callback: CallbackQuery) -> None:
         return
 
     if field == "status" and value:
-        await _apply_user_update(callback, user_uuid, {"status": value}, back_to=back_to)
+        await _apply_user_update(callback, user_uuid, {"status": value}, back_to=back_to, admin=admin)
         return
     if field == "strategy" and value:
-        await _apply_user_update(callback, user_uuid, {"trafficLimitStrategy": value}, back_to=back_to)
+        await _apply_user_update(callback, user_uuid, {"trafficLimitStrategy": value}, back_to=back_to, admin=admin)
         return
     if field == "strategy" and not value:
         await callback.message.edit_text(
@@ -1373,7 +1859,7 @@ async def cb_user_edit_field(callback: CallbackQuery) -> None:
                         else:
                             update_data = {"activeInternalSquads": [squad_uuid], "externalSquadUuid": None}
                         
-                        await _apply_user_update(callback, user_uuid, update_data, back_to=back_to_ctx)
+                        await _apply_user_update(callback, user_uuid, update_data, back_to=back_to_ctx, admin=admin)
                         PENDING_INPUT.pop(user_id, None)
                         return
                 except (ValueError, IndexError):
@@ -1437,7 +1923,7 @@ async def cb_user_configs(callback: CallbackQuery) -> None:
         accessible_nodes = []
         if short_uuid:
             try:
-                sub_info = await api_client.get_subscription_info(short_uuid)
+                sub_info = await internal_api_client.get_subscription_info(short_uuid)
                 sub_response = sub_info.get("response", sub_info)
                 
                 # Логируем структуру ответа для отладки
@@ -1456,7 +1942,7 @@ async def cb_user_configs(callback: CallbackQuery) -> None:
         
         # Получаем доступные ноды пользователя для формирования конфигов
         try:
-            nodes_data = await api_client.get_user_accessible_nodes(user_uuid)
+            nodes_data = await internal_api_client.get_user_accessible_nodes(user_uuid)
             nodes_response = nodes_data.get("response", nodes_data)
             
             # Логируем структуру ответа для отладки
@@ -1477,7 +1963,7 @@ async def cb_user_configs(callback: CallbackQuery) -> None:
         # Получаем Happ crypto link, если есть subscriptionUrl
         if subscription_url:
             try:
-                happ_response = await api_client.encrypt_happ_crypto_link(subscription_url)
+                happ_response = await internal_api_client.encrypt_happ_crypto_link(subscription_url)
                 happ_crypto_link = happ_response.get("response", {}).get("encryptedLink")
             except Exception:
                 logger.debug("Failed to encrypt Happ crypto link for user %s", short_uuid)
@@ -1866,7 +2352,7 @@ async def cb_user_node_configs(callback: CallbackQuery) -> None:
         user_info = user.get("response", user)
         
         # Получаем доступные ноды
-        nodes_data = await api_client.get_user_accessible_nodes(user_uuid)
+        nodes_data = await internal_api_client.get_user_accessible_nodes(user_uuid)
         nodes_response = nodes_data.get("response", nodes_data)
         accessible_nodes = nodes_response.get("activeNodes", []) if isinstance(nodes_response, dict) else []
         
@@ -2010,7 +2496,7 @@ async def cb_user_sub_link(callback: CallbackQuery) -> None:
                 return
             
             # Получаем доступные ноды
-            nodes_data = await api_client.get_user_accessible_nodes(user_uuid)
+            nodes_data = await internal_api_client.get_user_accessible_nodes(user_uuid)
             nodes_response = nodes_data.get("response", nodes_data)
             accessible_nodes = nodes_response.get("activeNodes", []) if isinstance(nodes_response, dict) else []
             
@@ -2098,7 +2584,7 @@ async def cb_user_sub_link(callback: CallbackQuery) -> None:
             # Получаем подписные ссылки из информации о подписке
             if short_uuid:
                 try:
-                    sub_info = await api_client.get_subscription_info(short_uuid)
+                    sub_info = await internal_api_client.get_subscription_info(short_uuid)
                     sub_response = sub_info.get("response", sub_info)
                     
                     configs_by_node = sub_response.get("configsByNode", sub_response.get("nodes", []))
@@ -2145,7 +2631,7 @@ async def cb_user_sub_link(callback: CallbackQuery) -> None:
             # Если ссылок нет, генерируем из доступных нод (как в cb_user_configs)
             if not subscription_links:
                 try:
-                    nodes_data = await api_client.get_user_accessible_nodes(user_uuid)
+                    nodes_data = await internal_api_client.get_user_accessible_nodes(user_uuid)
                     nodes_response = nodes_data.get("response", nodes_data)
                     accessible_nodes = nodes_response.get("activeNodes", []) if isinstance(nodes_response, dict) else []
                     
@@ -2270,7 +2756,7 @@ async def cb_user_happ_link(callback: CallbackQuery) -> None:
             return
 
         # Получаем Happ crypto link
-        happ_response = await api_client.encrypt_happ_crypto_link(subscription_url)
+        happ_response = await internal_api_client.encrypt_happ_crypto_link(subscription_url)
         happ_crypto_link = happ_response.get("response", {}).get("encryptedLink")
 
         if not happ_crypto_link:
@@ -2293,6 +2779,69 @@ async def cb_user_happ_link(callback: CallbackQuery) -> None:
         await callback.message.edit_text(_("user.not_found"), reply_markup=nav_keyboard(back_to))
     except ApiClientError:
         logger.exception("Failed to get Happ crypto link for user_uuid=%s actor_id=%s", user_uuid, callback.from_user.id)
+        await callback.message.edit_text(_("errors.generic"), reply_markup=nav_keyboard(back_to))
+
+
+@router.callback_query(F.data.startswith("uqr:"))
+async def cb_user_qr(callback: CallbackQuery, admin: BotAdmin) -> None:
+    """Обработчик показа QR-кода подписной ссылки пользователя."""
+    if await _not_admin(callback):
+        return
+    if not await require_permission(callback, admin, "users", "view"):
+        return
+    await callback.answer()
+
+    user_uuid = callback.data.split(":", 1)[1]
+    back_to = _get_user_detail_back_target(callback.from_user.id)
+
+    try:
+        user = await data_access.get_user_by_uuid_wrapped(user_uuid)
+        user_info = user.get("response", user)
+        subscription_url = user_info.get("subscriptionUrl")
+
+        if not subscription_url:
+            await callback.message.edit_text(
+                _("user.no_subscription_url"),
+                reply_markup=user_actions_keyboard(user_uuid, user_info.get("status", "UNKNOWN"), back_to=back_to, admin=admin),
+            )
+            return
+
+        qr_buf = io.BytesIO()
+        qrcode.make(subscription_url, box_size=8, border=2).save(qr_buf, format="PNG")
+        qr_buf.seek(0)
+
+        caption = _("user.qr_caption").format(url=_esc(subscription_url))
+        media = InputMediaPhoto(
+            media=BufferedInputFile(qr_buf.read(), filename="subscription.png"),
+            caption=caption,
+            parse_mode="HTML",
+        )
+        keyboard = InlineKeyboardMarkup(
+            inline_keyboard=[
+                [InlineKeyboardButton(text=_("actions.back"), callback_data=f"user:{user_uuid}")],
+                nav_row(back_to),
+            ]
+        )
+        try:
+            await callback.message.edit_media(media=media, reply_markup=keyboard)
+        except Exception:
+            logger.exception("edit_media failed for user QR, falling back to delete+send user_uuid=%s", user_uuid)
+            try:
+                await callback.message.delete()
+            except Exception:
+                pass
+            await callback.message.answer_photo(
+                photo=BufferedInputFile(qr_buf.getvalue(), filename="subscription.png"),
+                caption=caption,
+                parse_mode="HTML",
+                reply_markup=keyboard,
+            )
+    except UnauthorizedError:
+        await callback.message.edit_text(_("errors.unauthorized"), reply_markup=nav_keyboard(back_to))
+    except NotFoundError:
+        await callback.message.edit_text(_("user.not_found"), reply_markup=nav_keyboard(back_to))
+    except ApiClientError:
+        logger.exception("Failed to load user for QR user_uuid=%s actor_id=%s", user_uuid, callback.from_user.id)
         await callback.message.edit_text(_("errors.generic"), reply_markup=nav_keyboard(back_to))
 
 
@@ -2396,7 +2945,7 @@ async def cb_user_stats(callback: CallbackQuery) -> None:
     try:
         if action == "sub_history":
             # История запросов подписки
-            history_data = await api_client.get_user_subscription_request_history(user_uuid)
+            history_data = await internal_api_client.get_user_subscription_request_history(user_uuid)
             history = history_data.get("response", {}).get("records", [])
 
             if not history:
@@ -2500,7 +3049,7 @@ async def cb_user_stats(callback: CallbackQuery) -> None:
 
         elif action == "hwid":
             # Статистика по устройствам
-            hwid_data = await api_client.get_hwid_devices_stats()
+            hwid_data = await internal_api_client.get_hwid_devices_stats()
             stats = hwid_data.get("response", {})
 
             total_devices = stats.get("totalDevices", 0)
@@ -2610,7 +3159,7 @@ async def cb_user_traffic_nodes_period(callback: CallbackQuery) -> None:
             return
         
         # Получаем статистику трафика
-        traffic_data = await api_client.get_user_traffic_stats(user_uuid, start, end)
+        traffic_data = await internal_api_client.get_user_traffic_stats(user_uuid, start, end)
         response = traffic_data.get("response", {})
         total_traffic = response.get("totalTrafficBytes", 0)
         nodes_usage = response.get("nodesUsage", [])
@@ -2732,7 +3281,7 @@ async def cb_user_stats_traffic_period(callback: CallbackQuery) -> None:
             return
 
         # Получаем статистику трафика
-        traffic_data = await api_client.get_user_traffic_stats(user_uuid, start, end)
+        traffic_data = await internal_api_client.get_user_traffic_stats(user_uuid, start, end)
         
         # Логируем структуру ответа для отладки
         logger.info("User traffic stats API response: type=%s, keys=%s", type(traffic_data).__name__, list(traffic_data.keys()) if isinstance(traffic_data, dict) else "N/A")
@@ -2832,7 +3381,7 @@ async def cb_user_stats_nodes_period(callback: CallbackQuery) -> None:
         user_info = user.get("response", user)
 
         # Получаем доступные ноды пользователя
-        nodes_data = await api_client.get_user_accessible_nodes(user_uuid)
+        nodes_data = await internal_api_client.get_user_accessible_nodes(user_uuid)
         nodes = nodes_data.get("response", {}).get("nodes", [])
 
         if not nodes:
@@ -2916,7 +3465,7 @@ async def cb_user_stats_nodes_period(callback: CallbackQuery) -> None:
             for node_uuid in node_uuids[:10]:  # Ограничиваем до 10 нод
                 try:
                     # Используем больший лимит, чтобы гарантированно получить данные пользователя
-                    node_usage_data = await api_client.get_node_users_usage(node_uuid, start, end, top_users_limit=50)
+                    node_usage_data = await internal_api_client.get_node_users_usage(node_uuid, start, end, top_users_limit=50)
                     
                     # Логируем структуру ответа для отладки
                     logger.debug("Node usage API response for node %s: type=%s, keys=%s", node_uuid, type(node_usage_data).__name__, list(node_usage_data.keys()) if isinstance(node_usage_data, dict) else "N/A")
@@ -3003,7 +3552,7 @@ async def cb_user_hwid_menu(callback: CallbackQuery) -> None:
         hwid_limit_display = _("hwid.unlimited") if not hwid_limit else str(hwid_limit)
         
         # Получаем устройства пользователя
-        devices_data = await api_client.get_user_hwid_devices(user_uuid)
+        devices_data = await internal_api_client.get_user_hwid_devices(user_uuid)
         devices = devices_data.get("response", {}).get("devices", [])
         
         lines = [
@@ -3068,7 +3617,7 @@ async def cb_user_hwid_devices(callback: CallbackQuery) -> None:
         hwid_limit_display = _("hwid.unlimited") if not hwid_limit else str(hwid_limit)
         
         # Получаем устройства пользователя
-        devices_data = await api_client.get_user_hwid_devices(user_uuid)
+        devices_data = await internal_api_client.get_user_hwid_devices(user_uuid)
         devices = devices_data.get("response", {}).get("devices", [])
         
         lines = [
@@ -3110,11 +3659,13 @@ async def cb_user_hwid_devices(callback: CallbackQuery) -> None:
 
 
 @router.callback_query(F.data.startswith("hwid_delete_idx:"))
-async def cb_hwid_delete(callback: CallbackQuery) -> None:
+async def cb_hwid_delete(callback: CallbackQuery, admin: BotAdmin) -> None:
     """Обработчик удаления конкретного HWID устройства по индексу."""
     if await _not_admin(callback):
         return
     await callback.answer()
+    if not await require_permission(callback, admin, "users", "edit"):
+        return
     parts = callback.data.split(":")
     if len(parts) < 3:
         return
@@ -3130,7 +3681,7 @@ async def cb_hwid_delete(callback: CallbackQuery) -> None:
     
     try:
         # Получаем список устройств, чтобы найти HWID по индексу
-        devices_data = await api_client.get_user_hwid_devices(user_uuid)
+        devices_data = await internal_api_client.get_user_hwid_devices(user_uuid)
         devices = devices_data.get("response", {}).get("devices", [])
         
         if device_idx < 0 or device_idx >= len(devices):
@@ -3142,7 +3693,7 @@ async def cb_hwid_delete(callback: CallbackQuery) -> None:
             await callback.answer(_("errors.generic"), show_alert=True)
             return
         
-        await api_client.delete_user_hwid_device(user_uuid, hwid)
+        await internal_api_client.delete_user_hwid_device(user_uuid, hwid)
         await callback.answer(_("hwid.deleted"), show_alert=True)
         # Обновляем список устройств - вызываем функцию напрямую
         # Получаем информацию о пользователе
@@ -3153,7 +3704,7 @@ async def cb_hwid_delete(callback: CallbackQuery) -> None:
         hwid_limit_display = _("hwid.unlimited") if not hwid_limit else str(hwid_limit)
         
         # Получаем обновленный список устройств
-        devices_data = await api_client.get_user_hwid_devices(user_uuid)
+        devices_data = await internal_api_client.get_user_hwid_devices(user_uuid)
         devices = devices_data.get("response", {}).get("devices", [])
         
         lines = [
@@ -3193,11 +3744,13 @@ async def cb_hwid_delete(callback: CallbackQuery) -> None:
 
 
 @router.callback_query(F.data.startswith("hwid_delete_all:"))
-async def cb_hwid_delete_all(callback: CallbackQuery) -> None:
+async def cb_hwid_delete_all(callback: CallbackQuery, admin: BotAdmin) -> None:
     """Обработчик удаления всех HWID устройств пользователя."""
     if await _not_admin(callback):
         return
     await callback.answer()
+    if not await require_permission(callback, admin, "users", "edit"):
+        return
     parts = callback.data.split(":")
     if len(parts) < 2:
         return
@@ -3206,7 +3759,7 @@ async def cb_hwid_delete_all(callback: CallbackQuery) -> None:
     back_to = _get_user_detail_back_target(callback.from_user.id)
     
     try:
-        await api_client.delete_all_user_hwid_devices(user_uuid)
+        await internal_api_client.delete_all_user_hwid_devices(user_uuid)
         await callback.answer(_("hwid.all_deleted"), show_alert=True)
         # Обновляем список устройств - вызываем функцию напрямую
         # Получаем информацию о пользователе
@@ -3217,7 +3770,7 @@ async def cb_hwid_delete_all(callback: CallbackQuery) -> None:
         hwid_limit_display = _("hwid.unlimited") if not hwid_limit else str(hwid_limit)
         
         # Получаем обновленный список устройств
-        devices_data = await api_client.get_user_hwid_devices(user_uuid)
+        devices_data = await internal_api_client.get_user_hwid_devices(user_uuid)
         devices = devices_data.get("response", {}).get("devices", [])
         
         lines = [

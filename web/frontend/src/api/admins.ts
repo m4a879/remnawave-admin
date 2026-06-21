@@ -28,6 +28,9 @@ export interface AdminAccount {
   max_traffic_gb: number | null
   max_nodes: number | null
   max_hosts: number | null
+  has_bot_access: boolean
+  unlimited_traffic_policy: string
+  unrestricted_user_access: boolean
   users_created: number
   traffic_used_bytes: number
   nodes_created: number
@@ -48,18 +51,24 @@ export interface AdminAccountCreate {
   max_traffic_gb?: number | null
   max_nodes?: number | null
   max_hosts?: number | null
+  has_bot_access?: boolean
+  unlimited_traffic_policy?: string
+  unrestricted_user_access?: boolean
 }
 
 export interface AdminAccountUpdate {
   username?: string
   telegram_id?: number | null
-  role_id?: number
+  role_id?: number | null
   password?: string | null
   max_users?: number | null
   max_traffic_gb?: number | null
   max_nodes?: number | null
   max_hosts?: number | null
   is_active?: boolean
+  has_bot_access?: boolean
+  unlimited_traffic_policy?: string
+  unrestricted_user_access?: boolean
 }
 
 export interface RoleCreate {
@@ -112,6 +121,11 @@ export const adminsApi = {
 
   delete: async (id: number): Promise<void> => {
     await client.delete(`/admins/${id}`)
+  },
+
+  resetCounter: async (id: number, counter: 'users_created' | 'nodes_created' | 'hosts_created' | 'traffic_used_bytes'): Promise<AdminAccount> => {
+    const { data } = await client.post(`/admins/${id}/counters/reset`, { counter })
+    return data
   },
 
   auditLog: async (params?: {

@@ -49,6 +49,9 @@ class AdminAccountBase(BaseModel):
     max_traffic_gb: Optional[int] = Field(None, ge=0)
     max_nodes: Optional[int] = Field(None, ge=0)
     max_hosts: Optional[int] = Field(None, ge=0)
+    has_bot_access: bool = False
+    unlimited_traffic_policy: str = "allowed"
+    unrestricted_user_access: bool = False  # scoping ON для НОВЫХ админов (изоляция multi-tenant); снимается опционально
 
 
 class AdminAccountCreate(AdminAccountBase):
@@ -66,6 +69,13 @@ class AdminAccountUpdate(BaseModel):
     max_hosts: Optional[int] = Field(None, ge=0)
     is_active: Optional[bool] = None
     password: Optional[str] = Field(None, min_length=8, max_length=200)
+    has_bot_access: Optional[bool] = None
+    unlimited_traffic_policy: Optional[str] = None
+    unrestricted_user_access: Optional[bool] = None
+
+
+class CounterResetRequest(BaseModel):
+    counter: str = Field(..., description="Counter name: users_created, nodes_created, hosts_created, traffic_used_bytes")
 
 
 class AdminAccountResponse(BaseModel):
@@ -80,12 +90,15 @@ class AdminAccountResponse(BaseModel):
     max_traffic_gb: Optional[int] = None
     max_nodes: Optional[int] = None
     max_hosts: Optional[int] = None
+    has_bot_access: bool = False
     users_created: int = 0
     traffic_used_bytes: int = 0
     nodes_created: int = 0
     hosts_created: int = 0
     is_active: bool = True
     is_generated_password: bool = False
+    unlimited_traffic_policy: str = "allowed"
+    unrestricted_user_access: bool = True
     created_by: Optional[int] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None

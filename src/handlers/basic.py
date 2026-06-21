@@ -20,6 +20,7 @@ from src.keyboards.main_menu import (
     bulk_menu_keyboard,
 )
 from src.keyboards.hosts_menu import hosts_menu_keyboard
+from src.keyboards.nodes_menu import nodes_list_keyboard
 from src.keyboards.navigation import NavTarget, nav_keyboard, nav_row, input_keyboard
 from src.keyboards.user_create import (
     user_create_description_keyboard,
@@ -53,13 +54,13 @@ from src.keyboards.node_edit import node_edit_keyboard
 from src.keyboards.billing_menu import billing_menu_keyboard
 from src.keyboards.billing_nodes_menu import billing_nodes_menu_keyboard
 from src.keyboards.providers_menu import providers_menu_keyboard
-from shared.api_client import (
+from shared.internal_api import (
     ApiClientError,
     NotFoundError,
     UnauthorizedError,
-    api_client,
+    internal_api_client,
 )
-from src.utils.auth import is_admin
+from shared.rbac import check_quota
 from src.utils.formatters import (
     format_bytes,
     build_host_summary,
@@ -217,7 +218,7 @@ async def cb_input_skip(callback: CallbackQuery) -> None:
         elif stage == "login_url":
             data["login_url"] = None
             # Создаем провайдера
-            await api_client.create_infra_provider(
+            await internal_api_client.create_infra_provider(
                 name=data["name"],
                 favicon_link=None,
                 login_url=None
@@ -278,7 +279,7 @@ async def cb_input_skip(callback: CallbackQuery) -> None:
             if new_login_url_val != current_login_url:
                 login_url = new_login_url_val if new_login_url_val else None
             
-            await api_client.update_infra_provider(
+            await internal_api_client.update_infra_provider(
                 provider_uuid,
                 name=name,
                 favicon_link=favicon,
@@ -309,7 +310,7 @@ async def cb_input_skip(callback: CallbackQuery) -> None:
             PENDING_INPUT[user_id] = ctx
             # Показываем список провайдеров
             try:
-                providers_data = await api_client.get_infra_providers()
+                providers_data = await internal_api_client.get_infra_providers()
                 providers = providers_data.get("response", {}).get("providers", [])
                 keyboard = _node_providers_keyboard(providers) if providers else input_keyboard(action, allow_skip=True, skip_callback="nodes:select_provider:none")
                 await callback.message.edit_text(
@@ -419,9 +420,15 @@ async def cb_input_skip(callback: CallbackQuery) -> None:
             )
         elif stage == "tags":
             data["tags"] = None
-            # Создаем ноду
+            admin_account_id = ctx.get("admin_account_id")
+            if admin_account_id:
+                allowed, msg = await check_quota(admin_account_id, "nodes")
+                if not allowed:
+                    PENDING_INPUT.pop(user_id, None)
+                    await callback.message.edit_text(msg, reply_markup=nodes_list_keyboard())
+                    return
             try:
-                await api_client.create_node(
+                await internal_api_client.create_node(
                     name=data["name"],
                     address=data["address"],
                     config_profile_uuid=data["config_profile_uuid"],
@@ -438,16 +445,13 @@ async def cb_input_skip(callback: CallbackQuery) -> None:
                 )
                 PENDING_INPUT.pop(user_id, None)
                 nodes_text = await _fetch_nodes_text()
-                from src.keyboards.nodes_menu import nodes_list_keyboard
                 await callback.message.edit_text(nodes_text, reply_markup=nodes_list_keyboard())
             except UnauthorizedError:
                 PENDING_INPUT.pop(user_id, None)
-                from src.keyboards.nodes_menu import nodes_list_keyboard
                 await callback.message.edit_text(_("errors.unauthorized"), reply_markup=nodes_list_keyboard())
             except ApiClientError:
                 PENDING_INPUT.pop(user_id, None)
                 logger.exception("❌ Node creation failed")
-                from src.keyboards.nodes_menu import nodes_list_keyboard
                 await callback.message.edit_text(_("errors.generic"), reply_markup=nodes_list_keyboard())
     
     elif action == "host_create":
@@ -458,7 +462,7 @@ async def cb_input_skip(callback: CallbackQuery) -> None:
             PENDING_INPUT[user_id] = ctx
             # Показываем список профилей конфигурации для выбора
             try:
-                profiles_data = await api_client.get_config_profiles()
+                profiles_data = await internal_api_client.get_config_profiles()
                 profiles = profiles_data.get("response", {}).get("configProfiles", [])
                 if not profiles:
                     await callback.message.edit_text(
@@ -484,7 +488,7 @@ async def cb_input_skip(callback: CallbackQuery) -> None:
         
         try:
             # Получаем текущий профиль конфигурации хоста
-            host = await api_client.get_host(host_uuid)
+            host = await internal_api_client.get_host(host_uuid)
             info = host.get("response", host)
             inbound_info = info.get("inbound", {})
             config_profile_uuid = inbound_info.get("configProfileUuid")
@@ -519,7 +523,7 @@ async def cb_input_skip(callback: CallbackQuery) -> None:
         
         # Пропускаем поле - оставляем текущее значение (не обновляем)
         try:
-            node = await api_client.get_node(node_uuid)
+            node = await internal_api_client.get_node(node_uuid)
             summary = build_node_summary(node, _)
             await callback.message.edit_text(
                 summary,

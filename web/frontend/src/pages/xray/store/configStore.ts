@@ -5,6 +5,7 @@ import { persist, createJSONStorage } from 'zustand/middleware';
 import { RemnawaveClient } from '../core/api/remnawave-client';
 import { validateBalancer } from '../core/validators';
 import { toast } from 'sonner';
+import i18next from 'i18next';
 import type { RemnawaveProfile } from '../core/types';
 
 // Re-export types from core for backward compatibility
@@ -95,12 +96,12 @@ export const useConfigStore = create(
                 state.remnawave.token = null;
                 state.remnawave.connected = false;
                 state.remnawave.activeProfileUuid = null;
-                toast.info("Соединение с панелью закрыто");
+                toast.info(i18next.t('xray.disconnectedFromPanel'));
             })),
 
             connectRemnawaveToken: (url, token) => {
                 if (!url || !token) {
-                    toast.error("Нужны URL и токен");
+                    toast.error(i18next.t('xray.urlAndTokenRequired'));
                     return;
                 }
                 set(produce((state) => {
@@ -108,7 +109,7 @@ export const useConfigStore = create(
                     state.remnawave.token = token;
                     state.remnawave.connected = true;
                 }));
-                toast.success("Подключено к Remnawave");
+                toast.success(i18next.t('xray.connectedToRemnawave'));
             },
 
             /**
@@ -137,7 +138,7 @@ export const useConfigStore = create(
                 } catch (e: any) {
                     if (e.message?.includes?.("401")) {
                         get().disconnectRemnawave();
-                        toast.error("Сессия истекла");
+                        toast.error(i18next.t('xray.sessionExpired'));
                     }
                     throw e;
                 }
@@ -151,9 +152,9 @@ export const useConfigStore = create(
                     set(produce((state) => {
                         state.remnawave.activeProfileUuid = uuid;
                     }));
-                    toast.success("Профиль загружен");
+                    toast.success(i18next.t('xray.profileLoaded'));
                 } catch (e: any) {
-                    toast.error("Не удалось загрузить профиль");
+                    toast.error(i18next.t('xray.profileLoadFailed'));
                 }
             },
 
@@ -162,7 +163,7 @@ export const useConfigStore = create(
                 const { config } = get();
 
                 if (!activeProfileUuid || !config) {
-                    toast.error("Профиль не выбран");
+                    toast.error(i18next.t('xray.profileNotSelected'));
                     return;
                 }
 
@@ -170,10 +171,10 @@ export const useConfigStore = create(
                 // filter(Boolean) защищает от null элементов в массиве (бывает после удаления)
                 const balancers = (config.routing?.balancers || []).filter(Boolean);
                 const invalidBalancer = balancers.find(b => validateBalancer(b).length > 0);
-                
+
                 if (invalidBalancer) {
-                    toast.error("Push Blocked!", {
-                        description: `Balancer "${invalidBalancer.tag}" has no target outbounds. Node will crash if you push this.`,
+                    toast.error(i18next.t('xray.pushBlocked'), {
+                        description: i18next.t('xray.pushBlockedDesc', { tag: invalidBalancer.tag }),
                         duration: 6000
                     });
                     return;
@@ -182,9 +183,9 @@ export const useConfigStore = create(
                 const client = new RemnawaveClient();
                 try {
                     await client.updateConfigProfile(activeProfileUuid, config);
-                    toast.success("Профиль сохранён в панели");
+                    toast.success(i18next.t('xray.profileSaved'));
                 } catch (e: any) {
-                    toast.error("Не удалось отправить конфиг в панель");
+                    toast.error(i18next.t('xray.profileSaveFailed'));
                 }
             },
 

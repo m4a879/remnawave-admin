@@ -6,7 +6,8 @@ from typing import List
 
 from web.backend.api.deps import get_current_admin, get_api_client, AdminUser, require_permission, require_quota, get_client_ip
 from web.backend.core.errors import api_error, E
-from web.backend.core.rbac import write_audit_log, get_scope, check_access, resolve_allowed_actions_map
+from web.backend.core.audit import write_audit_log
+from web.backend.core.rbac import get_scope, check_access, resolve_allowed_actions_map
 from web.backend.schemas.host import (
     HostListItem,
     HostListResponse,
@@ -345,12 +346,14 @@ async def delete_host(
     if not result:
         raise api_error(404, E.HOST_DELETE_FAILED)
 
+    # Increment the admin's quota counter (lifetime events: +1 per delete)
+    if admin.account_id is not None:
+        from web.backend.core.rbac import increment_usage_counter
+        await increment_usage_counter(admin.account_id, "hosts_created", 1)
+
     await write_audit_log(
-        admin_id=admin.account_id,
-        admin_username=admin.username,
-        action="host.delete",
-        resource="hosts",
-        resource_id=host_uuid,
+        admin_id=admin.account_id, admin_username=admin.username,
+        action="host.delete", resource="hosts", resource_id=host_uuid,
         details=json.dumps({"host_uuid": host_uuid}),
         ip_address=get_client_ip(request),
     )

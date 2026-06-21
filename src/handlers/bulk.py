@@ -5,14 +5,20 @@ from aiogram import F, Router
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 from aiogram.utils.i18n import gettext as _
 
-from src.handlers.common import _edit_text_safe, _not_admin, _send_clean_message
+from src.handlers.common import _edit_text_safe, _not_admin, require_permission, _send_clean_message
 from src.handlers.state import PENDING_INPUT, SEARCH_PAGE_SIZE
 from src.keyboards.bulk_hosts import bulk_hosts_keyboard
 from src.keyboards.bulk_nodes import bulk_nodes_keyboard
 from src.keyboards.bulk_users import bulk_users_keyboard
-from shared.api_client import ApiClientError, UnauthorizedError, api_client
+from src.utils.auth import BotAdmin
+from shared.internal_api import ApiClientError, UnauthorizedError, internal_api_client
 from shared.database import db_service
 from shared.logger import logger
+from shared.admin_quota import (
+    apply_users_delete_quotas_batch,
+    apply_users_reset_traffic_quotas_batch,
+    fetch_users_quota_data_batch,
+)
 from src.utils.notifications import send_user_notification
 
 from src.handlers.hosts import _fetch_hosts_text
@@ -37,23 +43,45 @@ async def _run_bulk_action(
     uuids: list[str] | None = None,
     status: str | None = None,
     days: int | None = None,
+    admin: BotAdmin | None = None,
 ) -> None:
     """Выполняет массовую операцию над пользователями."""
     try:
         if action == "reset":
-            await api_client.bulk_reset_traffic_users(uuids or [])
+            # Apply quota counter changes via shared helper
+            if uuids:
+                try:
+                    # Fetch used_traffic_bytes BEFORE the reset so the counter
+                    # is incremented by the correct amount.
+                    users_data = await fetch_users_quota_data_batch(uuids)
+                    await internal_api_client.bulk_reset_traffic_users(uuids or [])
+                    await apply_users_reset_traffic_quotas_batch(users_data)
+                except Exception:
+                    logger.debug("Failed to update usage counters on bulk reset")
+            else:
+                await internal_api_client.bulk_reset_traffic_users([])
         elif action == "delete":
             # Получаем информацию о пользователях перед удалением для уведомлений
             users_to_notify = []
             if uuids:
                 for user_uuid in uuids:
                     try:
-                        user = await api_client.get_user_by_uuid(user_uuid)
+                        user = await internal_api_client.get_user_by_uuid(user_uuid)
                         users_to_notify.append(user)
                     except Exception:
                         logger.debug("Failed to get user data for notification user_uuid=%s", user_uuid)
             
-            await api_client.bulk_delete_users(uuids or [])
+            await internal_api_client.bulk_delete_users(uuids or [])
+
+            # Apply quota counter changes via shared helper.
+            # Fetch the creator admin from the local DB so the counter is
+            # attributed to the original owner (consistent with web backend).
+            if uuids:
+                try:
+                    users_data = await fetch_users_quota_data_batch(uuids)
+                    await apply_users_delete_quotas_batch(users_data)
+                except Exception:
+                    logger.debug("Failed to update usage counters on bulk delete")
             
             # Отправляем уведомления о удалении
             try:
@@ -67,12 +95,17 @@ async def _run_bulk_action(
                 await _reply(target, _("bulk.usage_delete_status"))
                 return
             
+            # Определяем admin_id для фильтрации на бэкенде
+            admin_id_for_api = None
+            if admin and admin.account_id and not admin.is_superadmin and not admin.unrestricted_user_access:
+                admin_id_for_api = admin.account_id
+            
             # Получаем информацию о пользователях перед удалением для уведомлений
             users_to_notify = []
             try:
                 start = 0
                 while True:
-                    users_data = await api_client.get_users(start=start, size=SEARCH_PAGE_SIZE)
+                    users_data = await internal_api_client.get_users(start=start, size=SEARCH_PAGE_SIZE, admin_id=admin_id_for_api)
                     payload = users_data.get("response", users_data)
                     users = payload.get("users", [])
                     total = payload.get("total", len(users))
@@ -88,7 +121,15 @@ async def _run_bulk_action(
             except Exception:
                 logger.exception("Failed to get users for deletion notifications")
             
-            await api_client.bulk_delete_users_by_status(status)
+            await internal_api_client.bulk_delete_users_by_status(status)
+
+            # Apply quota counter changes via shared helper
+            if uuids_for_delete := [u.get("uuid") for u in users_to_notify if u.get("uuid")]:
+                try:
+                    users_data = await fetch_users_quota_data_batch(uuids_for_delete)
+                    await apply_users_delete_quotas_batch(users_data)
+                except Exception:
+                    logger.debug("Failed to update usage counters on bulk delete by status")
             
             # Отправляем уведомления о удалении
             try:
@@ -98,22 +139,22 @@ async def _run_bulk_action(
             except Exception:
                 logger.exception("Failed to send user deletion notifications")
         elif action == "revoke":
-            await api_client.bulk_revoke_subscriptions(uuids or [])
+            await internal_api_client.bulk_revoke_subscriptions(uuids or [])
         elif action == "extend":
             if days is None:
                 await _reply(target, _("bulk.usage_extend"))
                 return
-            await api_client.bulk_extend_users(uuids or [], days)
+            await internal_api_client.bulk_extend_users(uuids or [], days)
         elif action == "extend_all":
             if days is None:
                 await _reply(target, _("bulk.usage_extend_all"))
                 return
-            await api_client.bulk_extend_all_users(days)
+            await internal_api_client.bulk_extend_all_users(days)
         elif action == "status":
             if status not in ALLOWED_STATUSES:
                 await _reply(target, _("bulk.usage_status"))
                 return
-            await api_client.bulk_update_users_status(uuids or [], status)
+            await internal_api_client.bulk_update_users_status(uuids or [], status)
         else:
             await _reply(target, _("errors.generic"))
             return
@@ -125,16 +166,16 @@ async def _run_bulk_action(
         await _reply(target, _("bulk.error"))
 
 
-async def _reply(target: Message | CallbackQuery, text: str, back: bool = False) -> None:
+async def _reply(target: Message | CallbackQuery, text: str, back: bool = False, admin: BotAdmin | None = None) -> None:
     """Отправляет ответ на массовую операцию."""
-    markup = bulk_users_keyboard() if back else None
+    markup = bulk_users_keyboard(admin=admin) if back else None
     if isinstance(target, CallbackQuery):
         await _edit_text_safe(target.message, text, reply_markup=markup)
     else:
         await _send_clean_message(target, text, reply_markup=markup)
 
 
-async def _handle_bulk_users_input(message: Message, ctx: dict) -> None:
+async def _handle_bulk_users_input(message: Message, ctx: dict, admin: BotAdmin | None = None) -> None:
     """Обрабатывает ввод для массовых операций над пользователями."""
     action = ctx.get("action", "")
     text = (message.text or "").strip()
@@ -142,7 +183,7 @@ async def _handle_bulk_users_input(message: Message, ctx: dict) -> None:
 
     def _reask(prompt_key: str) -> None:
         PENDING_INPUT[user_id] = ctx
-        asyncio.create_task(_send_clean_message(message, _(prompt_key), reply_markup=bulk_users_keyboard()))
+        asyncio.create_task(_send_clean_message(message, _(prompt_key), reply_markup=bulk_users_keyboard(admin=admin)))
 
     if action == "bulk_users_extend_active":
         try:
@@ -154,12 +195,17 @@ async def _handle_bulk_users_input(message: Message, ctx: dict) -> None:
             _reask("bulk.prompt_extend_active")
             return
 
+        # Определяем admin_id для фильтрации на бэкенде
+        admin_id_for_api = None
+        if admin and admin.account_id and not admin.is_superadmin and not admin.unrestricted_user_access:
+            admin_id_for_api = admin.account_id
+
         try:
             # Получаем всех активных пользователей с пагинацией
             active_uuids: list[str] = []
             start = 0
             while True:
-                users_data = await api_client.get_users(start=start, size=SEARCH_PAGE_SIZE)
+                users_data = await internal_api_client.get_users(start=start, size=SEARCH_PAGE_SIZE, admin_id=admin_id_for_api)
                 payload = users_data.get("response", users_data)
                 users = payload.get("users", [])
                 total = payload.get("total", len(users))
@@ -175,42 +221,44 @@ async def _handle_bulk_users_input(message: Message, ctx: dict) -> None:
                     break
 
             if not active_uuids:
-                await _send_clean_message(message, _("bulk.no_active_users"), reply_markup=bulk_users_keyboard())
+                await _send_clean_message(message, _("bulk.no_active_users"), reply_markup=bulk_users_keyboard(admin=admin))
                 PENDING_INPUT.pop(user_id, None)
                 return
 
             # Продлеваем активным
-            await api_client.bulk_extend_users(active_uuids, days)
+            await internal_api_client.bulk_extend_users(active_uuids, days)
             result_text = _("bulk.done_extend_active").format(count=len(active_uuids), days=days)
-            await _send_clean_message(message, result_text, reply_markup=bulk_users_keyboard())
+            await _send_clean_message(message, result_text, reply_markup=bulk_users_keyboard(admin=admin))
             PENDING_INPUT.pop(user_id, None)
         except UnauthorizedError:
-            await _send_clean_message(message, _("errors.unauthorized"), reply_markup=bulk_users_keyboard())
+            await _send_clean_message(message, _("errors.unauthorized"), reply_markup=bulk_users_keyboard(admin=admin))
             PENDING_INPUT.pop(user_id, None)
         except ApiClientError:
             logger.exception("❌ Bulk extend active users failed")
-            await _send_clean_message(message, _("bulk.error"), reply_markup=bulk_users_keyboard())
+            await _send_clean_message(message, _("bulk.error"), reply_markup=bulk_users_keyboard(admin=admin))
             PENDING_INPUT.pop(user_id, None)
         return
 
-    await _send_clean_message(message, _("errors.generic"), reply_markup=bulk_users_keyboard())
+    await _send_clean_message(message, _("errors.generic"), reply_markup=bulk_users_keyboard(admin=admin))
 
 
 @router.callback_query(F.data == "menu:bulk_users")
-async def cb_bulk_users(callback: CallbackQuery) -> None:
+async def cb_bulk_users(callback: CallbackQuery, admin: BotAdmin) -> None:
     """Обработчик кнопки 'Массовые операции (пользователи)' в меню."""
     if await _not_admin(callback):
         return
     await callback.answer()
-    await _edit_text_safe(callback.message, _("bulk.overview"), reply_markup=bulk_users_keyboard())
+    await _edit_text_safe(callback.message, _("bulk.overview"), reply_markup=bulk_users_keyboard(admin=admin))
 
 
 @router.callback_query(F.data.startswith("bulk:users:"))
-async def cb_bulk_users_actions(callback: CallbackQuery) -> None:
+async def cb_bulk_users_actions(callback: CallbackQuery, admin: BotAdmin) -> None:
     """Обработчик действий массовых операций над пользователями."""
     if await _not_admin(callback):
         return
     await callback.answer()
+    if not await require_permission(callback, admin, "users", "bulk_operations"):
+        return
     parts = callback.data.split(":")
     action = parts[2] if len(parts) > 2 else None
     try:
@@ -237,17 +285,55 @@ async def cb_bulk_users_actions(callback: CallbackQuery) -> None:
         action = parts[2] if len(parts) > 2 else None
 
         if action == "reset":
-            await api_client.bulk_reset_traffic_all_users()
-            await _edit_text_safe(callback.message, _("bulk.done"), reply_markup=bulk_users_keyboard())
+            # Fetch all users in scope to get used traffic and creator before reset.
+            all_users_data: list = []
+            admin_id_for_api = None
+            if admin and admin.account_id and not admin.is_superadmin and not admin.unrestricted_user_access:
+                admin_id_for_api = admin.account_id
+            try:
+                start = 0
+                while True:
+                    users_data = await internal_api_client.get_users(start=start, size=SEARCH_PAGE_SIZE, admin_id=admin_id_for_api)
+                    payload = users_data.get("response", users_data)
+                    users = payload.get("users", [])
+                    total = payload.get("total", len(users))
+                    for user in users:
+                        info = user.get("response", user)
+                        all_users_data.append((
+                            info.get("createdByAdminId"),
+                            info.get("trafficLimitBytes") or 0,
+                            info.get("usedTrafficBytes") or 0,
+                        ))
+                    start += SEARCH_PAGE_SIZE
+                    if start >= total or not users:
+                        break
+            except Exception:
+                logger.exception("Failed to get users for bulk traffic reset (all)")
+
+            await internal_api_client.bulk_reset_traffic_all_users()
+
+            # Apply quota counter changes via shared helper
+            if all_users_data:
+                try:
+                    await apply_users_reset_traffic_quotas_batch(all_users_data)
+                except Exception:
+                    logger.debug("Failed to update owner traffic counters on bulk reset (all)")
+
+            await _edit_text_safe(callback.message, _("bulk.done"), reply_markup=bulk_users_keyboard(admin=admin))
         elif action == "delete" and len(parts) > 3:
             status = parts[3]
+            
+            # Определяем admin_id для фильтрации на бэкенде
+            admin_id_for_api = None
+            if admin and admin.account_id and not admin.is_superadmin and not admin.unrestricted_user_access:
+                admin_id_for_api = admin.account_id
             
             # Получаем информацию о пользователях перед удалением для уведомлений
             users_to_notify = []
             try:
                 start = 0
                 while True:
-                    users_data = await api_client.get_users(start=start, size=SEARCH_PAGE_SIZE)
+                    users_data = await internal_api_client.get_users(start=start, size=SEARCH_PAGE_SIZE, admin_id=admin_id_for_api)
                     payload = users_data.get("response", users_data)
                     users = payload.get("users", [])
                     total = payload.get("total", len(users))
@@ -263,7 +349,7 @@ async def cb_bulk_users_actions(callback: CallbackQuery) -> None:
             except Exception:
                 logger.exception("Failed to get users for deletion notifications")
             
-            await api_client.bulk_delete_users_by_status(status)
+            await internal_api_client.bulk_delete_users_by_status(status)
             
             # Отправляем уведомления о удалении
             try:
@@ -273,44 +359,46 @@ async def cb_bulk_users_actions(callback: CallbackQuery) -> None:
             except Exception:
                 logger.exception("Failed to send user deletion notifications")
             
-            await _edit_text_safe(callback.message, _("bulk.done"), reply_markup=bulk_users_keyboard())
+            await _edit_text_safe(callback.message, _("bulk.done"), reply_markup=bulk_users_keyboard(admin=admin))
         elif action == "extend_all" and len(parts) > 3:
             try:
                 days = int(parts[3])
             except ValueError:
                 await callback.answer(_("errors.generic"), show_alert=True)
                 return
-            await api_client.bulk_extend_all_users(days)
-            await _edit_text_safe(callback.message, _("bulk.done"), reply_markup=bulk_users_keyboard())
+            await internal_api_client.bulk_extend_all_users(days)
+            await _edit_text_safe(callback.message, _("bulk.done"), reply_markup=bulk_users_keyboard(admin=admin))
         elif action == "extend_active":
             # Запрашиваем количество дней
             PENDING_INPUT[callback.from_user.id] = {"action": "bulk_users_extend_active"}
-            await _edit_text_safe(callback.message, _("bulk.prompt_extend_active"), reply_markup=bulk_users_keyboard())
+            await _edit_text_safe(callback.message, _("bulk.prompt_extend_active"), reply_markup=bulk_users_keyboard(admin=admin))
         else:
             await callback.answer(_("errors.generic"), show_alert=True)
             return
     except UnauthorizedError:
-        await _edit_text_safe(callback.message, _("errors.unauthorized"), reply_markup=bulk_users_keyboard())
+        await _edit_text_safe(callback.message, _("errors.unauthorized"), reply_markup=bulk_users_keyboard(admin=admin))
     except ApiClientError:
         logger.exception("❌ Bulk users action failed action=%s", action)
-        await _edit_text_safe(callback.message, _("bulk.error"), reply_markup=bulk_users_keyboard())
+        await _edit_text_safe(callback.message, _("bulk.error"), reply_markup=bulk_users_keyboard(admin=admin))
 
 
 @router.callback_query(F.data == "menu:bulk_nodes")
-async def cb_bulk_nodes(callback: CallbackQuery) -> None:
+async def cb_bulk_nodes(callback: CallbackQuery, admin: BotAdmin) -> None:
     """Обработчик кнопки 'Массовые операции (ноды)' в меню."""
     if await _not_admin(callback):
         return
     await callback.answer()
-    await _edit_text_safe(callback.message, _("bulk_nodes.overview"), reply_markup=bulk_nodes_keyboard())
+    await _edit_text_safe(callback.message, _("bulk_nodes.overview"), reply_markup=bulk_nodes_keyboard(admin=admin))
 
 
 @router.callback_query(F.data.startswith("bulk:nodes:"))
-async def cb_bulk_nodes_actions(callback: CallbackQuery) -> None:
+async def cb_bulk_nodes_actions(callback: CallbackQuery, admin: BotAdmin) -> None:
     """Обработчик действий массовых операций над нодами."""
     if await _not_admin(callback):
         return
     await callback.answer()
+    if not await require_permission(callback, admin, "nodes", "edit"):
+        return
     parts = callback.data.split(":")
     action = parts[2] if len(parts) > 2 else None
     
@@ -320,18 +408,18 @@ async def cb_bulk_nodes_actions(callback: CallbackQuery) -> None:
             from src.handlers.nodes import _bulk_nodes_select_keyboard
             
             try:
-                nodes_data = await api_client.get_nodes()
+                nodes_data = await internal_api_client.get_nodes()
                 nodes = nodes_data.get("response", [])
             except UnauthorizedError:
-                await _edit_text_safe(callback.message, _("errors.unauthorized"), reply_markup=bulk_nodes_keyboard())
+                await _edit_text_safe(callback.message, _("errors.unauthorized"), reply_markup=bulk_nodes_keyboard(admin=admin))
                 return
             except ApiClientError:
                 logger.exception("❌ Bulk nodes fetch failed")
-                await _edit_text_safe(callback.message, _("errors.generic"), reply_markup=bulk_nodes_keyboard())
+                await _edit_text_safe(callback.message, _("errors.generic"), reply_markup=bulk_nodes_keyboard(admin=admin))
                 return
 
             if not nodes:
-                await _edit_text_safe(callback.message, _("node.list_empty"), reply_markup=bulk_nodes_keyboard())
+                await _edit_text_safe(callback.message, _("node.list_empty"), reply_markup=bulk_nodes_keyboard(admin=admin))
                 return
 
             # Инициализируем состояние для массового изменения
@@ -347,18 +435,18 @@ async def cb_bulk_nodes_actions(callback: CallbackQuery) -> None:
         
         if action == "assign_profile":
             try:
-                data = await api_client.get_config_profiles()
+                data = await internal_api_client.get_config_profiles()
                 profiles = data.get("response", {}).get("configProfiles", [])
             except UnauthorizedError:
-                await _edit_text_safe(callback.message, _("errors.unauthorized"), reply_markup=bulk_nodes_keyboard())
+                await _edit_text_safe(callback.message, _("errors.unauthorized"), reply_markup=bulk_nodes_keyboard(admin=admin))
                 return
             except ApiClientError:
                 logger.exception("❌ Bulk nodes fetch profiles failed")
-                await _edit_text_safe(callback.message, _("bulk_nodes.error"), reply_markup=bulk_nodes_keyboard())
+                await _edit_text_safe(callback.message, _("bulk_nodes.error"), reply_markup=bulk_nodes_keyboard(admin=admin))
                 return
 
             if not profiles:
-                await _edit_text_safe(callback.message, _("bulk_nodes.no_profiles"), reply_markup=bulk_nodes_keyboard())
+                await _edit_text_safe(callback.message, _("bulk_nodes.no_profiles"), reply_markup=bulk_nodes_keyboard(admin=admin))
                 return
 
             from src.handlers.system import _system_nodes_profiles_keyboard
@@ -372,35 +460,35 @@ async def cb_bulk_nodes_actions(callback: CallbackQuery) -> None:
         if len(parts) >= 4 and parts[2] == "profile":
             profile_uuid = parts[3]
             try:
-                profile = await api_client.get_config_profile_computed(profile_uuid)
+                profile = await internal_api_client.get_config_profile_computed(profile_uuid)
                 info = profile.get("response", profile)
                 inbounds = info.get("inbounds", [])
                 inbound_uuids = [i.get("uuid") for i in inbounds if i.get("uuid")]
 
-                nodes_data = await api_client.get_nodes()
+                nodes_data = await internal_api_client.get_nodes()
                 nodes = nodes_data.get("response", [])
                 uuids = [n.get("uuid") for n in nodes if n.get("uuid")]
 
                 if not uuids:
-                    await _edit_text_safe(callback.message, _("bulk_nodes.no_nodes"), reply_markup=bulk_nodes_keyboard())
+                    await _edit_text_safe(callback.message, _("bulk_nodes.no_nodes"), reply_markup=bulk_nodes_keyboard(admin=admin))
                     return
 
-                await api_client.bulk_nodes_profile_modification(uuids, profile_uuid, inbound_uuids)
-                await _edit_text_safe(callback.message, _("bulk_nodes.done_assign"), reply_markup=bulk_nodes_keyboard())
+                await internal_api_client.bulk_nodes_profile_modification(uuids, profile_uuid, inbound_uuids)
+                await _edit_text_safe(callback.message, _("bulk_nodes.done_assign"), reply_markup=bulk_nodes_keyboard(admin=admin))
             except UnauthorizedError:
-                await _edit_text_safe(callback.message, _("errors.unauthorized"), reply_markup=bulk_nodes_keyboard())
+                await _edit_text_safe(callback.message, _("errors.unauthorized"), reply_markup=bulk_nodes_keyboard(admin=admin))
             except ApiClientError:
                 logger.exception("❌ Bulk nodes assign profile failed profile_uuid=%s", profile_uuid)
-                await _edit_text_safe(callback.message, _("bulk_nodes.error"), reply_markup=bulk_nodes_keyboard())
+                await _edit_text_safe(callback.message, _("bulk_nodes.error"), reply_markup=bulk_nodes_keyboard(admin=admin))
             return
 
         # Получаем все ноды
-        nodes_data = await api_client.get_nodes()
+        nodes_data = await internal_api_client.get_nodes()
         nodes = nodes_data.get("response", [])
         uuids = [n.get("uuid") for n in nodes if n.get("uuid")]
 
         if not uuids:
-            await _edit_text_safe(callback.message, _("bulk_nodes.no_nodes"), reply_markup=bulk_nodes_keyboard())
+            await _edit_text_safe(callback.message, _("bulk_nodes.no_nodes"), reply_markup=bulk_nodes_keyboard(admin=admin))
             return
 
         # Выполняем операцию для каждой ноды
@@ -410,28 +498,28 @@ async def cb_bulk_nodes_actions(callback: CallbackQuery) -> None:
         if action == "enable_all":
             for uuid in uuids:
                 try:
-                    await api_client.enable_node(uuid)
+                    await internal_api_client.enable_node(uuid)
                     success_count += 1
                 except ApiClientError:
                     error_count += 1
         elif action == "disable_all":
             for uuid in uuids:
                 try:
-                    await api_client.disable_node(uuid)
+                    await internal_api_client.disable_node(uuid)
                     success_count += 1
                 except ApiClientError:
                     error_count += 1
         elif action == "restart_all":
             for uuid in uuids:
                 try:
-                    await api_client.restart_node(uuid)
+                    await internal_api_client.restart_node(uuid)
                     success_count += 1
                 except ApiClientError:
                     error_count += 1
         elif action == "reset_traffic_all":
             for uuid in uuids:
                 try:
-                    await api_client.reset_node_traffic(uuid)
+                    await internal_api_client.reset_node_traffic(uuid)
                     success_count += 1
                 except ApiClientError:
                     error_count += 1
@@ -443,62 +531,64 @@ async def cb_bulk_nodes_actions(callback: CallbackQuery) -> None:
             text = _("bulk_nodes.done").format(success=success_count, error=error_count)
         else:
             text = _("bulk_nodes.error")
-        await _edit_text_safe(callback.message, text, reply_markup=bulk_nodes_keyboard())
+        await _edit_text_safe(callback.message, text, reply_markup=bulk_nodes_keyboard(admin=admin))
     except UnauthorizedError:
-        await _edit_text_safe(callback.message, _("errors.unauthorized"), reply_markup=bulk_nodes_keyboard())
+        await _edit_text_safe(callback.message, _("errors.unauthorized"), reply_markup=bulk_nodes_keyboard(admin=admin))
     except ApiClientError:
         logger.exception("❌ Bulk nodes action failed action=%s", action)
-        await _edit_text_safe(callback.message, _("bulk_nodes.error"), reply_markup=bulk_nodes_keyboard())
+        await _edit_text_safe(callback.message, _("bulk_nodes.error"), reply_markup=bulk_nodes_keyboard(admin=admin))
 
 
 @router.callback_query(F.data == "menu:bulk_hosts")
-async def cb_bulk_hosts(callback: CallbackQuery) -> None:
+async def cb_bulk_hosts(callback: CallbackQuery, admin: BotAdmin) -> None:
     """Обработчик кнопки 'Массовые операции (хосты)' в меню."""
     if await _not_admin(callback):
         return
     await callback.answer()
-    await _edit_text_safe(callback.message, _("bulk_hosts.overview"), reply_markup=bulk_hosts_keyboard())
+    await _edit_text_safe(callback.message, _("bulk_hosts.overview"), reply_markup=bulk_hosts_keyboard(admin=admin))
 
 
 @router.callback_query(F.data.startswith("bulk:hosts:"))
-async def cb_bulk_hosts_actions(callback: CallbackQuery) -> None:
+async def cb_bulk_hosts_actions(callback: CallbackQuery, admin: BotAdmin) -> None:
     """Обработчик действий массовых операций над хостами."""
     if await _not_admin(callback):
         return
     await callback.answer()
     action = callback.data.split(":")[-1]
     if action == "list":
-        text = await _fetch_hosts_text()
-        await _edit_text_safe(callback.message, text, reply_markup=bulk_hosts_keyboard())
+        text = await _fetch_hosts_text(admin=admin)
+        await _edit_text_safe(callback.message, text, reply_markup=bulk_hosts_keyboard(admin=admin))
+        return
+    if not await require_permission(callback, admin, "hosts", "edit"):
         return
     try:
         if action == "enable_all":
-            hosts_data = await api_client.get_hosts()
+            hosts_data = await internal_api_client.get_hosts()
             hosts = hosts_data.get("response", [])
             uuids = [h.get("uuid") for h in hosts if h.get("uuid")]
             if uuids:
-                await api_client.bulk_enable_hosts(uuids)
-            await _edit_text_safe(callback.message, _("bulk_hosts.done"), reply_markup=bulk_hosts_keyboard())
+                await internal_api_client.bulk_enable_hosts(uuids)
+            await _edit_text_safe(callback.message, _("bulk_hosts.done"), reply_markup=bulk_hosts_keyboard(admin=admin))
         elif action == "disable_all":
-            hosts_data = await api_client.get_hosts()
+            hosts_data = await internal_api_client.get_hosts()
             hosts = hosts_data.get("response", [])
             uuids = [h.get("uuid") for h in hosts if h.get("uuid")]
             if uuids:
-                await api_client.bulk_disable_hosts(uuids)
-            await _edit_text_safe(callback.message, _("bulk_hosts.done"), reply_markup=bulk_hosts_keyboard())
+                await internal_api_client.bulk_disable_hosts(uuids)
+            await _edit_text_safe(callback.message, _("bulk_hosts.done"), reply_markup=bulk_hosts_keyboard(admin=admin))
         elif action == "delete_disabled":
-            hosts_data = await api_client.get_hosts()
+            hosts_data = await internal_api_client.get_hosts()
             hosts = hosts_data.get("response", [])
             uuids = [h.get("uuid") for h in hosts if h.get("uuid") and h.get("isDisabled")]
             if uuids:
-                await api_client.bulk_delete_hosts(uuids)
-            await _edit_text_safe(callback.message, _("bulk_hosts.done"), reply_markup=bulk_hosts_keyboard())
+                await internal_api_client.bulk_delete_hosts(uuids)
+            await _edit_text_safe(callback.message, _("bulk_hosts.done"), reply_markup=bulk_hosts_keyboard(admin=admin))
         else:
             await callback.answer(_("errors.generic"), show_alert=True)
             return
     except UnauthorizedError:
-        await _edit_text_safe(callback.message, _("errors.unauthorized"), reply_markup=bulk_hosts_keyboard())
+        await _edit_text_safe(callback.message, _("errors.unauthorized"), reply_markup=bulk_hosts_keyboard(admin=admin))
     except ApiClientError:
         logger.exception("❌ Bulk hosts action failed action=%s", action)
-        await _edit_text_safe(callback.message, _("bulk_hosts.error"), reply_markup=bulk_hosts_keyboard())
+        await _edit_text_safe(callback.message, _("bulk_hosts.error"), reply_markup=bulk_hosts_keyboard(admin=admin))
 

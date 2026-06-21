@@ -10,6 +10,9 @@ from collections import deque
 from datetime import datetime, timezone
 from typing import Any, Dict, Deque, List, Optional, Tuple
 
+from shared.db_schema import ALERT_RULES_TABLE, ALERT_RULE_LOG_TABLE, NODES_TABLE
+from shared.db_query import select_sql, insert_sql, update_sql
+
 logger = logging.getLogger(__name__)
 
 OPERATORS = {
@@ -87,7 +90,8 @@ class AlertEngine:
 
             async with db_service.acquire() as conn:
                 rules = await conn.fetch(
-                    "SELECT * FROM alert_rules WHERE is_enabled = true AND rule_type = 'threshold'"
+                    select_sql(ALERT_RULES_TABLE, "*",
+                        "WHERE is_enabled = true AND rule_type = 'threshold'")
                 )
 
             if not rules:
@@ -126,10 +130,11 @@ class AlertEngine:
             async with db_service.acquire() as conn:
                 # Node metrics from DB (only columns that actually exist)
                 nodes = await conn.fetch(
-                    "SELECT uuid, name, address, is_connected, is_disabled, "
-                    "cpu_usage, memory_usage, disk_usage, "
-                    "traffic_used_bytes, metrics_updated_at "
-                    "FROM nodes WHERE is_disabled = false"
+                    select_sql(NODES_TABLE,
+                        "uuid, name, address, is_connected, is_disabled, "
+                        "cpu_usage, memory_usage, disk_usage, "
+                        "traffic_used_bytes, metrics_updated_at",
+                        "WHERE is_disabled = false")
                 )
 
                 max_cpu = 0.0
@@ -380,17 +385,19 @@ class AlertEngine:
             # Log the alert
             async with db_service.acquire() as conn:
                 await conn.execute(
-                    "INSERT INTO alert_rule_log (rule_id, rule_name, metric_value, threshold_value, "
-                    "severity, channels_notified, details) "
-                    "VALUES ($1, $2, $3, $4, $5, $6, $7)",
+                    insert_sql(ALERT_RULE_LOG_TABLE,
+                        ["rule_id", "rule_name", "metric_value", "threshold_value",
+                         "severity", "channels_notified", "details"]),
                     rule_id, rule_name, current_value, threshold,
                     severity, json.dumps(channels), details,
                 )
 
                 # Update rule state
                 await conn.execute(
-                    "UPDATE alert_rules SET last_triggered_at = NOW(), last_value = $1, "
-                    "trigger_count = trigger_count + 1, updated_at = NOW() WHERE id = $2",
+                    update_sql(ALERT_RULES_TABLE,
+                        "last_triggered_at = NOW(), last_value = $1, "
+                        "trigger_count = trigger_count + 1, updated_at = NOW()",
+                        "id = $2"),
                     current_value, rule_id,
                 )
 
@@ -438,9 +445,9 @@ class AlertEngine:
             async with db_service.acquire() as conn:
                 # Check if any recent log entry for this rule is still unacknowledged
                 unacked = await conn.fetchval(
-                    "SELECT COUNT(*) FROM alert_rule_log "
-                    "WHERE rule_id = $1 AND acknowledged = false "
-                    "AND created_at > NOW() - INTERVAL '1 hour'",
+                    select_sql(ALERT_RULE_LOG_TABLE, "COUNT(*)",
+                        "WHERE rule_id = $1 AND acknowledged = false "
+                        "AND created_at > NOW() - INTERVAL '1 hour'"),
                     rule_id,
                 )
                 if unacked and unacked > 0:

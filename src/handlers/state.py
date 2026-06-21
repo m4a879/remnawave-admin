@@ -131,6 +131,10 @@ STATS_CACHE: dict[str, dict] = {}
 # Время жизни кэша статистики в секундах
 STATS_CACHE_TTL = 45  # 45 секунд
 
+# Множество имён пользователей, которых бот в данный момент создаёт.
+# Используется вебхуком, чтобы не дублировать user.created нотификации.
+BOT_CREATING_USERS: set[str] = set()
+
 # Словарь для хранения ID последних сообщений бота в каждом чате
 # Ключ: chat_id, Значение: message_id
 LAST_BOT_MESSAGES: TTLDict = TTLDict(ttl=7200, max_size=10000)

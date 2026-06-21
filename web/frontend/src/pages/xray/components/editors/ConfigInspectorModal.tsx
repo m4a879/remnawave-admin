@@ -5,6 +5,7 @@ import { Button } from '../ui/Button';
 import { Icon } from '../ui/Icon';
 import { useConfigStore } from '../../store/configStore';
 import { toast } from 'sonner';
+import i18next from 'i18next';
 
 export const ConfigInspectorModal = ({ onClose, setModal, openSectionJson }: { 
     onClose: () => void, 
@@ -47,9 +48,9 @@ export const ConfigInspectorModal = ({ onClose, setModal, openSectionJson }: {
             }
             
             setInputText(decoded);
-            toast.success("Subscription fetched successfully");
+            toast.success(i18next.t('xray.subscriptionFetched'));
         } catch (error: any) {
-            toast.error("Fetch failed", { description: error.message });
+            toast.error(i18next.t('xray.fetchFailed'), { description: error.message });
         } finally {
             setIsFetching(false);
         }
@@ -62,9 +63,9 @@ export const ConfigInspectorModal = ({ onClose, setModal, openSectionJson }: {
             if (configs.some(c => !c || typeof c !== 'object')) throw new Error("Invalid format");
             setParsedConfigs(configs);
             setSelectedIndex(0);
-            toast.success(`Analyzed ${configs.length} configurations`);
+            toast.success(i18next.t('xray.analyzedConfigurations', { count: configs.length }));
         } catch (e: any) {
-            toast.error("Parse failed", { description: e.message });
+            toast.error(i18next.t('xray.parseFailed'), { description: e.message });
         }
     };
 
@@ -75,7 +76,7 @@ export const ConfigInspectorModal = ({ onClose, setModal, openSectionJson }: {
 
     const importOutbound = (proxy: any, customTag?: string) => {
         addOutbounds([{ ...proxy, tag: customTag || proxy.tag }]);
-        toast.success("Node added to outbounds");
+        toast.success(i18next.t('xray.nodeAdded'));
     };
 
     const openInboundEditor = (ib: any) => {
@@ -241,7 +242,7 @@ export const ConfigInspectorModal = ({ onClose, setModal, openSectionJson }: {
                                                 <div className="flex items-center gap-1.5 opacity-60 group-hover:opacity-100 transition-all duration-300 translate-x-2 group-hover:translate-x-0">
                                                                                                     <button onClick={() => openSectionJson('inbound', `JSON: ${ib.tag}`, ib)} title="Редактировать JSON" className="p-2 rounded-md bg-slate-800 text-slate-400 hover:text-white hover:bg-slate-700 transition-colors"><Icon name="Code" weight="bold" /></button>
                                                                                                     <button onClick={() => openInboundEditor(ib)} title="Открыть в редакторе" className="p-2 rounded-md bg-slate-800 text-slate-400 hover:text-white hover:bg-slate-700 transition-colors"><Icon name="PencilSimple" weight="bold" /></button>
-                                                                                                    <button onClick={() => { addItem('inbounds', ib); toast.success("Inbound added"); }} title="Добавить в конфиг" className="p-2 rounded-md bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500 hover:text-white transition-all"><Icon name="Plus" weight="bold" /></button>
+                                                                                                    <button onClick={() => { addItem('inbounds', ib); toast.success(i18next.t('xray.inboundAdded')); }} title={i18next.t('xray.addToConfig')} className="p-2 rounded-md bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500 hover:text-white transition-all"><Icon name="Plus" weight="bold" /></button>
                                                                                                 </div>
                                             </div>
                                         ))}

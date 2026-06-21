@@ -94,30 +94,33 @@ class CompressedRotatingFileHandler(RotatingFileHandler):
 
     def doRollover(self):
         """Ротация + сжатие старых файлов."""
-        if self.stream:
-            self.stream.close()
-            self.stream = None
+        try:
+            if self.stream:
+                self.stream.close()
+                self.stream = None
 
-        for i in range(self.backupCount - 1, 0, -1):
-            sfn = self.rotation_filename(f"{self.baseFilename}.{i}.gz")
-            dfn = self.rotation_filename(f"{self.baseFilename}.{i + 1}.gz")
-            if os.path.exists(sfn):
-                if os.path.exists(dfn):
-                    os.remove(dfn)
-                os.rename(sfn, dfn)
+            for i in range(self.backupCount - 1, 0, -1):
+                sfn = self.rotation_filename(f"{self.baseFilename}.{i}.gz")
+                dfn = self.rotation_filename(f"{self.baseFilename}.{i + 1}.gz")
+                if os.path.exists(sfn):
+                    if os.path.exists(dfn):
+                        os.remove(dfn)
+                    os.rename(sfn, dfn)
 
-        dfn = self.rotation_filename(f"{self.baseFilename}.1.gz")
-        if os.path.exists(dfn):
-            os.remove(dfn)
-        if os.path.exists(self.baseFilename):
-            with open(self.baseFilename, "rb") as f_in:
-                with gzip.open(dfn, "wb") as f_out:
-                    shutil.copyfileobj(f_in, f_out)
-            with open(self.baseFilename, "w"):
-                pass
+            dfn = self.rotation_filename(f"{self.baseFilename}.1.gz")
+            if os.path.exists(dfn):
+                os.remove(dfn)
+            if os.path.exists(self.baseFilename):
+                with open(self.baseFilename, "rb") as f_in:
+                    with gzip.open(dfn, "wb") as f_out:
+                        shutil.copyfileobj(f_in, f_out)
+                with open(self.baseFilename, "w"):
+                    pass
 
-        if not self.delay:
-            self.stream = self._open()
+            if not self.delay:
+                self.stream = self._open()
+        except Exception as exc:
+            logging.error("Error during log file rollover: %s", exc, exc_info=True)
 
 
 class ViolationLogFilter(logging.Filter):

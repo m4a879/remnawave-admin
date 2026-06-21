@@ -5,6 +5,9 @@ import time
 from pathlib import Path
 from typing import Optional, Dict, Any, Tuple, List
 
+from shared.db_schema import NODES_TABLE
+from shared.db_query import select_sql
+
 import httpx
 
 logger = logging.getLogger(__name__)
@@ -289,13 +292,15 @@ async def get_dependency_versions() -> Dict[str, Any]:
                 )
                 if col_exists:
                     rows = await conn.fetch(
-                        "SELECT name, xray_version FROM nodes WHERE xray_version IS NOT NULL"
+                        select_sql(NODES_TABLE, "name, xray_version",
+                            "WHERE xray_version IS NOT NULL")
                     )
                     deps["xray_nodes"] = {r["name"]: r["xray_version"] for r in rows}
                 else:
                     # Try extracting from raw_data JSON
                     rows = await conn.fetch(
-                        "SELECT name, raw_data FROM nodes WHERE raw_data IS NOT NULL"
+                        select_sql(NODES_TABLE, "name, raw_data",
+                            "WHERE raw_data IS NOT NULL")
                     )
                     xray_versions = {}
                     for r in rows:

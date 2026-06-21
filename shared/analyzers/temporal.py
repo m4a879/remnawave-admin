@@ -67,8 +67,12 @@ class TemporalAnalyzer:
             max_connection_age_hours = 24  # Максимальный возраст подключения для учёта
             # Учитываем количество устройств пользователя - если у пользователя несколько устройств,
             # то несколько одновременных подключений могут быть нормальными
-            config_max_ips = config_service.get("violations_max_simultaneous_ips", 0)
-            max_allowed_simultaneous = config_max_ips if config_max_ips > 0 else max(1, user_device_count)
+            try:
+                config_max_ips = config_service.get("violations_max_simultaneous_ips", 0)
+                max_allowed_simultaneous = config_max_ips if config_max_ips > 0 else max(1, user_device_count)
+            except Exception as e:
+                logger.debug("Failed to get config for violations_max_simultaneous_ips: %s, using default", e)
+                max_allowed_simultaneous = max(1, user_device_count)
             
             # Собираем все валидные времена подключений
             valid_connections = []
@@ -178,7 +182,11 @@ class TemporalAnalyzer:
                     # CGNAT: мобильные операторы дают 3-5 IP с одного устройства
                     cgnat_buffer = 0
                     if is_mobile:
-                        cgnat_buffer = int(config_service.get("violations_mobile_cgnat_buffer", 3))
+                        try:
+                            cgnat_buffer = int(config_service.get("violations_mobile_cgnat_buffer", 3))
+                        except Exception as e:
+                            logger.debug("Failed to get config for violations_mobile_cgnat_buffer: %s, using default", e)
+                            cgnat_buffer = 3
 
                     effective_threshold = max_allowed_simultaneous + network_switch_buffer + cgnat_buffer
 

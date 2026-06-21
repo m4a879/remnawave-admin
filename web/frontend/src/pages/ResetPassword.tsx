@@ -127,7 +127,7 @@ function ForgotPasswordForm() {
 
             <div className="space-y-1.5">
               <Label htmlFor="reset-email" className="text-xs font-medium text-dark-300">
-                Email
+                {t('resetPassword.email')}
               </Label>
               <div className="relative">
                 <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-dark-400" />

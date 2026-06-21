@@ -29,24 +29,38 @@ from shared.analyzers.hwid import HwidCrossAccountAnalyzer
 from shared.analyzers.user_agent import UserAgentAnalyzer
 
 
+# Веса факторов (module-level for access from _validate_weights)
+WEIGHTS = {
+    'temporal': 0.20,      # Временной паттерн (было 0.25)
+    'geo': 0.20,           # География (было 0.25)
+    'asn': 0.10,           # Тип провайдера (было 0.15)
+    'profile': 0.15,       # Отклонение от профиля (было 0.20)
+    'device': 0.10,        # ⚠️ ФИКТИВЕН: коллектор не пишет per-connection User-Agent
+                           # (node-agent парсит Xray access.log — там только IP+email),
+                           # поэтому device-score всегда 0. Вес сохранён на случай источника UA.
+    'hwid': 0.25,          # Кросс-аккаунт HWID (сильный сигнал)
+}
+
+def _validate_weights(weights):
+    """Проверяет, что сумма весов равна 1.0."""
+    total = sum(weights.values())
+    if abs(total - 1.0) > 0.001:
+        raise ValueError(
+            f"Веса факторов должны суммироваться в 1.0, но их сумма равна {total}. "
+            f"Веса: {weights}"
+        )
+
+_validate_weights(WEIGHTS)
+
+
 class IntelligentViolationDetector:
     """
     Система многофакторного анализа для детектирования нарушений.
 
     Объединяет результаты всех анализаторов и вычисляет итоговый скор нарушения.
     """
-    
-    # Веса факторов
-    WEIGHTS = {
-        'temporal': 0.20,      # Временной паттерн (было 0.25)
-        'geo': 0.20,           # География (было 0.25)
-        'asn': 0.10,           # Тип провайдера (было 0.15)
-        'profile': 0.15,       # Отклонение от профиля (было 0.20)
-        'device': 0.10,        # ⚠️ ФИКТИВЕН: коллектор не пишет per-connection User-Agent
-                               # (node-agent парсит Xray access.log — там только IP+email),
-                               # поэтому device-score всегда 0. Вес сохранён на случай источника UA.
-        'hwid': 0.25,          # Кросс-аккаунт HWID (сильный сигнал)
-    }
+
+    WEIGHTS = WEIGHTS
     
     # Пороги для действий
     THRESHOLDS = {

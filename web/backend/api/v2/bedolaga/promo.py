@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, Query, Path, Request
 from pydantic import BaseModel, Field
 
 from web.backend.api.deps import AdminUser, require_permission, get_client_ip
-from web.backend.core.rbac import write_audit_log
+from web.backend.core.audit import write_audit_log
 from shared.bedolaga_client import bedolaga_client
 
 from web.backend.api.v2.bedolaga import proxy_request

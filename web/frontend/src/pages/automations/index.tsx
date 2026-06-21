@@ -85,7 +85,7 @@ export default function Automations() {
   const toggleMutation = useMutation({
     mutationFn: automationsApi.toggle,
     onSuccess: (rule) => {
-      toast.success(`"${rule.name}" ${rule.is_enabled ? t('automations.enabled') : t('automations.disabled')}`)
+      toast.success(rule.is_enabled ? t('automations.toast.toggledEnabled', { name: rule.name }) : t('automations.toast.toggledDisabled', { name: rule.name }))
       queryClient.invalidateQueries({ queryKey: ['automations'] })
     },
     onError: () => toast.error(t('automations.toggleError')),

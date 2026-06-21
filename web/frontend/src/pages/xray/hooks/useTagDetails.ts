@@ -1,6 +1,7 @@
 // @ts-nocheck
 import { useState, useEffect, useCallback } from 'react';
 import { toast } from 'sonner';
+import i18next from 'i18next';
 import { getSharedProtoWorker } from '../utils/proto-worker';
 import { binaryCache, loadCachedData, saveCachedData } from '../utils/geo-data';
 
@@ -57,8 +58,8 @@ export const useTagDetails = (tag: string, customUrl?: string, customFormat?: st
                         }
                     } catch (err) {
                         if (!isCancelled) {
-                            toast.error("Failed to download database for extraction");
-                            setText("Network error.");
+                            toast.error(i18next.t('xray.failedDownloadDatabase'));
+                            setText(i18next.t('xray.networkError'));
                             setLoading(false);
                         }
                         return;
@@ -75,12 +76,12 @@ export const useTagDetails = (tag: string, customUrl?: string, customFormat?: st
             const handleMessage = (e: MessageEvent) => {
                 if (isCancelled) return;
                 if (e.data.error) {
-                    toast.error("Failed to load details");
-                    setText("Error loading data.\n" + e.data.error);
+                    toast.error(i18next.t('xray.failedLoadDetails'));
+                    setText(i18next.t('xray.errorLoadingData', { error: e.data.error }));
                 } else if (e.data.type === 'details') {
                     // Simple check to ensure we don't show wrong data if multiple requests are pending
                     // In a production app, we'd use a unique ID.
-                    setText(e.data.data || "No records found.");
+                    setText(e.data.data || i18next.t('xray.noRecordsFound'));
                 }
                 setLoading(false);
                 worker.removeEventListener('message', handleMessage);
@@ -113,8 +114,8 @@ export const useTagDetails = (tag: string, customUrl?: string, customFormat?: st
                 ta.value = text; ta.style.position = "fixed"; ta.style.left = "-999999px";
                 document.body.appendChild(ta); ta.focus(); ta.select(); document.execCommand('copy'); ta.remove();
             }
-            toast.success("Copied to clipboard!");
-        } catch { toast.error("Copy failed"); }
+            toast.success(i18next.t('xray.copiedToClipboard'));
+        } catch { toast.error(i18next.t('xray.copyFailed')); }
     }, [text]);
 
     return { text, loading, handleCopy };

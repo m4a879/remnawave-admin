@@ -9,6 +9,9 @@ from collections import defaultdict, deque
 from datetime import datetime, timezone
 from typing import Deque, Dict, Optional, Tuple
 
+from shared.db_schema import USERS_TABLE, USER_CONNECTIONS_TABLE, NODES_TABLE
+from shared.db_query import select_sql
+
 logger = logging.getLogger(__name__)
 
 # (timestamp, raw_used_traffic_bytes) per user
@@ -124,10 +127,10 @@ class TrafficRateMonitor:
             # Fallback: use DB data
             try:
                 async with db_service.acquire() as conn:
-                    rows = await conn.fetch(
-                        "SELECT uuid::text, username, used_traffic_bytes "
-                        "FROM users WHERE used_traffic_bytes > 0"
-                    )
+                        rows = await conn.fetch(
+                            select_sql(USERS_TABLE, "uuid::text, username, used_traffic_bytes",
+                                "WHERE used_traffic_bytes > 0")
+                        )
                 for row in rows:
                     traffic_map[row["uuid"]] = int(row["used_traffic_bytes"])
                     username_map[row["uuid"]] = row["username"] or row["uuid"][:8]
@@ -257,19 +260,20 @@ class TrafficRateMonitor:
             try:
                 async with db_service.acquire() as conn:
                     user_row = await conn.fetchrow(
-                        "SELECT status, used_traffic_bytes, traffic_limit_bytes, "
-                        "expire_at, description, short_uuid "
-                        "FROM users WHERE uuid = $1",
+                        select_sql(USERS_TABLE,
+                            "status, used_traffic_bytes, traffic_limit_bytes, "
+                            "expire_at, description, short_uuid",
+                            "WHERE uuid = $1"),
                         user_uuid,
                     )
                     # Only show nodes the user connected to during the violation window
                     window_minutes = cfg["window_minutes"]
                     node_rows = await conn.fetch(
-                        "SELECT DISTINCT n.name FROM user_connections uc "
-                        "JOIN nodes n ON uc.node_uuid = n.uuid "
-                        "WHERE uc.user_uuid = $1::uuid "
-                        "AND uc.connected_at >= NOW() - make_interval(mins := $2) "
-                        "ORDER BY n.name LIMIT 10",
+                        f"SELECT DISTINCT n.name FROM {USER_CONNECTIONS_TABLE} uc "
+                        f"JOIN {NODES_TABLE} n ON uc.node_uuid = n.uuid "
+                        f"WHERE uc.user_uuid = $1::uuid "
+                        f"AND uc.connected_at >= NOW() - make_interval(mins := $2) "
+                        f"ORDER BY n.name LIMIT 10",
                         user_uuid, window_minutes,
                     )
                 if user_row:

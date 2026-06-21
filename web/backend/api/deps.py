@@ -10,6 +10,8 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from web.backend.core.config import get_web_settings
 from web.backend.core.security import decode_token
 from web.backend.core.token_blacklist import token_blacklist
+from shared.db_schema import ADMIN_TABLE
+from shared.db_query import insert_sql
 
 logger = logging.getLogger(__name__)
 # auto_error=False: при отсутствии Authorization пробуем cookie-аутентификацию
@@ -26,6 +28,7 @@ class AdminUser:
     role_id: Optional[int] = None
     auth_method: str = "telegram"
     account_id: Optional[int] = None
+    unrestricted_user_access: bool = False
     permissions: Set[Tuple[str, str]] = field(default_factory=set)
 
     def has_permission(self, resource: str, action: str) -> bool:
@@ -74,6 +77,7 @@ async def _resolve_password_admin(username: str, settings) -> AdminUser:
                 role_id=account.get("role_id"),
                 auth_method="password",
                 account_id=account["id"],
+                unrestricted_user_access=account.get("unrestricted_user_access", False) or False,
                 permissions=perms,
             )
     except HTTPException:
@@ -130,6 +134,7 @@ async def _resolve_telegram_admin(subject: str, payload: dict, settings) -> Admi
                 role_id=account.get("role_id"),
                 auth_method="telegram",
                 account_id=account["id"],
+                unrestricted_user_access=account.get("unrestricted_user_access", False) or False,
                 permissions=perms,
             )
     except HTTPException:
@@ -148,13 +153,13 @@ async def _resolve_telegram_admin(subject: str, payload: dict, settings) -> Admi
                 username = payload.get("username", f"admin_{telegram_id}")
                 async with db_service.acquire() as conn:
                     account = await conn.fetchrow(
-                        """
-                        INSERT INTO admin_accounts (username, telegram_id, role_id, is_active)
-                        VALUES ($1, $2, $3, true)
-                        ON CONFLICT (telegram_id) DO UPDATE SET
-                            username = EXCLUDED.username
-                        RETURNING *
-                        """,
+                        insert_sql(
+                            ADMIN_TABLE,
+                            ["username", "telegram_id", "role_id", "is_active"],
+                            values="$1, $2, $3, true",
+                            suffix="ON CONFLICT (telegram_id) DO UPDATE SET username = EXCLUDED.username",
+                            returning="*",
+                        ),
                         username, telegram_id, role["id"],
                     )
                 if account:
@@ -177,6 +182,7 @@ async def _resolve_telegram_admin(subject: str, payload: dict, settings) -> Admi
                         role_id=actual_role_id,
                         auth_method="telegram",
                         account_id=account["id"],
+                        unrestricted_user_access=account.get("unrestricted_user_access", False) or False,
                         permissions=perms,
                     )
         except Exception as e:
@@ -447,12 +453,17 @@ def require_quota(resource: str):
             return
 
         from web.backend.core.rbac import check_quota
+        from web.backend.core.errors import api_error, E
         allowed, error_msg = await check_quota(admin.account_id, resource)
         if not allowed:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail=error_msg,
-            )
+            # Map resource name to a specific quota error code so the
+            # frontend can show a contextual message.
+            code = {
+                "users": E.USERS_QUOTA_EXCEEDED,
+                "nodes": E.NODES_QUOTA_EXCEEDED,
+                "hosts": E.HOSTS_QUOTA_EXCEEDED,
+            }.get(resource, E.QUOTA_EXCEEDED)
+            raise api_error(status.HTTP_403_FORBIDDEN, code, error_msg)
 
     return _check
 
@@ -486,3 +497,25 @@ async def get_api_client():
     """Dependency for API client access."""
     from shared.api_client import api_client
     return api_client
+
+
+INTERNAL_API_SECRET_HEADER = "X-Internal-Api-Secret"
+
+
+async def verify_internal_api_secret(request: Request) -> None:
+    """Dependency to verify internal API secret for bot→backend communication.
+
+    Reads the X-Internal-Api-Secret header and compares it with the
+    INTERNAL_API_SECRET environment variable. Both bot and backend
+    share the same .env file, so this works without a chicken-egg problem.
+    """
+    import os
+    expected = os.environ.get("INTERNAL_API_SECRET", "")
+    if not expected:
+        logger.warning("INTERNAL_API_SECRET not set, rejecting internal request")
+        raise HTTPException(status_code=500, detail="INTERNAL_API_SECRET not configured")
+    received = request.headers.get(INTERNAL_API_SECRET_HEADER, "")
+    if not received or received != expected:
+        logger.warning("Invalid INTERNAL_API_SECRET from %s", request.client.host if request.client else "unknown")
+        raise HTTPException(status_code=401, detail="Invalid internal API secret")
+    logger.debug("Internal API request verified from %s", request.client.host if request.client else "unknown")

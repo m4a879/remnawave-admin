@@ -137,7 +137,7 @@ function ApiKeysTab() {
       apiKeysApi.update(id, { is_active }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['api-keys'] }),
     onError: (err, vars) =>
-      toastMutationError(err, t('apiKeys.updateFailed', { defaultValue: 'Не удалось обновить ключ' }), () => toggleKey.mutate(vars), retryLabel),
+      toastMutationError(err, t('apiKeys.updateFailed'), () => toggleKey.mutate(vars), retryLabel),
   })
 
   const updateKey = useMutation({
@@ -149,7 +149,7 @@ function ApiKeysTab() {
       queryClient.invalidateQueries({ queryKey: ['api-keys'] })
     },
     onError: (err, vars) =>
-      toastMutationError(err, t('apiKeys.updateFailed', { defaultValue: 'Не удалось обновить ключ' }), () => updateKey.mutate(vars), retryLabel),
+      toastMutationError(err, t('apiKeys.updateFailed'), () => updateKey.mutate(vars), retryLabel),
   })
 
   const deleteKey = useMutation({
@@ -160,7 +160,7 @@ function ApiKeysTab() {
       queryClient.invalidateQueries({ queryKey: ['api-keys'] })
     },
     onError: (err, id) =>
-      toastMutationError(err, t('apiKeys.deleteFailed', { defaultValue: 'Не удалось удалить ключ' }), () => deleteKey.mutate(id), retryLabel),
+      toastMutationError(err, t('apiKeys.deleteFailed'), () => deleteKey.mutate(id), retryLabel),
   })
 
   const handleCopy = (text: string) => {
@@ -562,7 +562,7 @@ function WebhooksTab() {
       webhooksApi.update(id, { is_active }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['webhooks'] }),
     onError: (err, vars) =>
-      toastMutationError(err, t('apiKeys.updateFailed', { defaultValue: 'Не удалось обновить webhook' }), () => toggleWebhook.mutate(vars), retryLabel),
+      toastMutationError(err, t('apiKeys.webhookUpdateFailed'), () => toggleWebhook.mutate(vars), retryLabel),
   })
 
   const updateWebhook = useMutation({
@@ -574,7 +574,7 @@ function WebhooksTab() {
       queryClient.invalidateQueries({ queryKey: ['webhooks'] })
     },
     onError: (err, vars) =>
-      toastMutationError(err, t('apiKeys.updateFailed', { defaultValue: 'Не удалось обновить webhook' }), () => updateWebhook.mutate(vars), retryLabel),
+      toastMutationError(err, t('apiKeys.webhookUpdateFailed'), () => updateWebhook.mutate(vars), retryLabel),
   })
 
   const deleteWebhook = useMutation({
@@ -585,7 +585,7 @@ function WebhooksTab() {
       queryClient.invalidateQueries({ queryKey: ['webhooks'] })
     },
     onError: (err, id) =>
-      toastMutationError(err, t('apiKeys.deleteFailed', { defaultValue: 'Не удалось удалить webhook' }), () => deleteWebhook.mutate(id), retryLabel),
+      toastMutationError(err, t('apiKeys.webhookDeleteFailed'), () => deleteWebhook.mutate(id), retryLabel),
   })
 
   const testWebhook = useMutation({
@@ -756,7 +756,7 @@ function WebhooksTab() {
               />
             </div>
             <div>
-              <Label>URL</Label>
+              <Label>{t('apiKeys.url')}</Label>
               <Input
                 type="url"
                 value={form.url}
@@ -789,8 +789,8 @@ function WebhooksTab() {
               >
                 <SelectTrigger className="mt-2"><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="v2">v2 — timestamped (recommended)</SelectItem>
-                  <SelectItem value="v1">v1 — legacy</SelectItem>
+                  <SelectItem value="v2">{t('apiKeys.versionV2')}</SelectItem>
+                  <SelectItem value="v1">{t('apiKeys.versionV1')}</SelectItem>
                 </SelectContent>
               </Select>
               <p className="text-xs text-dark-400 mt-1">
@@ -853,7 +853,7 @@ function WebhooksTab() {
               <Input value={editForm.name} onChange={(e) => setEditForm((p) => ({ ...p, name: e.target.value }))} />
             </div>
             <div>
-              <Label>URL</Label>
+              <Label>{t('apiKeys.url')}</Label>
               <Input
                 type="url"
                 value={editForm.url}
@@ -894,8 +894,8 @@ function WebhooksTab() {
               >
                 <SelectTrigger className="mt-2"><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="v2">v2 — timestamped (recommended)</SelectItem>
-                  <SelectItem value="v1">v1 — legacy</SelectItem>
+                  <SelectItem value="v2">{t('apiKeys.versionV2')}</SelectItem>
+                  <SelectItem value="v1">{t('apiKeys.versionV1')}</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -962,7 +962,7 @@ function WebhooksTab() {
           </DialogHeader>
           <div className="space-y-3 py-2">
             <div className="flex items-center gap-2">
-              <span className="text-sm text-dark-300">HTTP:</span>
+              <span className="text-sm text-dark-300">{t('apiKeys.httpLabel')}</span>
               <Badge variant={testResult?.status_code && testResult.status_code >= 200 && testResult.status_code < 300 ? 'success' : 'destructive'}>
                 {testResult?.status_code ?? t('apiKeys.testFailed', { defaultValue: 'Ошибка' })}
               </Badge>

@@ -4,22 +4,37 @@ import logging
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Optional, List
+from typing import Optional, List, Set
 
 from fastapi import APIRouter, Depends, Query, HTTPException, Request
+from pydantic import BaseModel, Field
 
-from web.backend.core.errors import api_error, E
+from web.backend.core.errors import api_error, E, ErrorCode
+from shared.db_schema import USERS_TABLE
+from shared.db_query import select_sql, update_sql
+from shared.admin_quota import (
+    apply_user_delete_quotas,
+    apply_user_reassign_quotas,
+    apply_user_reset_traffic_quotas,
+    apply_users_delete_quotas_batch,
+    apply_users_reassign_quotas_batch,
+    apply_users_reset_traffic_quotas_batch,
+    fetch_user_quota_data,
+    fetch_users_quota_data_batch,
+)
 
 # Add src to path for importing bot services
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent.parent))
 
 from web.backend.api.deps import get_current_admin, require_permission, require_quota, AdminUser, get_client_ip
 from web.backend.core.api_helper import fetch_users_from_api
-from web.backend.core.rbac import write_audit_log, get_visible_user_uuids
+from web.backend.core.audit import write_audit_log
+from web.backend.core.admin_accounts import get_admin_account_by_id
+from web.backend.core.rbac import get_visible_user_uuids, get_scope
 from web.backend.core.webhook_security import fire_event
 from web.backend.schemas.user import UserListItem, UserDetail, UserCreate, UserUpdate, HwidDevice
 from web.backend.schemas.common import PaginatedResponse, SuccessResponse
-from web.backend.schemas.bulk import BulkUserRequest, BulkOperationResult, BulkOperationError
+from web.backend.schemas.bulk import BulkUserRequest, BulkOperationResult, BulkOperationError, BulkReassignRequest
 from web.backend.core.rate_limit import limiter, RATE_BULK
 
 logger = logging.getLogger(__name__)
@@ -61,6 +76,151 @@ def _extract_panel_error(exc: Exception) -> Optional[str]:
     return None
 
 
+# Known Panel API errorCode → our ErrorCode mapping. Panel returns
+# `{"errorCode": "A019", "message": "..."}` for typed errors. We translate
+# the typed code into a code the frontend can localize. Anything not in
+# this map falls back to the panel's free-text message.
+_PANEL_ERROR_CODE_MAP: dict[str, ErrorCode] = {
+    # User / username
+    "A014": E.USERNAME_ALREADY_EXISTS,            # create user — duplicate
+    "A015": E.USERNAME_ALREADY_EXISTS,            # update user — duplicate
+    "A019": E.PANEL_REJECTED_USERNAME,
+    "A020": E.PANEL_REJECTED_USERNAME,
+    # Status
+    "A021": E.PANEL_REJECTED_STATUS,
+    # Traffic strategy
+    "A022": E.PANEL_REJECTED_TRAFFIC_STRATEGY,
+    # Squad references
+    "A023": E.PANEL_REJECTED_SQUAD,
+    "A024": E.PANEL_REJECTED_SQUAD,
+    # Tag
+    "A025": E.PANEL_REJECTED_TAG,
+}
+
+
+def _classify_panel_error(exc: Exception) -> tuple[ErrorCode, str]:
+    """Map a Panel API exception to (our error code, human message).
+
+    Uses the Panel's `errorCode` field when present, falls back to message
+    heuristics, and finally to PANEL_REJECTED_GENERIC.
+    """
+    msg = _extract_panel_error(exc) or "Panel rejected the request"
+    try:
+        import httpx
+        import json as _json
+        if isinstance(exc, httpx.HTTPStatusError):
+            body = exc.response.text or ""
+            try:
+                parsed = _json.loads(body)
+                if isinstance(parsed, dict):
+                    code = parsed.get("errorCode")
+                    if isinstance(code, str) and code in _PANEL_ERROR_CODE_MAP:
+                        return _PANEL_ERROR_CODE_MAP[code], msg
+                    # Heuristics on the free-text message
+                    m = msg.lower()
+                    if "username" in m and ("already" in m or "exists" in m or "duplicate" in m):
+                        return E.PANEL_USER_ALREADY_EXISTS, msg
+                    if "traffic limit strategy" in m or "trafficstrategy" in m:
+                        return E.PANEL_REJECTED_TRAFFIC_STRATEGY, msg
+                    if "status" in m and ("invalid" in m or "not allowed" in m):
+                        return E.PANEL_REJECTED_STATUS, msg
+                    if "squad" in m and ("not found" in m or "invalid" in m):
+                        return E.PANEL_REJECTED_SQUAD, msg
+                    if "tag" in m and ("too long" in m or "invalid" in m or "duplicate" in m):
+                        return E.PANEL_REJECTED_TAG, msg
+                    if "username" in m and ("invalid" in m or "format" in m):
+                        return E.PANEL_REJECTED_USERNAME, msg
+            except (ValueError, TypeError):
+                pass
+    except Exception:
+        pass
+    return E.PANEL_REJECTED_GENERIC, msg
+
+
+# ── Input validation constants ────────────────────────────────────────
+_USERNAME_RE = __import__("re").compile(r"^[A-Za-z0-9_.-]{1,100}$")
+_EMAIL_RE = __import__("re").compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+_MIN_TRAFFIC_LIMIT_BYTES = 1024 * 1024  # 1 MB
+_MAX_TAG_LEN = 32
+_MAX_DESC_LEN = 256
+
+
+def _validate_user_create_input(data) -> None:
+    """Validate UserCreate fields and raise specific errors.
+
+    Pydantic enforces type/length on declared fields, but cross-field
+    validation (e.g. traffic limit, telegram id range) needs explicit checks.
+    """
+    if not data.username or not data.username.strip():
+        raise api_error(400, E.USERNAME_REQUIRED)
+    username = data.username.strip()
+    if len(username) > 100:
+        raise api_error(400, E.USERNAME_TOO_LONG)
+    if not _USERNAME_RE.match(username):
+        raise api_error(
+            400, E.USERNAME_INVALID_FORMAT,
+            f"Username '{username}' is invalid. Use 1-100 letters, digits, "
+            f"underscores, hyphens, or dots.",
+        )
+    if data.traffic_limit_bytes is not None:
+        if data.traffic_limit_bytes < 0:
+            raise api_error(400, E.TRAFFIC_LIMIT_NEGATIVE)
+        if 0 < data.traffic_limit_bytes < _MIN_TRAFFIC_LIMIT_BYTES:
+            raise api_error(400, E.TRAFFIC_LIMIT_TOO_SMALL)
+    if data.email is not None and data.email.strip():
+        if not _EMAIL_RE.match(data.email.strip()):
+            raise api_error(400, E.INVALID_EMAIL_FORMAT, f"Email '{data.email}' is not valid.")
+    if data.telegram_id is not None and not (1 <= data.telegram_id <= 9_999_999_999):
+        raise api_error(400, E.INVALID_TELEGRAM_ID)
+    if data.hwid_device_limit is not None and data.hwid_device_limit < 0:
+        raise api_error(400, E.INVALID_HWID_DEVICE_LIMIT)
+    if data.expire_at is not None:
+        # Naive datetimes are treated as UTC
+        exp = data.expire_at
+        if exp.tzinfo is None:
+            exp = exp.replace(tzinfo=timezone.utc)
+        if exp < datetime.now(timezone.utc) - timedelta(minutes=1):
+            raise api_error(400, E.INVALID_EXPIRE_DATE)
+    if data.tag and len(data.tag) > _MAX_TAG_LEN:
+        raise api_error(400, E.TAG_TOO_LONG, f"Tag is limited to {_MAX_TAG_LEN} characters.")
+    if data.description and len(data.description) > _MAX_DESC_LEN:
+        raise api_error(400, E.DESCRIPTION_TOO_LONG, f"Description is limited to {_MAX_DESC_LEN} characters.")
+
+
+def _validate_user_update_input(data) -> None:
+    """Validate UserUpdate fields. Mirrors create rules for shared fields."""
+    if data.username is not None:
+        if not data.username.strip():
+            raise api_error(400, E.USERNAME_REQUIRED)
+        username = data.username.strip()
+        if len(username) > 100:
+            raise api_error(400, E.USERNAME_TOO_LONG)
+        if not _USERNAME_RE.match(username):
+            raise api_error(400, E.USERNAME_INVALID_FORMAT)
+    if data.traffic_limit_bytes is not None:
+        if data.traffic_limit_bytes < 0:
+            raise api_error(400, E.TRAFFIC_LIMIT_NEGATIVE)
+        if 0 < data.traffic_limit_bytes < _MIN_TRAFFIC_LIMIT_BYTES:
+            raise api_error(400, E.TRAFFIC_LIMIT_TOO_SMALL)
+    if data.email is not None and data.email.strip():
+        if not _EMAIL_RE.match(data.email.strip()):
+            raise api_error(400, E.INVALID_EMAIL_FORMAT)
+    if data.telegram_id is not None and not (1 <= data.telegram_id <= 9_999_999_999):
+        raise api_error(400, E.INVALID_TELEGRAM_ID)
+    if data.hwid_device_limit is not None and data.hwid_device_limit < 0:
+        raise api_error(400, E.INVALID_HWID_DEVICE_LIMIT)
+    if data.expire_at is not None:
+        exp = data.expire_at
+        if exp.tzinfo is None:
+            exp = exp.replace(tzinfo=timezone.utc)
+        if exp < datetime.now(timezone.utc) - timedelta(minutes=1):
+            raise api_error(400, E.INVALID_EXPIRE_DATE)
+    if data.tag and len(data.tag) > _MAX_TAG_LEN:
+        raise api_error(400, E.TAG_TOO_LONG)
+    if data.description and len(data.description) > _MAX_DESC_LEN:
+        raise api_error(400, E.DESCRIPTION_TOO_LONG)
+
+
 def _ensure_snake_case(user: dict) -> dict:
     """Ensure user dict has snake_case keys for pydantic schemas."""
     result = dict(user)
@@ -84,7 +244,7 @@ def _ensure_snake_case(user: dict) -> dict:
         'lifetimeUsedTrafficBytes': 'lifetime_used_traffic_bytes',
         'hwidDeviceLimit': 'hwid_device_limit',
         'hwidDeviceCount': 'hwid_device_count',
-        'activeDeviceCount': 'hwid_device_count',
+        'activeDeviceCount': 'active_device_count',
         'externalSquadUuid': 'external_squad_uuid',
         'activeInternalSquads': 'active_internal_squads',
         'createdAt': 'created_at',
@@ -98,6 +258,7 @@ def _ensure_snake_case(user: dict) -> dict:
         'lastTriggeredThreshold': 'last_triggered_threshold',
         'firstConnectedAt': 'first_connected_at',
         'lastConnectedNodeUuid': 'last_connected_node_uuid',
+        'createdByAdminId': 'created_by_admin_id',
     }
     for camel, snake in mappings.items():
         if camel in result and snake not in result:
@@ -150,9 +311,12 @@ def _filter_users_in_memory(
     users: list, *, search=None, status=None, traffic_type=None,
     expire_filter=None, online_filter=None, traffic_usage=None,
     sort_by="created_at", sort_order="desc", page=1, per_page=20,
+    visible_uuids: Optional[Set[str]] = None,
 ) -> tuple:
     """In-memory filtering/sorting/pagination fallback for API path."""
     now = datetime.now(timezone.utc)
+    if visible_uuids is not None:
+        users = [u for u in users if u.get("uuid") and u["uuid"].lower() in visible_uuids]
 
     def _get(u, *keys, default=''):
         for k in keys:
@@ -237,7 +401,7 @@ def _filter_users_in_memory(
     elif sort_by == 'traffic_limit_bytes':
         def _tlk(u):
             val = u.get('traffic_limit_bytes')
-            return val if val else (float('inf') if not reverse else -1)
+            return val if val else float('inf')
         users.sort(key=_tlk, reverse=reverse)
     elif sort_by in ('online_at', 'expire_at'):
         def _dsk(u):
@@ -264,6 +428,7 @@ async def list_users(
     traffic_usage: Optional[str] = Query(None, description="Filter by traffic usage: above_90, above_70, above_50, zero"),
     sort_by: str = Query("created_at", description="Sort field"),
     sort_order: str = Query("desc", regex="^(asc|desc)$"),
+    admin_id: Optional[int] = Query(None, description="Filter by creator admin ID (superadmin only)"),
     admin: AdminUser = Depends(require_permission("users", "view")),
 ):
     """List users with pagination and filtering."""
@@ -275,6 +440,9 @@ async def list_users(
         # Access-policy scope: only users tied to allowed nodes/squads
         visible_uuids = await get_visible_user_uuids(admin)
         uuid_whitelist = list(visible_uuids) if visible_uuids is not None else None
+
+        # Restrict admin_id filter to superadmin and unrestricted admins
+        resolved_admin_id = admin_id if (admin.role == "superadmin" or getattr(admin, "unrestricted_user_access", False)) else None
 
         # Primary path: SQL pagination in database
         try:
@@ -289,6 +457,7 @@ async def list_users(
                     traffic_usage=traffic_usage,
                     sort_by=sort_by, sort_order=sort_order,
                     uuid_whitelist=uuid_whitelist,
+                    admin_id=resolved_admin_id,
                 )
                 db_available = True
         except Exception as e:
@@ -297,16 +466,16 @@ async def list_users(
         if not db_available:
             # Fallback: API with in-memory filtering (old behavior)
             users = await _get_users_list()
-            users = [_ensure_snake_case(u) for u in users]
             if uuid_whitelist is not None:
                 wh = {u.lower() for u in uuid_whitelist}
-                users = [u for u in users if str(u.get("uuid", "")).lower() in wh]
+                users = [u for u in users if u.get("uuid") and u["uuid"].lower() in wh]
             users, total = _filter_users_in_memory(
                 users, search=search, status=status,
                 traffic_type=traffic_type, expire_filter=expire_filter,
                 online_filter=online_filter, traffic_usage=traffic_usage,
                 sort_by=sort_by, sort_order=sort_order,
                 page=page, per_page=per_page,
+                visible_uuids=visible_uuids,
             )
 
         # Normalize to snake_case
@@ -332,6 +501,20 @@ async def list_users(
                                 u['raw_used_traffic_bytes'] = raw_traffic[uid]
             except Exception as e:
                 logger.debug("Failed to enrich page data: %s", e)
+
+        # Enrich with admin usernames for created_by_admin_id
+        admin_ids = {u.get('created_by_admin_id') for u in users if u.get('created_by_admin_id')}
+        if admin_ids:
+            try:
+                from web.backend.core.rbac import get_admin_usernames
+                admin_names = await get_admin_usernames(list(admin_ids))
+                if admin_names:
+                    for u in users:
+                        created_by = u.get('created_by_admin_id')
+                        if created_by and created_by in admin_names:
+                            u['created_by_admin_username'] = admin_names[created_by]
+            except Exception as e:
+                logger.debug("Failed to enrich admin usernames: %s", e)
 
         # Convert to schema
         user_items = []
@@ -408,6 +591,10 @@ async def get_internal_squads(
             logger.error("Error fetching internal squads: %s", e)
             return []
 
+    scope = await get_scope(admin, "squad", "view")
+    if scope is not None:
+        squads = [sq for sq in squads if isinstance(sq, dict) and str(sq.get("uuid", "")).lower() in scope]
+
     return [_normalize_squad(sq) for sq in squads if isinstance(sq, dict)]
 
 
@@ -481,7 +668,10 @@ async def resolve_user(
             result = await lookup_fn()
             payload = result.get("response", result) if isinstance(result, dict) else result
             if payload:
-                return payload
+                resolved_uuid = payload.get("uuid") if isinstance(payload, dict) else None
+                if resolved_uuid:
+                    await _ensure_user_visible(admin, resolved_uuid)
+                return _ensure_snake_case(payload) if isinstance(payload, dict) else payload
         except Exception as e:
             last_error = e
             logger.debug("Resolve by %s failed for '%s': %s", method_name, query, e)
@@ -501,6 +691,7 @@ async def resolve_user(
                     f"%{query.lower()}%",
                 )
                 if row:
+                    await _ensure_user_visible(admin, str(row["uuid"]))
                     # Found in local DB — fetch full data from Panel
                     try:
                         result = await api_client.get_user_by_uuid(str(row["uuid"]))
@@ -573,6 +764,17 @@ async def get_user(
         except Exception as e:
             logger.debug("Failed to enrich user with anti-abuse data: %s", e)
 
+        # Enrich with admin username
+        try:
+            from web.backend.core.rbac import get_admin_usernames
+            created_by_id = user_data.get('created_by_admin_id')
+            if created_by_id:
+                admin_names = await get_admin_usernames([created_by_id])
+                if admin_names and created_by_id in admin_names:
+                    user_data['created_by_admin_username'] = admin_names[created_by_id]
+        except Exception as e:
+            logger.debug("Failed to enrich admin username: %s", e)
+
         return UserDetail(**user_data)
 
     except HTTPException:
@@ -590,6 +792,9 @@ async def create_user(
     _quota: None = Depends(require_quota("users")),
 ):
     """Create a new user."""
+    # Input validation (raises specific 400 errors via api_error)
+    _validate_user_create_input(data)
+
     try:
         from shared.api_client import api_client
 
@@ -608,37 +813,108 @@ async def create_user(
             else data.traffic_limit_strategy
         )
 
-        result = await api_client.create_user(
-            username=data.username,
-            expire_at=expire_at_str,
-            traffic_limit_bytes=data.traffic_limit_bytes,
-            hwid_device_limit=data.hwid_device_limit,
-            telegram_id=data.telegram_id,
-            description=data.description,
-            traffic_limit_strategy=strategy_upper,
-            external_squad_uuid=data.external_squad_uuid,
-            active_internal_squads=data.active_internal_squads,
-            status=status_upper,
-            tag=data.tag,
-            email=data.email,
-            short_uuid=data.short_uuid,
-            trojan_password=data.trojan_password,
-            vless_uuid=data.vless_uuid,
-            ss_password=data.ss_password,
-            uuid=data.uuid,
-            created_at=data.created_at.isoformat() if data.created_at else None,
-            last_traffic_reset_at=data.last_traffic_reset_at.isoformat() if data.last_traffic_reset_at else None,
-        )
+        # `unlimited_traffic_policy` controls *enforcement* (hard quota cap)
+        # but NOT *tracking*. The `traffic_used_bytes` counter must always be
+        # updated when a user is created with a traffic limit, otherwise
+        # subsequent edits and deletes subtract from a counter that was
+        # never incremented — driving it negative. (regression test in
+        # test_users_api.py::test_traffic_counter_never_goes_negative)
+        if admin.role != "superadmin" and admin.account_id is not None:
+            acct = await get_admin_account_by_id(admin.account_id)
+            policy = acct.get("unlimited_traffic_policy", "allowed") if acct else "allowed"
+            if policy == "disabled":
+                if data.traffic_limit_bytes is None:
+                    raise api_error(403, E.TRAFFIC_LIMIT_REQUIRED)
+                max_traffic_gb = acct.get("max_traffic_gb")
+                if max_traffic_gb is not None:
+                    current_used = acct.get("traffic_used_bytes", 0)
+                    max_allowed = max_traffic_gb * 1073741824
+                    if current_used + data.traffic_limit_bytes > max_allowed:
+                        remaining_gb = max(0, (max_allowed - current_used) // 1073741824)
+                        raise api_error(
+                            403, E.TRAFFIC_QUOTA_EXCEEDED,
+                            f"Traffic limit exceeds your quota. Available: {remaining_gb} GB",
+                        )
+            if policy == "enforced":
+                data.traffic_limit_bytes = None
+
+        try:
+            result = await api_client.create_user(
+                username=data.username,
+                expire_at=expire_at_str,
+                traffic_limit_bytes=data.traffic_limit_bytes,
+                hwid_device_limit=data.hwid_device_limit,
+                telegram_id=data.telegram_id,
+                description=data.description,
+                traffic_limit_strategy=strategy_upper,
+                external_squad_uuid=data.external_squad_uuid,
+                active_internal_squads=data.active_internal_squads,
+                status=status_upper,
+                tag=data.tag,
+                email=data.email,
+                short_uuid=data.short_uuid,
+                trojan_password=data.trojan_password,
+                vless_uuid=data.vless_uuid,
+                ss_password=data.ss_password,
+                uuid=data.uuid,
+                created_at=data.created_at.isoformat() if data.created_at else None,
+                last_traffic_reset_at=data.last_traffic_reset_at.isoformat() if data.last_traffic_reset_at else None,
+            )
+        except Exception as panel_exc:
+            # Map Panel API error to a specific code so the frontend can
+            # show a localized, contextual message.
+            code, msg = _classify_panel_error(panel_exc)
+            logger.error("create_user(username=%s) panel error: %s [%s]", data.username, msg, code.value, exc_info=True)
+            raise api_error(400, code, msg)
 
         user = result.get('response', result) if isinstance(result, dict) else result
 
-        # Increment quota usage counter
         if admin.account_id is not None:
             from web.backend.core.rbac import increment_usage_counter
-            await increment_usage_counter(admin.account_id, "users_created")
+            if not await increment_usage_counter(admin.account_id, "users_created"):
+                # Roll back the user we just created to keep counters honest
+                try:
+                    await api_client.delete_user(user.get("uuid", ""))
+                except Exception:
+                    pass
+                raise api_error(409, E.USERS_QUOTA_EXCEEDED,
+                                "User quota exceeded. Please delete some users or contact your administrator.")
+            # Always track traffic counter when the user has a limit. The
+            # enforcement policy was already applied above; the counter
+            # is purely informational and must stay consistent with the
+            # user's actual allocation so edits and deletes don't drive
+            # it negative. If the increment fails (race condition, DB
+            # issue, etc.) we roll back the user we just created.
+            if data.traffic_limit_bytes is not None and data.traffic_limit_bytes > 0:
+                if not await increment_usage_counter(
+                    admin.account_id, "traffic_used_bytes", data.traffic_limit_bytes
+                ):
+                    try:
+                        await api_client.delete_user(user.get("uuid", ""))
+                    except Exception:
+                        pass
+                    raise api_error(
+                        409, E.TRAFFIC_QUOTA_EXCEEDED,
+                        "Traffic limit exceeds your quota. Please delete some users or contact your administrator."
+                    )
+
+        # Persist full user data from Panel API response to local DB
+        user_uuid = user.get('uuid', '') if isinstance(user, dict) else ''
+        if user_uuid:
+            try:
+                from shared.database import db_service
+                if db_service.is_connected:
+                    await db_service.upsert_user(user)
+                    if admin.account_id is not None:
+                        async with db_service.acquire() as conn:
+                            await conn.execute(
+                                "UPDATE users SET created_by_admin_id = $1 WHERE uuid = $2",
+                                admin.account_id, user_uuid,
+                            )
+            except Exception as e:
+                logger.debug("Failed to persist user data: %s", e)
 
         # Audit
-        user_uuid = user.get('uuid', '') if isinstance(user, dict) else ''
         await write_audit_log(
             admin_id=admin.account_id,
             admin_username=admin.username,
@@ -662,10 +938,11 @@ async def create_user(
 
     except ImportError:
         raise api_error(503, E.API_SERVICE_UNAVAILABLE)
+    except HTTPException:
+        raise
     except Exception as e:
-        detail = _extract_panel_error(e) or "Не удалось создать юзера"
-        logger.error("create_user(username=%s) failed: %s", data.username, detail, exc_info=True)
-        raise HTTPException(status_code=400, detail=detail)
+        logger.error("create_user(username=%s) failed: %s", data.username, e, exc_info=True)
+        raise api_error(500, E.INTERNAL_ERROR)
 
 
 @router.patch("/{user_uuid}", response_model=UserDetail)
@@ -677,10 +954,17 @@ async def update_user(
 ):
     """Update user fields."""
     await _ensure_user_visible(admin, user_uuid)
+
+    update_data = data.model_dump(exclude_unset=True, mode='json')
+    if not update_data:
+        raise api_error(400, E.NO_FIELDS_TO_UPDATE)
+
+    # Input validation (raises specific 400 errors via api_error)
+    _validate_user_update_input(data)
+
     try:
         from shared.api_client import api_client
 
-        update_data = data.model_dump(exclude_unset=True, mode='json')
         # Panel API ждёт enum status в UPPERCASE (ACTIVE/LIMITED/DISABLED/EXPIRED).
         # Фронт хранит их в lowercase для удобства, апаем тут.
         if isinstance(update_data.get('status'), str):
@@ -698,11 +982,128 @@ async def update_user(
             'active_internal_squads': 'activeInternalSquads',
             'external_squad_uuid': 'externalSquadUuid',
         }
+
+        # The traffic counter tracks the user's currently-allocated quota and
+        # must be updated whenever the limit changes, regardless of the
+        # admin's enforcement policy. Otherwise a user created under
+        # `policy="allowed"` (counter not incremented) and then later
+        # edited/deleted under `policy="disabled"` would subtract from a
+        # counter that was never credited — driving it negative.
+        _traffic_delta = 0
+        _traffic_tracked = False
+        creator_admin_id = None
+
+        # Fetch the owner (creator) of this user. The counter change will be
+        # attributed to the OWNER, not the acting admin. This is important when
+        # a higher-access admin (e.g. superadmin) edits a user that was created
+        # by a less-privileged admin.
+        from shared.database import db_service
+        if db_service.is_connected:
+            try:
+                existing = await db_service.get_user_by_uuid(user_uuid)
+                if existing:
+                    creator_admin_id = existing.get("createdByAdminId")
+            except Exception:
+                logger.debug("Failed to fetch user for owner lookup user_uuid=%s", user_uuid)
+
+        # Enforce per-admin unlimited_traffic_policy for non-superadmin
+        if admin.role != "superadmin" and admin.account_id is not None and 'traffic_limit_bytes' in update_data:
+            acct = await get_admin_account_by_id(admin.account_id)
+            policy = acct.get("unlimited_traffic_policy", "allowed") if acct else "allowed"
+            if policy == "disabled":
+                if update_data['traffic_limit_bytes'] is None:
+                    raise api_error(403, E.TRAFFIC_LIMIT_REQUIRED)
+                old_limit = None
+                user_used = 0
+                try:
+                    if db_service.is_connected:
+                        existing = await db_service.get_user_by_uuid(user_uuid)
+                        if existing:
+                            old_limit = existing.get('trafficLimitBytes')
+                            user_used = existing.get('usedTrafficBytes') or 0
+                except Exception:
+                    pass
+                if old_limit is None:
+                    try:
+                        resp = await api_client.get_user_by_uuid(user_uuid)
+                        user_data = resp.get('response', resp) if isinstance(resp, dict) else resp
+                        old_limit = user_data.get('traffic_limit_bytes')
+                        if old_limit is None:
+                            raise ValueError("no limit in API response")
+                        if not user_used:
+                            user_used = user_data.get('used_traffic_bytes') or 0
+                    except Exception:
+                        pass
+                if old_limit is None:
+                    old_limit = 0
+                new_limit = update_data['traffic_limit_bytes']
+                if new_limit is not None and user_used > 0 and new_limit < user_used:
+                    used_gb = (user_used + 1073741823) // 1073741824
+                    raise api_error(
+                        403, E.TRAFFIC_LIMIT_BELOW_USAGE,
+                        f"Cannot set traffic limit below current usage ({used_gb} GB used).",
+                    )
+                _traffic_delta = (new_limit or 0) - old_limit
+                if _traffic_delta > 0:
+                    max_traffic_gb = acct.get("max_traffic_gb")
+                    if max_traffic_gb is not None:
+                        current_used = acct.get("traffic_used_bytes", 0)
+                        max_allowed = max_traffic_gb * 1073741824
+                        if current_used + _traffic_delta > max_allowed:
+                            remaining_gb = max(0, (max_allowed - current_used) // 1073741824)
+                            raise api_error(
+                                403, E.TRAFFIC_QUOTA_EXCEEDED,
+                                f"Traffic limit exceeds your quota. Available: {remaining_gb} GB",
+                            )
+                    _traffic_tracked = True
+                elif _traffic_delta < 0:
+                    _traffic_tracked = True
+            if policy == "enforced":
+                update_data['traffic_limit_bytes'] = 0
+
+        # For non-disabled policies, the counter still needs to be updated so
+        # future edits/deletes stay consistent. The delta is computed from
+        # the local DB; if it's missing, fall back to 0 (no counter change).
+        if (
+            not _traffic_tracked
+            and admin.role != "superadmin"
+            and admin.account_id is not None
+            and 'traffic_limit_bytes' in update_data
+        ):
+            acct = await get_admin_account_by_id(admin.account_id)
+            policy = acct.get("unlimited_traffic_policy", "allowed") if acct else "allowed"
+            if policy != "disabled":
+                # Same delta calculation as above but without the enforcement
+                # gate. We need this to keep the counter consistent even
+                # when the admin's policy doesn't enforce a hard cap.
+                try:
+                    if db_service.is_connected:
+                        existing_for_delta = await db_service.get_user_by_uuid(user_uuid)
+                    else:
+                        existing_for_delta = None
+                except Exception:
+                    existing_for_delta = None
+                old_limit = (existing_for_delta or {}).get('trafficLimitBytes') or 0
+                new_limit = update_data['traffic_limit_bytes'] or 0
+                _traffic_delta = new_limit - old_limit
+                if _traffic_delta != 0:
+                    _traffic_tracked = True
+
         camel_data = {}
         for k, v in update_data.items():
             camel_data[snake_to_camel.get(k, k)] = v
-        resp = await api_client.update_user(user_uuid, **camel_data)
+        try:
+            resp = await api_client.update_user(user_uuid, **camel_data)
+        except Exception as panel_exc:
+            code, msg = _classify_panel_error(panel_exc)
+            logger.error("update_user(%s) panel error: %s [%s]", user_uuid, msg, code.value, exc_info=True)
+            raise api_error(400, code, msg)
         user = resp.get('response', resp) if isinstance(resp, dict) else resp
+
+        # Apply quota counter changes to the OWNER (creator), not the acting admin.
+        if _traffic_tracked and creator_admin_id is not None and _traffic_delta != 0:
+            from web.backend.core.rbac import increment_usage_counter
+            await increment_usage_counter(creator_admin_id, "traffic_used_bytes", _traffic_delta)
 
         # Audit
         await write_audit_log(
@@ -710,7 +1111,7 @@ async def update_user(
             admin_username=admin.username,
             action="user.update",
             resource="users",
-            resource_id=user_uuid,
+            resource_id=str(user_uuid),
             details=json.dumps({k: str(v) for k, v in update_data.items()}),
             ip_address=get_client_ip(request),
         )
@@ -726,13 +1127,11 @@ async def update_user(
 
     except ImportError:
         raise api_error(503, E.API_SERVICE_UNAVAILABLE)
+    except HTTPException:
+        raise
     except Exception as e:
-        # Достаём текст ошибки от Panel (если это HTTPStatusError) — иначе плоский
-        # «Internal server error» не даёт юзеру никаких подсказок и нам нечего смотреть
-        # в логах SystemLogs.
-        detail = _extract_panel_error(e) or "Не удалось обновить юзера"
-        logger.error("update_user(%s) failed: %s", user_uuid, detail, exc_info=True)
-        raise HTTPException(status_code=400, detail=detail)
+        logger.error("update_user(%s) failed: %s", user_uuid, e, exc_info=True)
+        raise api_error(500, E.INTERNAL_ERROR)
 
 
 @router.delete("/{user_uuid}", response_model=SuccessResponse)
@@ -745,16 +1144,36 @@ async def delete_user(
     await _ensure_user_visible(admin, user_uuid)
     try:
         from shared.api_client import api_client
+        from shared.database import db_service
 
-        await api_client.delete_user(user_uuid)
+        # Fetch user before deleting to get ownership and usage for quota decrement
+        creator_admin_id = None
+        used_bytes = 0
+        traffic_limit = 0
+        if db_service.is_connected:
+            existing = await db_service.get_user_by_uuid(user_uuid)
+            if existing:
+                creator_admin_id = existing.get("createdByAdminId")
+                used_bytes = existing.get("usedTrafficBytes") or 0
+                traffic_limit = existing.get("trafficLimitBytes") or 0
+
+        try:
+            await api_client.delete_user(user_uuid)
+        except Exception as panel_exc:
+            code, msg = _classify_panel_error(panel_exc)
+            logger.error("delete_user(%s) panel error: %s [%s]", user_uuid, msg, code.value, exc_info=True)
+            raise api_error(400, code, msg)
 
         # Also remove from local DB so UI updates immediately
         try:
-            from shared.database import db_service
             if db_service.is_connected:
                 await db_service.delete_user(user_uuid)
         except Exception as e:
             logger.debug("Non-critical: failed to delete user from local DB: %s", e)
+
+        # Apply quota counter changes via shared helper
+        if creator_admin_id is not None:
+            await apply_user_delete_quotas(creator_admin_id, traffic_limit or 0, used_bytes)
 
         # Audit
         await write_audit_log(
@@ -776,8 +1195,11 @@ async def delete_user(
 
     except ImportError:
         raise api_error(503, E.API_SERVICE_UNAVAILABLE)
+    except HTTPException:
+        raise
     except Exception as e:
-        raise HTTPException(status_code=400, detail="Internal server error")
+        logger.error("delete_user(%s) failed: %s", user_uuid, e, exc_info=True)
+        raise api_error(500, E.INTERNAL_ERROR)
 
 
 @router.post("/{user_uuid}/enable", response_model=SuccessResponse)
@@ -857,12 +1279,18 @@ async def reset_user_traffic(
     try:
         from shared.api_client import api_client
 
+        # Fetch used_traffic_bytes BEFORE the reset
+        creator_admin_id, _limit, used_bytes = await fetch_user_quota_data(user_uuid)
+
         await api_client.reset_user_traffic(user_uuid)
+
+        # Apply quota counter changes via shared helper
+        await apply_user_reset_traffic_quotas(creator_admin_id, used_bytes)
 
         await write_audit_log(
             admin_id=admin.account_id, admin_username=admin.username,
             action="user.reset_traffic", resource="users", resource_id=user_uuid,
-            details=json.dumps({"user_uuid": user_uuid}),
+            details=json.dumps({"user_uuid": user_uuid, "used_bytes": used_bytes}),
             ip_address=get_client_ip(request),
         )
         return SuccessResponse(message="Traffic reset")
@@ -909,6 +1337,9 @@ async def get_hwid_device_counts(
     admin: AdminUser = Depends(require_permission("users", "view")),
 ):
     """Get HWID device counts for multiple users in one call."""
+    visible = await get_visible_user_uuids(admin)
+    if visible is not None:
+        user_uuids = [u for u in user_uuids if u.lower() in visible]
     import asyncio
 
     async def _get_count(uuid: str) -> tuple:
@@ -943,6 +1374,7 @@ async def get_user_traffic_stats(
     Uses /api/bandwidth-stats/users/{uuid} which returns actual per-user
     traffic data broken down by node for any date range.
     """
+    await _ensure_user_visible(admin, user_uuid)
     from datetime import datetime, timedelta, timezone
 
     try:
@@ -1040,6 +1472,7 @@ async def get_user_ip_history(
     admin: AdminUser = Depends(require_permission("users", "view")),
 ):
     """Get unique IP addresses for a user with geo enrichment."""
+    await _ensure_user_visible(admin, user_uuid)
     period_days = {"24h": 1, "7d": 7, "30d": 30}.get(period, 1)
     try:
         from shared.database import db_service
@@ -1091,6 +1524,7 @@ async def sync_user_hwid_devices(
     admin: AdminUser = Depends(require_permission("users", "edit")),
 ):
     """Force re-sync HWID devices for a user from Remnawave API to local DB."""
+    await _ensure_user_visible(admin, user_uuid)
     try:
         from shared.sync import sync_service
         synced = await sync_service.sync_user_hwid_devices(user_uuid)
@@ -1106,6 +1540,7 @@ async def get_user_hwid_devices(
     admin: AdminUser = Depends(require_permission("users", "view")),
 ):
     """Get HWID devices for a user. Reads from local DB (synced via webhooks), API as fallback."""
+    await _ensure_user_visible(admin, user_uuid)
     def _parse_devices(devices: list) -> List[HwidDevice]:
         items = []
         for d in devices:
@@ -1154,6 +1589,7 @@ async def delete_user_hwid_device(
     admin: AdminUser = Depends(require_permission("users", "edit")),
 ):
     """Delete a specific HWID device for a user."""
+    await _ensure_user_visible(admin, user_uuid)
     try:
         from shared.database import db_service
         from shared.api_client import api_client
@@ -1180,6 +1616,7 @@ async def delete_all_user_hwid_devices(
     admin: AdminUser = Depends(require_permission("users", "edit")),
 ):
     """Delete all HWID devices for a user."""
+    await _ensure_user_visible(admin, user_uuid)
     try:
         from shared.database import db_service
         from shared.api_client import api_client
@@ -1211,6 +1648,10 @@ async def bulk_enable_users(
     admin: AdminUser = Depends(require_permission("users", "bulk_operations")),
 ):
     """Enable multiple users at once (max 100)."""
+    visible = await get_visible_user_uuids(admin)
+    if visible is not None:
+        body.uuids = [u for u in body.uuids if u.lower() in visible]
+
     try:
         from shared.api_client import api_client
     except ImportError:
@@ -1242,6 +1683,10 @@ async def bulk_disable_users(
     admin: AdminUser = Depends(require_permission("users", "bulk_operations")),
 ):
     """Disable multiple users at once (max 100)."""
+    visible = await get_visible_user_uuids(admin)
+    if visible is not None:
+        body.uuids = [u for u in body.uuids if u.lower() in visible]
+
     try:
         from shared.api_client import api_client
     except ImportError:
@@ -1273,6 +1718,10 @@ async def bulk_delete_users(
     admin: AdminUser = Depends(require_permission("users", "bulk_operations")),
 ):
     """Delete multiple users at once (max 100)."""
+    visible = await get_visible_user_uuids(admin)
+    if visible is not None:
+        body.uuids = [u for u in body.uuids if u.lower() in visible]
+
     try:
         from shared.api_client import api_client
     except ImportError:
@@ -1281,13 +1730,27 @@ async def bulk_delete_users(
     success, failed, errors = 0, 0, []
     for uuid in body.uuids:
         try:
+            from shared.database import db_service
+            creator_admin_id = None
+            used_bytes = 0
+            traffic_limit = 0
+            if db_service.is_connected:
+                existing = await db_service.get_user_by_uuid(uuid)
+                if existing:
+                    creator_admin_id = existing.get("createdByAdminId")
+                    used_bytes = existing.get("usedTrafficBytes") or 0
+                    traffic_limit = existing.get("trafficLimitBytes") or 0
+
             await api_client.delete_user(uuid)
-            try:
-                from shared.database import db_service
-                if db_service.is_connected:
+            if db_service.is_connected:
+                try:
                     await db_service.delete_user(uuid)
-            except Exception as e:
-                logger.debug("Non-critical: failed to delete user from local DB: %s", e)
+                except Exception as e:
+                    logger.debug("Non-critical: failed to delete user from local DB: %s", e)
+
+            if creator_admin_id is not None:
+                await apply_user_delete_quotas(creator_admin_id, traffic_limit or 0, used_bytes)
+
             success += 1
             fire_event("user.deleted", {
                 "uuid": uuid,
@@ -1315,10 +1778,17 @@ async def bulk_reset_traffic(
     admin: AdminUser = Depends(require_permission("users", "bulk_operations")),
 ):
     """Reset traffic for multiple users at once (max 100)."""
+    visible = await get_visible_user_uuids(admin)
+    if visible is not None:
+        body.uuids = [u for u in body.uuids if u.lower() in visible]
+
     try:
         from shared.api_client import api_client
     except ImportError:
         raise api_error(503, E.API_SERVICE_UNAVAILABLE)
+
+    # Fetch used_traffic_bytes BEFORE the reset
+    users_data = await fetch_users_quota_data_batch(body.uuids)
 
     success, failed, errors = 0, 0, []
     for uuid in body.uuids:
@@ -1329,10 +1799,83 @@ async def bulk_reset_traffic(
             failed += 1
             errors.append(BulkOperationError(uuid=uuid, error=str(e)))
 
+    # Apply quota counter changes via shared helper
+    await apply_users_reset_traffic_quotas_batch(users_data)
+
     await write_audit_log(
         admin_id=admin.account_id, admin_username=admin.username,
         action="user.bulk_reset_traffic", resource="users", resource_id="bulk",
         details=json.dumps({"count": len(body.uuids), "success": success, "failed": failed}),
+        ip_address=get_client_ip(request),
+    )
+    return BulkOperationResult(success=success, failed=failed, errors=errors)
+
+
+@router.post("/bulk/reassign", response_model=BulkOperationResult)
+@limiter.limit(RATE_BULK)
+async def bulk_reassign_users(
+    request: Request,
+    body: BulkReassignRequest,
+    admin: AdminUser = Depends(require_permission("users", "bulk_operations")),
+):
+    """Reassign multiple users to another admin (superadmin only)."""
+    if admin.role != "superadmin":
+        raise api_error(403, E.FORBIDDEN)
+    target = await get_admin_account_by_id(body.new_admin_id)
+    if not target:
+        raise api_error(404, E.ADMIN_NOT_FOUND)
+
+    from shared.database import db_service
+
+    if not db_service.is_connected:
+        raise api_error(503, E.DB_UNAVAILABLE)
+
+    # Fetch existing ownership and traffic data before updating
+    rows = []
+    async with db_service.acquire() as conn:
+        rows = await conn.fetch(
+            select_sql(USERS_TABLE, "created_by_admin_id, used_traffic_bytes, traffic_limit_bytes", "WHERE uuid = ANY($1::uuid[])"),
+            body.uuids,
+        )
+
+    success = len(body.uuids)
+    errors = []
+    async with db_service.acquire() as conn:
+        try:
+            result = await conn.execute(
+                update_sql(USERS_TABLE, "created_by_admin_id = $1", "uuid = ANY($2::uuid[])"),
+                body.new_admin_id, body.uuids,
+            )
+            if "UPDATE " in result:
+                parts = result.split()
+                if len(parts) >= 2:
+                    try:
+                        success = int(parts[1])
+                    except (ValueError, IndexError):
+                        pass
+        except Exception as e:
+            success = 0
+            errors = [BulkOperationError(uuid=u, error=str(e)) for u in body.uuids]
+
+    failed = len(body.uuids) - success
+
+    # Apply quota counter changes via shared helper using per-user data
+    per_user_data: list = []
+    for r in rows:
+        prev_id = r.get("created_by_admin_id")
+        if prev_id == body.new_admin_id:
+            continue
+        per_user_data.append((
+            prev_id,
+            r.get("traffic_limit_bytes") or 0,
+            r.get("used_traffic_bytes") or 0,
+        ))
+    await apply_users_reassign_quotas_batch(per_user_data, body.new_admin_id)
+
+    await write_audit_log(
+        admin_id=admin.account_id, admin_username=admin.username,
+        action="user.bulk_reassign", resource="users", resource_id="bulk",
+        details=json.dumps({"count": len(body.uuids), "success": success, "failed": failed, "new_admin_id": body.new_admin_id}),
         ip_address=get_client_ip(request),
     )
     return BulkOperationResult(success=success, failed=failed, errors=errors)
@@ -1346,6 +1889,7 @@ async def get_subscription_info(
     admin: AdminUser = Depends(require_permission("users", "view")),
 ):
     """Get detailed subscription info for a user via Panel API."""
+    await _ensure_user_visible(admin, user_uuid)
     from shared.api_client import api_client
     from shared.database import db_service
 
@@ -1378,6 +1922,7 @@ async def fetch_user_ips(
     admin: AdminUser = Depends(require_permission("users", "view")),
 ):
     """Запускает сбор IP-адресов пользователя через Panel API."""
+    await _ensure_user_visible(admin, user_uuid)
     from shared.api_client import api_client
 
     try:
@@ -1389,6 +1934,221 @@ async def fetch_user_ips(
         raise api_error(502, E.API_SERVICE_UNAVAILABLE)
 
 
+# ── Reassign user to another admin ──────────────────────────────
+
+class ReassignRequest(BaseModel):
+    new_admin_id: int = Field(..., description="ID of the admin to assign the user to")
+
+
+@router.post("/{user_uuid}/reassign", response_model=SuccessResponse)
+async def reassign_user(
+    user_uuid: str,
+    request: Request,
+    body: ReassignRequest,
+    admin: AdminUser = Depends(require_permission("users", "edit")),
+):
+    """Reassign a user to another admin (superadmin only)."""
+    if admin.role != "superadmin":
+        raise api_error(403, E.FORBIDDEN)
+    target = await get_admin_account_by_id(body.new_admin_id)
+    if not target:
+        raise api_error(404, E.ADMIN_NOT_FOUND)
+    try:
+        from shared.database import db_service
+        if not db_service.is_connected:
+            raise api_error(503, E.DB_UNAVAILABLE)
+        previous_admin_id = None
+        used_bytes = 0
+        traffic_limit = 0
+        async with db_service.acquire() as conn:
+            existing = await conn.fetchrow(
+                select_sql(USERS_TABLE, "created_by_admin_id, used_traffic_bytes, traffic_limit_bytes", "WHERE uuid = $1"),
+                user_uuid,
+            )
+            if not existing:
+                raise api_error(404, E.USER_NOT_FOUND)
+            previous_admin_id = existing.get("created_by_admin_id")
+            used_bytes = existing.get("used_traffic_bytes") or 0
+            traffic_limit = existing.get("traffic_limit_bytes") or 0
+            result = await conn.execute(
+                update_sql(USERS_TABLE, "created_by_admin_id = $1", "uuid = $2"),
+                body.new_admin_id, user_uuid,
+            )
+            if "UPDATE 0" in result:
+                raise api_error(404, E.USER_NOT_FOUND)
+
+        # Apply quota counter changes via shared helper
+        await apply_user_reassign_quotas(
+            previous_admin_id,
+            body.new_admin_id,
+            traffic_limit or 0,
+            used_bytes,
+        )
+
+        await write_audit_log(
+            admin_id=admin.account_id, admin_username=admin.username,
+            action="user.reassign", resource="users", resource_id=user_uuid,
+            details=json.dumps({
+                "new_admin_id": body.new_admin_id,
+                "new_username": target["username"],
+                "previous_admin_id": previous_admin_id,
+            }),
+            ip_address=get_client_ip(request),
+        )
+        return SuccessResponse(message="User reassigned")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("reassign_user failed: %s", e)
+        raise api_error(500, E.INTERNAL_ERROR)
+
+
+@router.post("/bulk/unassign-admin", response_model=BulkOperationResult)
+@limiter.limit(RATE_BULK)
+async def bulk_unassign_admin(
+    request: Request,
+    body: BulkUserRequest,
+    admin: AdminUser = Depends(require_permission("users", "bulk_operations")),
+):
+    """Clear created_by_admin_id for multiple users at once (superadmin only, max 100)."""
+    if admin.role != "superadmin":
+        raise api_error(403, E.FORBIDDEN)
+    visible = await get_visible_user_uuids(admin)
+    if visible is not None:
+        body.uuids = [u for u in body.uuids if u.lower() in visible]
+
+    try:
+        from shared.database import db_service
+        if not db_service.is_connected:
+            raise api_error(503, E.DB_UNAVAILABLE)
+
+        # Fetch previous ownership before update so we can transfer counters
+        rows = []
+        async with db_service.acquire() as conn:
+            rows = await conn.fetch(
+                select_sql(
+                    USERS_TABLE,
+                    "uuid::text, created_by_admin_id, traffic_limit_bytes, used_traffic_bytes",
+                    "WHERE uuid = ANY($1::uuid[]) AND created_by_admin_id IS NOT NULL",
+                ),
+                body.uuids,
+            )
+
+        success, failed, errors = 0, 0, []
+        async with db_service.acquire() as conn:
+            try:
+                result = await conn.execute(
+                    update_sql(
+                        USERS_TABLE,
+                        "created_by_admin_id = NULL",
+                        "uuid = ANY($1::uuid[])",
+                    ),
+                    body.uuids,
+                )
+                if "UPDATE " in result:
+                    parts = result.split()
+                    if len(parts) >= 2:
+                        try:
+                            success = int(parts[1])
+                        except (ValueError, IndexError):
+                            pass
+            except Exception as e:
+                success = 0
+                errors = [BulkOperationError(uuid=u, error=str(e)) for u in body.uuids]
+
+        failed = len(body.uuids) - success
+
+        # Apply quota counter changes: previous owners lose the user
+        # (unassign is like reassign to NULL — previous owner loses, no new owner gains)
+        from shared.rbac import increment_usage_counter
+        per_owner: dict = {}
+        for r in rows:
+            prev_id = r.get("created_by_admin_id")
+            if prev_id is None:
+                continue
+            limit = r.get("traffic_limit_bytes") or 0
+            used = r.get("used_traffic_bytes") or 0
+            unused = max(0, limit - used)
+            bucket = per_owner.setdefault(prev_id, {"count": 0, "unused": 0})
+            bucket["count"] += 1
+            if unused > 0:
+                bucket["unused"] += unused
+        try:
+            for owner_id, bucket in per_owner.items():
+                if bucket["count"] > 0:
+                    await increment_usage_counter(owner_id, "users_created", -bucket["count"])
+                if bucket["unused"] > 0:
+                    await increment_usage_counter(owner_id, "traffic_used_bytes", -bucket["unused"])
+        except Exception as e:
+            logger.warning("Failed to update counters on bulk unassign: %s", e)
+
+        await write_audit_log(
+            admin_id=admin.account_id, admin_username=admin.username,
+            action="user.bulk_unassign_admin", resource="users", resource_id="bulk",
+            details=json.dumps({"count": len(body.uuids), "success": success, "failed": failed}),
+            ip_address=get_client_ip(request),
+        )
+        return BulkOperationResult(success=success, failed=failed, errors=errors)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("bulk_unassign_admin failed: %s", e)
+        raise api_error(500, E.INTERNAL_ERROR)
+
+
+@router.post("/{user_uuid}/unassign-admin", response_model=SuccessResponse)
+async def unassign_admin(
+    user_uuid: str,
+    request: Request,
+    admin: AdminUser = Depends(require_permission("users", "edit")),
+):
+    """Clear the created_by_admin_id for a user (superadmin only)."""
+    if admin.role != "superadmin":
+        raise api_error(403, E.FORBIDDEN)
+    try:
+        from shared.database import db_service
+        if not db_service.is_connected:
+            raise api_error(503, E.DB_UNAVAILABLE)
+        previous_admin_id = None
+        limit = 0
+        used = 0
+        async with db_service.acquire() as conn:
+            existing = await conn.fetchrow(
+                select_sql(USERS_TABLE, "created_by_admin_id, traffic_limit_bytes, used_traffic_bytes", "WHERE uuid = $1"),
+                user_uuid,
+            )
+            if not existing:
+                raise api_error(404, E.USER_NOT_FOUND)
+            previous_admin_id = existing.get("created_by_admin_id")
+            limit = existing.get("traffic_limit_bytes") or 0
+            used = existing.get("used_traffic_bytes") or 0
+            result = await conn.execute(
+                update_sql(USERS_TABLE, "created_by_admin_id = NULL", "uuid = $1"),
+                user_uuid,
+            )
+            if "UPDATE 0" in result:
+                raise api_error(404, E.USER_NOT_FOUND)
+        # Apply quota counter changes via shared helper
+        if previous_admin_id is not None:
+            from shared.rbac import increment_usage_counter
+            await increment_usage_counter(previous_admin_id, "users_created", -1)
+            unused = max(0, limit - used)
+            if unused > 0:
+                await increment_usage_counter(previous_admin_id, "traffic_used_bytes", -unused)
+        await write_audit_log(
+            admin_id=admin.account_id, admin_username=admin.username,
+            action="user.unassign_admin", resource="users", resource_id=user_uuid,
+            details=json.dumps({"cleared": True, "previous_admin_id": previous_admin_id}),
+            ip_address=get_client_ip(request),
+        )
+        return SuccessResponse(message="Admin unassigned")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("unassign_admin failed: %s", e)
+        raise api_error(500, E.INTERNAL_ERROR)
+
+
 @router.get("/{user_uuid}/fetch-ips/result/{job_id}")
 async def get_fetch_ips_result(
     user_uuid: str,
@@ -1396,6 +2156,7 @@ async def get_fetch_ips_result(
     admin: AdminUser = Depends(require_permission("users", "view")),
 ):
     """Получает результат сбора IP-адресов по jobId."""
+    await _ensure_user_visible(admin, user_uuid)
     from shared.api_client import api_client
 
     try:
@@ -1414,6 +2175,7 @@ async def drop_user_connections(
     admin: AdminUser = Depends(require_permission("users", "edit")),
 ):
     """Сбрасывает активные соединения пользователя."""
+    await _ensure_user_visible(admin, user_uuid)
     from shared.api_client import api_client
 
     body = await request.json()

@@ -1,12 +1,13 @@
 """Общие утилиты для всех обработчиков."""
 import asyncio
+from typing import Awaitable, Callable, Optional
 
 from aiogram.types import CallbackQuery, InlineKeyboardMarkup, Message
 from aiogram.utils.i18n import gettext as _
 
 from src.handlers.state import ADMIN_COMMAND_DELETE_DELAY, BACKGROUND_TASKS, LAST_BOT_MESSAGES, LAST_BOT_MESSAGES_LOCK
-from shared.api_client import ApiClientError, NotFoundError, UnauthorizedError
-from src.utils.auth import is_admin
+from shared.internal_api import ApiClientError, NotFoundError, UnauthorizedError
+from src.utils.auth import BotAdmin, resolve_admin
 from shared.logger import logger
 
 
@@ -72,31 +73,55 @@ async def _send_clean_message(
 
 
 async def _not_admin(message: Message | CallbackQuery) -> bool:
-    """Проверяет, является ли пользователь администратором. Удаляет команды автоматически."""
+    """Проверяет, является ли пользователь администратором с доступом к боту. Удаляет команды автоматически."""
     from src.handlers.state import PENDING_INPUT
     
     user_id = message.from_user.id if hasattr(message, "from_user") else None
-    if user_id is None or not is_admin(user_id):
+    if user_id is None:
+        return True
+
+    admin = await resolve_admin(user_id)
+    if admin is None:
         text = _("errors.unauthorized")
         if isinstance(message, CallbackQuery):
             await message.answer(text, show_alert=True)
         else:
             await _send_clean_message(message, text)
         return True
+
+    if not admin.is_superadmin and not admin.has_bot_access:
+        text = _("errors.no_bot_access_title") + "\n\n" + _("errors.no_bot_access")
+        if isinstance(message, CallbackQuery):
+            await message.answer(text, show_alert=True)
+        else:
+            await _send_clean_message(message, text)
+        return True
+
     if isinstance(message, Message):
         is_command = bool(getattr(message, "text", "") and message.text.startswith("/"))
-        # Если это ожидаемый ввод (пользователь в PENDING_INPUT), не удаляем сообщение сразу
-        # Оно будет удалено после обработки в соответствующем обработчике
         is_pending_input = user_id in PENDING_INPUT
         if is_command:
             delay = ADMIN_COMMAND_DELETE_DELAY
             track_task(_cleanup_message(message, delay=delay))
         elif not is_pending_input:
-            # Для обычных текстовых сообщений (не команды и не ожидаемый ввод) удаляем сразу
-            # НО: если это может быть ожидаемый ввод (например, после промпта поиска),
-            # не удаляем сразу, а дадим обработчику handle_pending решить
-            # Удаление произойдет в handle_pending, если это не ожидаемый ввод
-            pass  # Не удаляем здесь, пусть handle_pending решает
+            pass
+    return False
+
+
+async def require_permission(
+    target: Message | CallbackQuery,
+    admin: BotAdmin,
+    resource: str,
+    action: str,
+) -> bool:
+    """Check admin has permission. Returns True if allowed, False if denied (sends error)."""
+    if await admin.has_permission(resource, action):
+        return True
+    text = _("errors.permission_denied")
+    if isinstance(target, CallbackQuery):
+        await target.answer(text, show_alert=True)
+    else:
+        await _send_clean_message(target, text)
     return False
 
 
@@ -155,6 +180,21 @@ async def _edit_text_safe(
         await message.answer(text, reply_markup=reply_markup, parse_mode=parse_mode)
 
 
+async def _fetch_data(
+    fetch_fn: Callable[[], Awaitable[dict]],
+    logger_msg: str = "",
+) -> dict | str:
+    """Fetch data from API, returning response dict or error string on failure."""
+    try:
+        return await fetch_fn()
+    except UnauthorizedError:
+        return _("errors.unauthorized")
+    except ApiClientError:
+        if logger_msg:
+            logger.exception(logger_msg)
+        return _("errors.generic")
+
+
 def _get_error_message(exc: Exception, include_code: bool = True, include_hint: bool = True) -> str:
     """Возвращает понятное сообщение об ошибке на основе типа исключения.
     
@@ -166,7 +206,7 @@ def _get_error_message(exc: Exception, include_code: bool = True, include_hint: 
     Returns:
         Форматированное сообщение об ошибке
     """
-    from shared.api_client import (
+    from shared.internal_api import (
         ApiClientError,
         NetworkError,
         NotFoundError,

@@ -697,7 +697,7 @@ function ASNTable({ records, t }: { records: ASNRecord[]; t: (key: string, optio
           <table className="w-full">
             <thead className="border-b border-[var(--glass-border)]">
               <tr>
-                <th className="text-left text-xs font-medium text-dark-300 px-4 py-3">ASN</th>
+                <th className="text-left text-xs font-medium text-dark-300 px-4 py-3">{t('reports.asn.header')}</th>
                 <th className="text-left text-xs font-medium text-dark-300 px-4 py-3">{t('reports.asn.orgName')}</th>
                 <th className="text-left text-xs font-medium text-dark-300 px-4 py-3">{t('reports.asn.type')}</th>
                 <th className="text-left text-xs font-medium text-dark-300 px-4 py-3">{t('reports.asn.region')}</th>

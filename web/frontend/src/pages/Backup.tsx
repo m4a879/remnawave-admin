@@ -134,7 +134,7 @@ function BackupsTab() {
       queryClient.invalidateQueries({ queryKey: ['backup-files'] })
       queryClient.invalidateQueries({ queryKey: ['backup-disk-usage'] })
     },
-    onError: (err: any) => toast.error(err.response?.data?.detail || 'Upload failed', { duration: 8000 }),
+    onError: (err: any) => toast.error(err.response?.data?.detail || t('backup.toastUploadFailed'), { duration: 8000 }),
   })
 
   const rotateMutation = useMutation({
@@ -144,7 +144,7 @@ function BackupsTab() {
       queryClient.invalidateQueries({ queryKey: ['backup-files'] })
       queryClient.invalidateQueries({ queryKey: ['backup-disk-usage'] })
     },
-    onError: () => toast.error('Rotation failed'),
+    onError: () => toast.error(t('backup.toastRotationFailed')),
   })
 
   const telegramMutation = useMutation({
@@ -154,7 +154,7 @@ function BackupsTab() {
       toast.success(t('backup.sentToTelegram', { defaultValue: `Sent ${data.parts_sent} part(s) to Telegram` }))
       setTelegramDialog(null)
     },
-    onError: (err: any) => toast.error(err.response?.data?.detail || 'Send failed', { duration: 8000 }),
+    onError: (err: any) => toast.error(err.response?.data?.detail || t('backup.toastSendFailed'), { duration: 8000 }),
   })
 
   const handleUpload = () => {
@@ -237,7 +237,7 @@ function BackupsTab() {
             </div>
             <div>
               <p className="text-sm font-medium text-white">{t('backup.createDatabase')}</p>
-              <p className="text-xs text-dark-300">PostgreSQL dump</p>
+              <p className="text-xs text-dark-300">{t('backup.postgresqlDump')}</p>
             </div>
           </button>
 
@@ -463,7 +463,7 @@ function BackupsTab() {
           </DialogHeader>
           <div className="space-y-3">
             <div>
-              <label className="text-xs text-dark-200 mb-1 block">Chat ID <span className="text-dark-400">({t('backup.leaveEmptyDefault', { defaultValue: 'leave empty for default' })})</span></label>
+              <label className="text-xs text-dark-200 mb-1 block">{t('backup.chatId')} <span className="text-dark-400">({t('backup.leaveEmptyDefault', { defaultValue: 'leave empty for default' })})</span></label>
               <Input
                 placeholder="-100123456789"
                 value={telegramDialog?.chatId || ''}

@@ -233,61 +233,61 @@ function HostEditModal({
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="none">{t('hosts.security.none')}</SelectItem>
-                <SelectItem value="tls">TLS</SelectItem>
-                <SelectItem value="reality">Reality</SelectItem>
-                <SelectItem value="xtls">XTLS</SelectItem>
+                <SelectItem value="tls">{t('hosts.security.tls')}</SelectItem>
+                <SelectItem value="reality">{t('hosts.security.reality')}</SelectItem>
+                <SelectItem value="xtls">{t('hosts.security.xtls')}</SelectItem>
               </SelectContent>
             </Select>
           </div>
 
           <div className="space-y-2">
-            <Label>SNI</Label>
+            <Label>{t('hosts.form.sni')}</Label>
             <Input
               type="text"
               value={form.sni}
               onChange={(e) => setForm({ ...form, sni: e.target.value })}
-              placeholder="Server Name Indication"
+              placeholder={t('hosts.form.sniPlaceholder')}
             />
           </div>
 
           <div className="space-y-2">
-            <Label>Host</Label>
+            <Label>{t('hosts.form.host')}</Label>
             <Input
               type="text"
               value={form.host}
               onChange={(e) => setForm({ ...form, host: e.target.value })}
-              placeholder="Host header"
+              placeholder={t('hosts.form.hostPlaceholder')}
             />
           </div>
 
           <div className="space-y-2">
-            <Label>Path</Label>
+            <Label>{t('hosts.form.path')}</Label>
             <Input
               type="text"
               value={form.path}
               onChange={(e) => setForm({ ...form, path: e.target.value })}
               className="font-mono text-sm"
-              placeholder="/path"
+              placeholder={t('hosts.form.pathPlaceholder')}
             />
           </div>
 
           <div className="space-y-2">
-            <Label>ALPN</Label>
+            <Label>{t('hosts.form.alpn')}</Label>
             <Input
               type="text"
               value={form.alpn}
               onChange={(e) => setForm({ ...form, alpn: e.target.value })}
-              placeholder="h2,http/1.1"
+              placeholder={t('hosts.form.alpnPlaceholder')}
             />
           </div>
 
           <div className="space-y-2">
-            <Label>Fingerprint</Label>
+            <Label>{t('hosts.form.fingerprint')}</Label>
             <Input
               type="text"
               value={form.fingerprint}
               onChange={(e) => setForm({ ...form, fingerprint: e.target.value })}
-              placeholder="chrome, firefox, safari..."
+              placeholder={t('hosts.form.fingerprintPlaceholder')}
             />
           </div>
 
@@ -448,61 +448,61 @@ function HostCreateModal({
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="none">{t('hosts.security.none')}</SelectItem>
-                <SelectItem value="tls">TLS</SelectItem>
-                <SelectItem value="reality">Reality</SelectItem>
-                <SelectItem value="xtls">XTLS</SelectItem>
+                <SelectItem value="tls">{t('hosts.security.tls')}</SelectItem>
+                <SelectItem value="reality">{t('hosts.security.reality')}</SelectItem>
+                <SelectItem value="xtls">{t('hosts.security.xtls')}</SelectItem>
               </SelectContent>
             </Select>
           </div>
 
           <div className="space-y-2">
-            <Label>SNI</Label>
+            <Label>{t('hosts.form.sni')}</Label>
             <Input
               type="text"
               value={form.sni}
               onChange={(e) => setForm({ ...form, sni: e.target.value })}
-              placeholder="Server Name Indication"
+              placeholder={t('hosts.form.sniPlaceholder')}
             />
           </div>
 
           <div className="space-y-2">
-            <Label>Host</Label>
+            <Label>{t('hosts.form.host')}</Label>
             <Input
               type="text"
               value={form.host}
               onChange={(e) => setForm({ ...form, host: e.target.value })}
-              placeholder="Host header"
+              placeholder={t('hosts.form.hostPlaceholder')}
             />
           </div>
 
           <div className="space-y-2">
-            <Label>Path</Label>
+            <Label>{t('hosts.form.path')}</Label>
             <Input
               type="text"
               value={form.path}
               onChange={(e) => setForm({ ...form, path: e.target.value })}
               className="font-mono text-sm"
-              placeholder="/path"
+              placeholder={t('hosts.form.pathPlaceholder')}
             />
           </div>
 
           <div className="space-y-2">
-            <Label>ALPN</Label>
+            <Label>{t('hosts.form.alpn')}</Label>
             <Input
               type="text"
               value={form.alpn}
               onChange={(e) => setForm({ ...form, alpn: e.target.value })}
-              placeholder="h2,http/1.1"
+              placeholder={t('hosts.form.alpnPlaceholder')}
             />
           </div>
 
           <div className="space-y-2">
-            <Label>Fingerprint</Label>
+            <Label>{t('hosts.form.fingerprint')}</Label>
             <Input
               type="text"
               value={form.fingerprint}
               onChange={(e) => setForm({ ...form, fingerprint: e.target.value })}
-              placeholder="chrome, firefox, safari..."
+              placeholder={t('hosts.form.fingerprintPlaceholder')}
             />
           </div>
 
@@ -588,10 +588,10 @@ function HostCard({
     const sec = h.security_layer || h.security
     if (!sec) return '-'
     const labels: Record<string, string> = {
-      'tls': 'TLS',
-      'reality': 'Reality',
+      'tls': t('hosts.security.tls'),
+      'reality': t('hosts.security.reality'),
       'none': t('hosts.security.none'),
-      'xtls': 'XTLS',
+      'xtls': t('hosts.security.xtls'),
       'default': t('hosts.security.default'),
     }
     return labels[sec] || sec
@@ -707,12 +707,12 @@ function HostCard({
             </p>
           </div>
           <div className="bg-[var(--glass-bg)] rounded-lg p-2">
-            <span className="text-dark-200 text-xs">SNI</span>
+            <span className="text-dark-200 text-xs">{t('hosts.form.sni')}</span>
             <p className="font-medium text-white truncate">{host.sni || '-'}</p>
           </div>
           {host.inbound && (
             <div className="bg-[var(--glass-bg)] rounded-lg p-2">
-              <span className="text-dark-200 text-xs">Inbound</span>
+              <span className="text-dark-200 text-xs">{t('hosts.form.inbound')}</span>
               <p className="font-medium text-white truncate">{host.inbound.tag}</p>
               <p className="text-[10px] text-dark-300">{host.inbound.type}</p>
             </div>
@@ -725,25 +725,25 @@ function HostCard({
           )}
           {host.host && (
             <div className="bg-[var(--glass-bg)] rounded-lg p-2">
-              <span className="text-dark-200 text-xs">Host</span>
+              <span className="text-dark-200 text-xs">{t('hosts.form.host')}</span>
               <p className="font-medium text-white truncate">{host.host}</p>
             </div>
           )}
           {host.path && (
             <div className="bg-[var(--glass-bg)] rounded-lg p-2">
-              <span className="text-dark-200 text-xs">Path</span>
+              <span className="text-dark-200 text-xs">{t('hosts.form.path')}</span>
               <p className="font-medium text-white truncate font-mono text-xs">{host.path}</p>
             </div>
           )}
           {host.alpn && (
             <div className="bg-[var(--glass-bg)] rounded-lg p-2">
-              <span className="text-dark-200 text-xs">ALPN</span>
+              <span className="text-dark-200 text-xs">{t('hosts.form.alpn')}</span>
               <p className="font-medium text-white truncate">{host.alpn}</p>
             </div>
           )}
           {host.fingerprint && (
             <div className="bg-[var(--glass-bg)] rounded-lg p-2">
-              <span className="text-dark-200 text-xs">Fingerprint</span>
+              <span className="text-dark-200 text-xs">{t('hosts.form.fingerprint')}</span>
               <p className="font-medium text-white truncate">{host.fingerprint}</p>
             </div>
           )}
@@ -823,6 +823,7 @@ export default function Hosts() {
     mutationFn: (uuid: string) => client.delete(`/hosts/${uuid}`),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['hosts'] })
+      queryClient.invalidateQueries({ queryKey: ['admins'] })
       toast.success(t('hosts.toast.deleted'))
     },
     onError: (err: Error & { response?: { data?: { detail?: string } } }) => {
@@ -849,6 +850,7 @@ export default function Hosts() {
     mutationFn: (data: Record<string, unknown>) => client.post('/hosts', data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['hosts'] })
+      queryClient.invalidateQueries({ queryKey: ['admins'] })
       setShowCreateModal(false)
       setCreateError('')
       toast.success(t('hosts.toast.created'))

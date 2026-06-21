@@ -1,6 +1,7 @@
 // @ts-nocheck
 import { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import { toast } from 'sonner';
+import i18next from 'i18next';
 import { getSharedProtoWorker } from '../utils/proto-worker';
 import { binaryCache, loadCachedData, saveCachedData, getDefaultGeoList } from '../utils/geo-data';
 
@@ -128,7 +129,7 @@ export const useGeoViewer = () => {
                     setDeepSearchLoading(false);
                     worker.removeEventListener('message', handleMessage);
                 } else if (e.data.error) {
-                    toast.error("Deep search error", { description: e.data.error });
+                    toast.error(i18next.t('xray.deepSearchError'), { description: e.data.error });
                     setDeepSearchLoading(false);
                     worker.removeEventListener('message', handleMessage);
                 }
@@ -173,11 +174,11 @@ export const useGeoViewer = () => {
 
                 const worker = getSharedProtoWorker();
                 const handleMessage = (evt: MessageEvent) => {
-                    if (evt.data.error) toast.error("Failed to parse DAT", { description: evt.data.error });
+                    if (evt.data.error) toast.error(i18next.t('xray.failedParseDat'), { description: evt.data.error });
                     else if (evt.data.type === 'success') {
                         setCustomData(evt.data.data);
                         setViewTag(null);
-                        toast.success(`Loaded ${evt.data.data.length} categories from local file`);
+                        toast.success(i18next.t('xray.loadedCategoriesFromFile', { count: evt.data.data.length }));
                     }
                     setCustomLoading(false);
                     worker.removeEventListener('message', handleMessage);
@@ -187,17 +188,17 @@ export const useGeoViewer = () => {
                 worker.postMessage({ type: 'custom', fileBuffer: buffer, dataType: customFormat });
             }
         } catch (err: any) {
-            toast.error("File read error", { description: err.message });
+            toast.error(i18next.t('xray.fileReadError'), { description: err.message });
             setCustomLoading(false);
         }
         e.target.value = '';
     };
 
     const fetchCustomList = async () => {
-        if (!customUrl || customUrl.includes('.')) { 
-            if (customFileBuffer) return toast.info("Local file already loaded");
+        if (!customUrl || customUrl.includes('.')) {
+            if (customFileBuffer) return toast.info(i18next.t('xray.localFileAlreadyLoaded'));
         }
-        if (!customUrl.startsWith('http')) return toast.error("Please enter a valid URL");
+        if (!customUrl.startsWith('http')) return toast.error(i18next.t('xray.invalidUrl'));
         
         setCustomLoading(true);
         setCustomFileBuffer(null);
@@ -239,7 +240,7 @@ export const useGeoViewer = () => {
 
                 const worker = getSharedProtoWorker();
                 const handleMessage = async (e: MessageEvent) => {
-                    if (e.data.error) toast.error("Failed to parse DAT", { description: e.data.error });
+                    if (e.data.error) toast.error(i18next.t('xray.failedParseDat'), { description: e.data.error });
                     else if (e.data.type === 'success') {
                         await saveCachedData(customUrl, e.data.data, e.data.meta || { timestamp: Date.now() });
                         setCustomData(e.data.data);
@@ -254,7 +255,7 @@ export const useGeoViewer = () => {
                 worker.postMessage({ type: 'custom', fileBuffer: buffer, dataType: customFormat });
             }
         } catch (err: any) {
-            toast.error("Failed to fetch list", { description: err.message });
+            toast.error(i18next.t('xray.failedFetchList'), { description: err.message });
             setCustomLoading(false);
         }
     };

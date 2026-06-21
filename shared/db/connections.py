@@ -10,6 +10,8 @@ from typing import Any, Dict, List, Optional
 import asyncpg
 
 from shared.logger import logger
+from shared.db_schema import USER_CONNECTIONS_TABLE, VIOLATIONS_TABLE, USERS_TABLE
+from shared.db_query import select_sql, insert_sql, update_sql, delete_sql
 
 
 class ConnectionsMixin:
@@ -37,14 +39,11 @@ class ConnectionsMixin:
                 # Проверяем, есть ли уже активное подключение с этим IP для этого пользователя
                 # Включаем connected_at в SELECT чтобы избежать лишнего round-trip
                 existing = await conn.fetchrow(
-                    """
-                    SELECT id, connected_at FROM user_connections
-                    WHERE user_uuid = $1
-                    AND ip_address = $2
-                    AND disconnected_at IS NULL
-                    ORDER BY connected_at DESC
-                    LIMIT 1
-                    """,
+                    select_sql(
+                        USER_CONNECTIONS_TABLE,
+                        "id, connected_at",
+                        "WHERE user_uuid = $1 AND ip_address = $2 AND disconnected_at IS NULL ORDER BY connected_at DESC LIMIT 1",
+                    ),
                     user_uuid, ip_address
                 )
 
@@ -81,11 +80,11 @@ class ConnectionsMixin:
                         update_time = datetime.utcnow()
 
                     await conn.execute(
-                        """
-                        UPDATE user_connections
-                        SET connected_at = $1, node_uuid = COALESCE($2, node_uuid)
-                        WHERE id = $3
-                        """,
+                        update_sql(
+                            USER_CONNECTIONS_TABLE,
+                            "connected_at = $1, node_uuid = COALESCE($2, node_uuid)",
+                            "id = $3",
+                        ),
                         update_time, node_uuid, conn_id
                     )
                     result_id = conn_id
@@ -93,11 +92,11 @@ class ConnectionsMixin:
                     # Создаём новую запись
                     insert_time = connected_at if connected_at else datetime.utcnow()
                     result_id = await conn.fetchval(
-                        """
-                        INSERT INTO user_connections (user_uuid, ip_address, node_uuid, device_info, connected_at)
-                        VALUES ($1, $2, $3, $4, $5)
-                        RETURNING id
-                        """,
+                        insert_sql(
+                            USER_CONNECTIONS_TABLE,
+                            ["user_uuid", "ip_address", "node_uuid", "device_info", "connected_at"],
+                            returning="id",
+                        ),
                         user_uuid, ip_address, node_uuid,
                         json.dumps(device_info) if device_info else None,
                         insert_time
@@ -105,14 +104,11 @@ class ConnectionsMixin:
 
                 # Закрываем старые подключения с другими IP (общее для обоих веток)
                 await conn.execute(
-                    """
-                    UPDATE user_connections
-                    SET disconnected_at = NOW()
-                    WHERE user_uuid = $1
-                    AND ip_address != $2
-                    AND disconnected_at IS NULL
-                    AND connected_at < NOW() - INTERVAL '2 minutes'
-                    """,
+                    update_sql(
+                        USER_CONNECTIONS_TABLE,
+                        "disconnected_at = NOW()",
+                        "user_uuid = $1 AND ip_address != $2 AND disconnected_at IS NULL AND connected_at < NOW() - INTERVAL '2 minutes'",
+                    ),
                     user_uuid, ip_address
                 )
 
@@ -195,7 +191,7 @@ class ConnectionsMixin:
                 # work. Instead: UPDATE existing rows first, then INSERT truly new.
                 update_result = await conn.execute(
                     f"""
-                    UPDATE user_connections uc
+                    UPDATE {USER_CONNECTIONS_TABLE} uc
                     SET connected_at = GREATEST(uc.connected_at, batch.ca),
                         node_uuid = COALESCE(batch.n, uc.node_uuid),
                         device_info = COALESCE(batch.d, uc.device_info)
@@ -216,12 +212,12 @@ class ConnectionsMixin:
                 # 1b. Insert truly new connections (no existing active row for user+ip)
                 insert_result = await conn.execute(
                     f"""
-                    INSERT INTO user_connections (user_uuid, ip_address, node_uuid, device_info, connected_at)
+                    INSERT INTO {USER_CONNECTIONS_TABLE} (user_uuid, ip_address, node_uuid, device_info, connected_at)
                     SELECT u::uuid, u_ip{ip_cast}, n::uuid, d::jsonb, COALESCE(t, NOW())
                     FROM UNNEST($1::text[], $2::text[], $3::text[], $4::text[], $5::timestamptz[])
                         AS t(u, u_ip, n, d, t)
                     WHERE NOT EXISTS (
-                        SELECT 1 FROM user_connections uc
+                        SELECT 1 FROM {USER_CONNECTIONS_TABLE} uc
                         WHERE uc.user_uuid = u::uuid
                           AND uc.ip_address::text = u_ip::text
                           AND uc.disconnected_at IS NULL
@@ -236,7 +232,7 @@ class ConnectionsMixin:
                 # Cast ip_address to text for comparison (works with both INET and VARCHAR)
                 close_result = await conn.execute(
                     f"""
-                    UPDATE user_connections uc
+                    UPDATE {USER_CONNECTIONS_TABLE} uc
                     SET disconnected_at = NOW()
                     FROM (
                         SELECT DISTINCT u::uuid AS uid, i{ip_cast} AS ip
@@ -273,14 +269,11 @@ class ConnectionsMixin:
         
         async with self.acquire() as conn:
             rows = await conn.fetch(
-                """
-                SELECT * FROM user_connections 
-                WHERE user_uuid = $1 
-                AND disconnected_at IS NULL
-                AND connected_at > NOW() - make_interval(mins => $2)
-                ORDER BY connected_at DESC
-                LIMIT $3
-                """,
+                select_sql(
+                    USER_CONNECTIONS_TABLE,
+                    "*",
+                    "WHERE user_uuid = $1 AND disconnected_at IS NULL AND connected_at > NOW() - make_interval(mins => $2) ORDER BY connected_at DESC LIMIT $3",
+                ),
                 user_uuid, int(max_age_minutes), limit
             )
             return [dict(row) for row in rows]
@@ -296,11 +289,11 @@ class ConnectionsMixin:
         
         async with self.acquire() as conn:
             result = await conn.fetchval(
-                """
-                SELECT COUNT(DISTINCT ip_address) FROM user_connections
-                WHERE user_uuid = $1
-                AND connected_at > NOW() - make_interval(hours => $2)
-                """,
+                select_sql(
+                    USER_CONNECTIONS_TABLE,
+                    "COUNT(DISTINCT ip_address)",
+                    "WHERE user_uuid = $1 AND connected_at > NOW() - make_interval(hours => $2)",
+                ),
                 user_uuid, int(since_hours)
             )
             return result or 0
@@ -325,11 +318,11 @@ class ConnectionsMixin:
         
         async with self.acquire() as conn:
             result = await conn.fetchval(
-                """
-                SELECT COUNT(DISTINCT ip_address) FROM user_connections
-                WHERE user_uuid = $1
-                AND connected_at > NOW() - make_interval(mins => $2)
-                """,
+                select_sql(
+                    USER_CONNECTIONS_TABLE,
+                    "COUNT(DISTINCT ip_address)",
+                    "WHERE user_uuid = $1 AND connected_at > NOW() - make_interval(mins => $2)",
+                ),
                 user_uuid, int(window_minutes)
             )
             return result or 0
@@ -352,12 +345,11 @@ class ConnectionsMixin:
         
         async with self.acquire() as conn:
             result = await conn.fetchval(
-                """
-                SELECT COUNT(*) FROM user_connections
-                WHERE user_uuid = $1
-                AND disconnected_at IS NULL
-                AND connected_at > NOW() - INTERVAL '10 minutes'
-                """,
+                select_sql(
+                    USER_CONNECTIONS_TABLE,
+                    "COUNT(*)",
+                    "WHERE user_uuid = $1 AND disconnected_at IS NULL AND connected_at > NOW() - INTERVAL '10 minutes'",
+                ),
                 user_uuid
             )
             return result or 0
@@ -374,25 +366,25 @@ class ConnectionsMixin:
 
         async with self.acquire() as conn:
             row = await conn.fetchrow(
-                """
+                f"""
                 SELECT
-                    (SELECT COUNT(*) FROM user_connections
+                    (SELECT COUNT(*) FROM {USER_CONNECTIONS_TABLE}
                      WHERE user_uuid = $1 AND disconnected_at IS NULL
                        AND connected_at > NOW() - make_interval(mins => $3)
                     ) AS active_count,
-                    (SELECT COUNT(DISTINCT ip_address) FROM user_connections
+                    (SELECT COUNT(DISTINCT ip_address) FROM {USER_CONNECTIONS_TABLE}
                      WHERE user_uuid = $1
                        AND connected_at > NOW() - make_interval(mins => $2)
                     ) AS unique_ips,
-                    (SELECT COUNT(*) FROM user_connections
+                    (SELECT COUNT(*) FROM {USER_CONNECTIONS_TABLE}
                      WHERE user_uuid = $1 AND disconnected_at IS NULL
                        AND connected_at > NOW() - INTERVAL '10 minutes'
                     ) AS simultaneous,
-                    (SELECT COUNT(*) FROM user_connections
+                    (SELECT COUNT(*) FROM {USER_CONNECTIONS_TABLE}
                      WHERE user_uuid = $1
                        AND connected_at > NOW() - INTERVAL '1 day'
                     ) AS history_24h_count,
-                    (SELECT MAX(connected_at) FROM user_connections
+                    (SELECT MAX(connected_at) FROM {USER_CONNECTIONS_TABLE}
                      WHERE user_uuid = $1 AND disconnected_at IS NULL
                        AND connected_at > NOW() - make_interval(mins => $3)
                     ) AS last_connection_at
@@ -425,21 +417,19 @@ class ConnectionsMixin:
         
         async with self.acquire() as conn:
             rows = await conn.fetch(
-                """
-                SELECT 
-                    id,
-                    user_uuid,
-                    ip_address,
-                    node_uuid,
-                    connected_at,
-                    disconnected_at,
-                    device_info
-                FROM user_connections
-                WHERE user_uuid = $1 
-                AND connected_at > NOW() - make_interval(days => $2)
-                ORDER BY connected_at DESC
-                LIMIT $3
-                """,
+                select_sql(
+                    USER_CONNECTIONS_TABLE,
+                    """
+                        id,
+                        user_uuid,
+                        ip_address,
+                        node_uuid,
+                        connected_at,
+                        disconnected_at,
+                        device_info
+                    """,
+                    "WHERE user_uuid = $1 AND connected_at > NOW() - make_interval(days => $2) ORDER BY connected_at DESC LIMIT $3",
+                ),
                 user_uuid,
                 int(days),
                 limit
@@ -473,10 +463,11 @@ class ConnectionsMixin:
 
         async with self.acquire() as conn:
             result = await conn.execute(
-                """
-                UPDATE user_connections SET disconnected_at = NOW()
-                WHERE id = $1 AND disconnected_at IS NULL
-                """,
+                update_sql(
+                    USER_CONNECTIONS_TABLE,
+                    "disconnected_at = NOW()",
+                    "id = $1 AND disconnected_at IS NULL",
+                ),
                 connection_id
             )
             return result == "UPDATE 1"
@@ -488,10 +479,11 @@ class ConnectionsMixin:
 
         async with self.acquire() as conn:
             result = await conn.execute(
-                """
-                UPDATE user_connections SET disconnected_at = NOW()
-                WHERE id = ANY($1) AND disconnected_at IS NULL
-                """,
+                update_sql(
+                    USER_CONNECTIONS_TABLE,
+                    "disconnected_at = NOW()",
+                    "id = ANY($1) AND disconnected_at IS NULL",
+                ),
                 connection_ids
             )
             return int(result.split()[-1]) if result else 0
@@ -530,7 +522,7 @@ class ConnectionsMixin:
                                 upper = datetime.fromisoformat(to_str).replace(tzinfo=timezone.utc)
                                 if upper <= cutoff:
                                     await conn.execute(
-                                        f"ALTER TABLE user_connections DETACH PARTITION {name}"
+                                        f"ALTER TABLE {USER_CONNECTIONS_TABLE} DETACH PARTITION {name}"
                                     )
                                     await conn.execute(f"DROP TABLE {name}")
                                     logger.info("Dropped partition %s", name)
@@ -545,10 +537,10 @@ class ConnectionsMixin:
             for _ in range(max_batches):
                 async with self.acquire() as conn:
                     result = await conn.execute(
-                        """
-                        DELETE FROM user_connections
+                        f"""
+                        DELETE FROM {USER_CONNECTIONS_TABLE}
                         WHERE id IN (
-                            SELECT id FROM user_connections
+                            SELECT id FROM {USER_CONNECTIONS_TABLE}
                             WHERE disconnected_at IS NOT NULL
                               AND connected_at < NOW() - make_interval(days => $1)
                             ORDER BY connected_at
@@ -583,7 +575,7 @@ class ConnectionsMixin:
 
                 # One-time fix: strip CIDR suffixes from ip_address after INET→VARCHAR migration
                 fixed = await conn.execute(
-                    "UPDATE user_connections SET ip_address = split_part(ip_address, '/', 1) WHERE ip_address LIKE '%/%'"
+                    update_sql(USER_CONNECTIONS_TABLE, "ip_address = split_part(ip_address, '/', 1)", "ip_address LIKE '%/%'")
                 )
                 fixed_count = int(fixed.split()[-1]) if fixed else 0
                 if fixed_count > 0:
@@ -610,7 +602,7 @@ class ConnectionsMixin:
                     if not exists:
                         await conn.execute(f"""
                             CREATE TABLE {part_name}
-                            PARTITION OF user_connections
+                            PARTITION OF {USER_CONNECTIONS_TABLE}
                             FOR VALUES FROM ('{from_date}') TO ('{to_date}')
                         """)
                         created += 1
@@ -713,12 +705,11 @@ class ConnectionsMixin:
         try:
             async with self.acquire() as conn:
                 return await conn.fetchval(
-                    """
-                    SELECT id FROM violations
-                    WHERE user_uuid = $1
-                      AND detected_at > NOW() - make_interval(mins => $2)
-                      AND 'Torrent traffic detected' = ANY(reasons)
-                    """,
+                    select_sql(
+                        VIOLATIONS_TABLE,
+                        "id",
+                        "WHERE user_uuid = $1 AND detected_at > NOW() - make_interval(mins => $2) AND 'Torrent traffic detected' = ANY(reasons)",
+                    ),
                     user_uuid, minutes,
                 )
         except Exception as e:
@@ -744,10 +735,10 @@ class ConnectionsMixin:
                     days,
                 )
                 top_users = await conn.fetch(
-                    """
+                    f"""
                     SELECT te.user_uuid::text, u.username, COUNT(*) as event_count
                     FROM torrent_events te
-                    LEFT JOIN users u ON u.uuid = te.user_uuid
+                    LEFT JOIN {USERS_TABLE} u ON u.uuid = te.user_uuid
                     WHERE te.detected_at > NOW() - make_interval(days => $1)
                     GROUP BY te.user_uuid, u.username
                     ORDER BY event_count DESC

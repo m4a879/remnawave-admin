@@ -16,7 +16,8 @@ from src.keyboards.filters import (
     users_filter_keyboard,
 )
 from src.keyboards.navigation import NavTarget
-from shared.api_client import ApiClientError, api_client
+from src.utils.auth import BotAdmin
+from shared.internal_api import ApiClientError, internal_api_client
 from shared.logger import logger
 
 router = Router(name="filters")
@@ -27,7 +28,7 @@ router = Router(name="filters")
 # ========================
 
 @router.callback_query(F.data == "filter:users:show")
-async def cb_filter_users_show(callback: CallbackQuery) -> None:
+async def cb_filter_users_show(callback: CallbackQuery, admin: BotAdmin) -> None:
     """Показать меню фильтров пользователей."""
     if await _not_admin(callback):
         return
@@ -48,7 +49,7 @@ async def cb_filter_users_show(callback: CallbackQuery) -> None:
 
 
 @router.callback_query(F.data.startswith("filter:users:"))
-async def cb_filter_users_apply(callback: CallbackQuery) -> None:
+async def cb_filter_users_apply(callback: CallbackQuery, admin: BotAdmin) -> None:
     """Применить фильтр пользователей."""
     if await _not_admin(callback):
         return
@@ -88,7 +89,7 @@ async def cb_filter_users_apply(callback: CallbackQuery) -> None:
 # ========================
 
 @router.callback_query(F.data == "filter:nodes:show")
-async def cb_filter_nodes_show(callback: CallbackQuery) -> None:
+async def cb_filter_nodes_show(callback: CallbackQuery, admin: BotAdmin) -> None:
     """Показать меню фильтров нод."""
     if await _not_admin(callback):
         return
@@ -114,7 +115,7 @@ async def cb_filter_nodes_show(callback: CallbackQuery) -> None:
 
 
 @router.callback_query(F.data.startswith("filter:nodes:status:"))
-async def cb_filter_nodes_status(callback: CallbackQuery) -> None:
+async def cb_filter_nodes_status(callback: CallbackQuery, admin: BotAdmin) -> None:
     """Применить фильтр нод по статусу."""
     if await _not_admin(callback):
         return
@@ -144,7 +145,7 @@ async def cb_filter_nodes_status(callback: CallbackQuery) -> None:
 
 
 @router.callback_query(F.data == "filter:nodes:tag:select")
-async def cb_filter_nodes_tag_select(callback: CallbackQuery) -> None:
+async def cb_filter_nodes_tag_select(callback: CallbackQuery, admin: BotAdmin) -> None:
     """Показать список тегов для фильтрации нод."""
     if await _not_admin(callback):
         return
@@ -156,7 +157,7 @@ async def cb_filter_nodes_tag_select(callback: CallbackQuery) -> None:
     
     try:
         # Получаем все ноды для сбора тегов
-        data = await api_client.get_nodes()
+        data = await internal_api_client.get_nodes()
         nodes = data.get("response", [])
         
         # Собираем все теги
@@ -178,7 +179,7 @@ async def cb_filter_nodes_tag_select(callback: CallbackQuery) -> None:
 
 
 @router.callback_query(F.data.startswith("filter:nodes:tag:"))
-async def cb_filter_nodes_tag_apply(callback: CallbackQuery) -> None:
+async def cb_filter_nodes_tag_apply(callback: CallbackQuery, admin: BotAdmin) -> None:
     """Применить фильтр нод по тегу."""
     if await _not_admin(callback):
         return
@@ -212,7 +213,7 @@ async def cb_filter_nodes_tag_apply(callback: CallbackQuery) -> None:
 
 
 @router.callback_query(F.data == "filter:nodes:clear")
-async def cb_filter_nodes_clear(callback: CallbackQuery) -> None:
+async def cb_filter_nodes_clear(callback: CallbackQuery, admin: BotAdmin) -> None:
     """Сбросить фильтр нод."""
     if await _not_admin(callback):
         return
@@ -240,7 +241,7 @@ async def cb_filter_nodes_clear(callback: CallbackQuery) -> None:
 # ========================
 
 @router.callback_query(F.data == "filter:hosts:show")
-async def cb_filter_hosts_show(callback: CallbackQuery) -> None:
+async def cb_filter_hosts_show(callback: CallbackQuery, admin: BotAdmin) -> None:
     """Показать меню фильтров хостов."""
     if await _not_admin(callback):
         return
@@ -261,7 +262,7 @@ async def cb_filter_hosts_show(callback: CallbackQuery) -> None:
 
 
 @router.callback_query(F.data.startswith("filter:hosts:"))
-async def cb_filter_hosts_apply(callback: CallbackQuery) -> None:
+async def cb_filter_hosts_apply(callback: CallbackQuery, admin: BotAdmin) -> None:
     """Применить фильтр хостов."""
     if await _not_admin(callback):
         return
@@ -293,5 +294,5 @@ async def cb_filter_hosts_apply(callback: CallbackQuery) -> None:
     
     # Переходим к списку хостов
     from src.handlers.hosts import _fetch_hosts_with_keyboard
-    text, keyboard = await _fetch_hosts_with_keyboard(user_id=user_id, page=0)
+    text, keyboard = await _fetch_hosts_with_keyboard(user_id=user_id, page=0, admin=admin)
     await _send_clean_message(callback, text, reply_markup=keyboard)

@@ -11,9 +11,13 @@ from fastapi import APIRouter, Depends, Query, HTTPException, Request
 # Add src to path for importing bot services
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent.parent))
 
+from shared.db_schema import NODES_TABLE
+from shared.db_query import select_sql, update_sql
+
 from web.backend.api.deps import get_current_admin, AdminUser, require_permission, require_quota, get_client_ip
 from web.backend.core.errors import api_error, E
-from web.backend.core.rbac import write_audit_log, get_scope, check_access, resolve_allowed_actions_map
+from web.backend.core.audit import write_audit_log
+from web.backend.core.rbac import get_scope, check_access, resolve_allowed_actions_map
 from web.backend.core.api_helper import (
     fetch_nodes_from_api, fetch_nodes_realtime_usage,
     fetch_nodes_usage_by_range, _normalize,
@@ -391,6 +395,11 @@ async def delete_node(
         except Exception as e:
             logger.debug("Non-critical: %s", e)
 
+        # Increment the admin's quota counter (lifetime events: +1 per delete)
+        if admin.account_id is not None:
+            from web.backend.core.rbac import increment_usage_counter
+            await increment_usage_counter(admin.account_id, "nodes_created", 1)
+
         await write_audit_log(
             admin_id=admin.account_id,
             admin_username=admin.username,
@@ -646,14 +655,14 @@ async def bulk_generate_tokens(
     if not uuids:
         async with db_service.acquire() as conn:
             rows = await conn.fetch(
-                "SELECT uuid::text, name FROM nodes WHERE agent_token IS NULL ORDER BY name"
+                select_sql(NODES_TABLE, "uuid::text, name", "WHERE agent_token IS NULL ORDER BY name")
             )
             uuids = [r["uuid"] for r in rows]
             name_map = {r["uuid"]: r["name"] for r in rows}
     else:
         async with db_service.acquire() as conn:
             rows = await conn.fetch(
-                "SELECT uuid::text, name FROM nodes WHERE uuid = ANY($1::uuid[])", uuids
+                select_sql(NODES_TABLE, "uuid::text, name", "WHERE uuid = ANY($1::uuid[])"), uuids
             )
             name_map = {r["uuid"]: r["name"] for r in rows}
 
@@ -722,12 +731,12 @@ async def bulk_install_commands(
     async with db_service.acquire() as conn:
         if uuids:
             rows = await conn.fetch(
-                "SELECT uuid::text, name, agent_token FROM nodes WHERE uuid = ANY($1::uuid[]) ORDER BY name",
+                select_sql(NODES_TABLE, "uuid::text, name, agent_token", "WHERE uuid = ANY($1::uuid[]) ORDER BY name"),
                 uuids,
             )
         else:
             rows = await conn.fetch(
-                "SELECT uuid::text, name, agent_token FROM nodes ORDER BY name"
+                select_sql(NODES_TABLE, "uuid::text, name, agent_token", "ORDER BY name")
             )
 
     if not rows:
@@ -820,7 +829,7 @@ async def bulk_revoke_tokens(
     if not uuids:
         async with db_service.acquire() as conn:
             rows = await conn.fetch(
-                "SELECT uuid::text FROM nodes WHERE agent_token IS NOT NULL"
+                select_sql(NODES_TABLE, "uuid::text", "WHERE agent_token IS NOT NULL")
             )
             uuids = [r["uuid"] for r in rows]
 
@@ -832,7 +841,7 @@ async def bulk_revoke_tokens(
         for node_uuid in uuids:
             try:
                 await conn.execute(
-                    "UPDATE nodes SET agent_token = NULL WHERE uuid = $1",
+                    update_sql(NODES_TABLE, "agent_token = NULL", "uuid = $1"),
                     node_uuid,
                 )
                 success += 1
