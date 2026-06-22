@@ -81,6 +81,10 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { cn } from '@/lib/utils'
 import { ConfirmDialog } from '@/components/ConfirmDialog'
 import Billing from './Billing'
+import { ViewToggle } from '@/components/ViewToggle'
+import { useViewMode } from '@/lib/useViewMode'
+import { NodesTable } from '@/components/nodes/NodesTable'
+import { NodeCompactCard } from '@/components/nodes/NodeCompactCard'
 
 // Types
 interface Node {
@@ -1316,6 +1320,7 @@ export default function Nodes() {
   const [confirmAction, setConfirmAction] = useState<{ type: string; uuid: string } | null>(null)
   const { schedule: scheduleAction } = useDeferredAction()
   const [sortState, setSortStateRaw] = useState<SortState>(() => loadSortState())
+  const [viewMode, setViewMode] = useViewMode('nodes')
 
   const setSortState = (next: SortState | ((prev: SortState) => SortState)) => {
     setSortStateRaw((prev) => {
@@ -1539,90 +1544,132 @@ export default function Nodes() {
         </Card>
       </div>
 
-      {/* Sort controls */}
-      {!isLoading && sortedNodes.length > 0 && (
+      {/* Toolbar: sort + view toggle */}
+      {!isLoading && nodes.length > 0 && (
         <div className="flex items-center gap-2 flex-wrap">
-          <div className="flex items-center gap-1.5 text-xs text-dark-200">
-            <ArrowUpDown className="w-3.5 h-3.5" />
-            <span>{t('nodes.sort.label', { defaultValue: 'Сортировка' })}</span>
-          </div>
-          <Select
-            value={sortState.preset}
-            onValueChange={(v) =>
-              setSortState((prev) => {
-                const next = v as SortPreset
-                // When user picks "custom" without dragging yet — seed customOrder from current visible order
-                if (next === 'custom' && prev.customOrder.length === 0) {
-                  return { preset: 'custom', customOrder: sortedIds }
+          {viewMode !== 'table' && (
+            <>
+              <div className="flex items-center gap-1.5 text-xs text-dark-200">
+                <ArrowUpDown className="w-3.5 h-3.5" />
+                <span>{t('nodes.sort.label', { defaultValue: 'Сортировка' })}</span>
+              </div>
+              <Select
+                value={sortState.preset}
+                onValueChange={(v) =>
+                  setSortState((prev) => {
+                    const next = v as SortPreset
+                    // When user picks "custom" without dragging yet — seed customOrder from current visible order
+                    if (next === 'custom' && prev.customOrder.length === 0) {
+                      return { preset: 'custom', customOrder: sortedIds }
+                    }
+                    return { ...prev, preset: next }
+                  })
                 }
-                return { ...prev, preset: next }
-              })
-            }
-          >
-            <SelectTrigger className="h-8 w-[240px] text-xs">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {SORT_PRESETS.map((p) => (
-                <SelectItem key={p} value={p} className="text-xs">
-                  {t(`nodes.sort.preset.${p}`)}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          {sortState.preset === 'custom' && (
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-8 px-2 text-xs text-dark-200 hover:text-white"
-              onClick={resetCustomOrder}
-              title={t('nodes.sort.resetCustom', { defaultValue: 'Сбросить порядок' })}
-            >
-              <RotateCcw className="w-3.5 h-3.5 mr-1.5" />
-              {t('nodes.sort.resetCustom', { defaultValue: 'Сбросить порядок' })}
-            </Button>
+              >
+                <SelectTrigger className="h-8 w-[240px] text-xs">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {SORT_PRESETS.map((p) => (
+                    <SelectItem key={p} value={p} className="text-xs">
+                      {t(`nodes.sort.preset.${p}`)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {sortState.preset === 'custom' && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-8 px-2 text-xs text-dark-200 hover:text-white"
+                  onClick={resetCustomOrder}
+                  title={t('nodes.sort.resetCustom', { defaultValue: 'Сбросить порядок' })}
+                >
+                  <RotateCcw className="w-3.5 h-3.5 mr-1.5" />
+                  {t('nodes.sort.resetCustom', { defaultValue: 'Сбросить порядок' })}
+                </Button>
+              )}
+            </>
           )}
+          <ViewToggle mode={viewMode} onChange={setViewMode} className="ml-auto" />
         </div>
       )}
 
-      {/* Nodes grid */}
-      <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
-        <SortableContext items={sortedIds} strategy={rectSortingStrategy}>
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            {isLoading ? (
-              // Loading skeletons
-              Array.from({ length: 4 }).map((_, i) => <NodeSkeleton key={i} />)
-            ) : sortedNodes.length === 0 ? (
-              <div className="col-span-full">
-                <Card className="text-center py-12">
-                  <CardContent>
-                    <WifiOff className="w-12 h-12 text-dark-300 mx-auto mb-3" />
-                    <p className="text-dark-200">{t('nodes.status.noNodes')}</p>
-                  </CardContent>
-                </Card>
-              </div>
-            ) : (
-              sortedNodes.map((node, i) => (
-                <div key={node.uuid} className="animate-fade-in-up" style={{ animationDelay: `${0.05 + i * 0.04}s` }}>
-                  <SortableNodeCard
-                    node={node}
-                    enabled
-                    onRestart={() => restartNode.mutate(node.uuid)}
-                    onEdit={() => { setEditingNode(node); setEditError('') }}
-                    onEnable={() => enableNode.mutate(node.uuid)}
-                    onDisable={() => setConfirmAction({ type: 'disable', uuid: node.uuid })}
-                    onDelete={() => setConfirmAction({ type: 'delete', uuid: node.uuid })}
-                    onTokenManage={() => setTokenNode(node)}
-                    onFetchIps={() => setIpsNode(node)}
-                    canEdit={canEdit}
-                    canDelete={canDelete}
-                  />
+      {/* Nodes list */}
+      {!isLoading && viewMode === 'table' && nodes.length > 0 ? (
+        <NodesTable
+          nodes={sortedNodes}
+          canEdit={canEdit}
+          canDelete={canDelete}
+          onRestart={(n) => restartNode.mutate(n.uuid)}
+          onEdit={(n) => { setEditingNode(nodes.find((x) => x.uuid === n.uuid) ?? null); setEditError('') }}
+          onEnable={(n) => enableNode.mutate(n.uuid)}
+          onDisable={(n) => setConfirmAction({ type: 'disable', uuid: n.uuid })}
+          onDelete={(n) => setConfirmAction({ type: 'delete', uuid: n.uuid })}
+          onTokenManage={(n) => setTokenNode(nodes.find((x) => x.uuid === n.uuid) ?? null)}
+          onFetchIps={(n) => setIpsNode(nodes.find((x) => x.uuid === n.uuid) ?? null)}
+        />
+      ) : (
+        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+          <SortableContext items={sortedIds} strategy={rectSortingStrategy}>
+            <div
+              className={cn(
+                'grid gap-4',
+                viewMode === 'compact'
+                  ? 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4'
+                  : 'grid-cols-1 lg:grid-cols-2',
+              )}
+            >
+              {isLoading ? (
+                // Loading skeletons
+                Array.from({ length: 4 }).map((_, i) => <NodeSkeleton key={i} />)
+              ) : sortedNodes.length === 0 ? (
+                <div className="col-span-full">
+                  <Card className="text-center py-12">
+                    <CardContent>
+                      <WifiOff className="w-12 h-12 text-dark-300 mx-auto mb-3" />
+                      <p className="text-dark-200">{t('nodes.status.noNodes')}</p>
+                    </CardContent>
+                  </Card>
                 </div>
-              ))
-            )}
-          </div>
-        </SortableContext>
-      </DndContext>
+              ) : (
+                sortedNodes.map((node, i) => (
+                  <div key={node.uuid} className="animate-fade-in-up" style={{ animationDelay: `${0.05 + i * 0.04}s` }}>
+                    {viewMode === 'compact' ? (
+                      <NodeCompactCard
+                        node={node}
+                        canEdit={canEdit}
+                        canDelete={canDelete}
+                        onRestart={(n) => restartNode.mutate(n.uuid)}
+                        onEdit={(n) => { setEditingNode(nodes.find((x) => x.uuid === n.uuid) ?? null); setEditError('') }}
+                        onEnable={(n) => enableNode.mutate(n.uuid)}
+                        onDisable={(n) => setConfirmAction({ type: 'disable', uuid: n.uuid })}
+                        onDelete={(n) => setConfirmAction({ type: 'delete', uuid: n.uuid })}
+                        onTokenManage={(n) => setTokenNode(nodes.find((x) => x.uuid === n.uuid) ?? null)}
+                        onFetchIps={(n) => setIpsNode(nodes.find((x) => x.uuid === n.uuid) ?? null)}
+                      />
+                    ) : (
+                      <SortableNodeCard
+                        node={node}
+                        enabled
+                        onRestart={() => restartNode.mutate(node.uuid)}
+                        onEdit={() => { setEditingNode(node); setEditError('') }}
+                        onEnable={() => enableNode.mutate(node.uuid)}
+                        onDisable={() => setConfirmAction({ type: 'disable', uuid: node.uuid })}
+                        onDelete={() => setConfirmAction({ type: 'delete', uuid: node.uuid })}
+                        onTokenManage={() => setTokenNode(node)}
+                        onFetchIps={() => setIpsNode(node)}
+                        canEdit={canEdit}
+                        canDelete={canDelete}
+                      />
+                    )}
+                  </div>
+                ))
+              )}
+            </div>
+          </SortableContext>
+        </DndContext>
+      )}
 
       {/* Edit modal */}
       {editingNode && (

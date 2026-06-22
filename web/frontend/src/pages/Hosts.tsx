@@ -49,6 +49,10 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { cn } from '@/lib/utils'
 import { ConfirmDialog } from '@/components/ConfirmDialog'
 import client from '../api/client'
+import { ViewToggle } from '@/components/ViewToggle'
+import { useViewMode } from '@/lib/useViewMode'
+import { HostsTable } from '@/components/hosts/HostsTable'
+import { HostCompactCard } from '@/components/hosts/HostCompactCard'
 
 // Types matching backend HostListItem
 interface Host {
@@ -788,6 +792,7 @@ export default function Hosts() {
   const [showCreateModal, setShowCreateModal] = useState(false)
   const [createError, setCreateError] = useState('')
   const [deleteConfirmUuid, setDeleteConfirmUuid] = useState<string | null>(null)
+  const [viewMode, setViewMode] = useViewMode('hosts')
 
   // Fetch hosts
   const { data: hosts = [], isLoading, refetch } = useQuery({
@@ -933,33 +938,71 @@ export default function Hosts() {
         </Card>
       </div>
 
-      {/* Hosts grid */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        {isLoading ? (
-          Array.from({ length: 4 }).map((_, i) => <HostSkeleton key={i} />)
-        ) : hosts.length === 0 ? (
-          <Card className="col-span-full">
-            <CardContent className="py-12 text-center">
-              <Globe className="w-12 h-12 text-dark-300 mx-auto mb-3" />
-              <p className="text-dark-200">{t('hosts.statusNoHosts')}</p>
-            </CardContent>
-          </Card>
-        ) : (
-          hosts.map((host, i) => (
-            <div key={host.uuid} className="animate-fade-in-up" style={{ animationDelay: `${0.1 + i * 0.06}s` }}>
-              <HostCard
-                host={host}
-                onEdit={() => { setEditingHost(host); setEditError('') }}
-                onEnable={() => enableHost.mutate(host.uuid)}
-                onDisable={() => disableHost.mutate(host.uuid)}
-                onDelete={() => setDeleteConfirmUuid(host.uuid)}
-                canEdit={canEdit}
-                canDelete={canDelete}
-              />
-            </div>
-          ))
-        )}
-      </div>
+      {/* Toolbar: view toggle */}
+      {!isLoading && hosts.length > 0 && (
+        <div className="flex items-center justify-end">
+          <ViewToggle mode={viewMode} onChange={setViewMode} />
+        </div>
+      )}
+
+      {/* Hosts list */}
+      {!isLoading && viewMode === 'table' && hosts.length > 0 ? (
+        <HostsTable
+          hosts={hosts}
+          canEdit={canEdit}
+          canDelete={canDelete}
+          onEdit={(h) => { setEditingHost(hosts.find((x) => x.uuid === h.uuid) ?? null); setEditError('') }}
+          onEnable={(h) => enableHost.mutate(h.uuid)}
+          onDisable={(h) => disableHost.mutate(h.uuid)}
+          onDelete={(h) => setDeleteConfirmUuid(h.uuid)}
+        />
+      ) : (
+        <div
+          className={cn(
+            'grid gap-4',
+            viewMode === 'compact'
+              ? 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4'
+              : 'grid-cols-1 lg:grid-cols-2',
+          )}
+        >
+          {isLoading ? (
+            Array.from({ length: 4 }).map((_, i) => <HostSkeleton key={i} />)
+          ) : hosts.length === 0 ? (
+            <Card className="col-span-full">
+              <CardContent className="py-12 text-center">
+                <Globe className="w-12 h-12 text-dark-300 mx-auto mb-3" />
+                <p className="text-dark-200">{t('hosts.statusNoHosts')}</p>
+              </CardContent>
+            </Card>
+          ) : (
+            hosts.map((host, i) => (
+              <div key={host.uuid} className="animate-fade-in-up" style={{ animationDelay: `${0.1 + i * 0.06}s` }}>
+                {viewMode === 'compact' ? (
+                  <HostCompactCard
+                    host={host}
+                    canEdit={canEdit}
+                    canDelete={canDelete}
+                    onEdit={(h) => { setEditingHost(hosts.find((x) => x.uuid === h.uuid) ?? null); setEditError('') }}
+                    onEnable={(h) => enableHost.mutate(h.uuid)}
+                    onDisable={(h) => disableHost.mutate(h.uuid)}
+                    onDelete={(h) => setDeleteConfirmUuid(h.uuid)}
+                  />
+                ) : (
+                  <HostCard
+                    host={host}
+                    onEdit={() => { setEditingHost(host); setEditError('') }}
+                    onEnable={() => enableHost.mutate(host.uuid)}
+                    onDisable={() => disableHost.mutate(host.uuid)}
+                    onDelete={() => setDeleteConfirmUuid(host.uuid)}
+                    canEdit={canEdit}
+                    canDelete={canDelete}
+                  />
+                )}
+              </div>
+            ))
+          )}
+        </div>
+      )}
 
       {/* Edit modal */}
       {editingHost && (
