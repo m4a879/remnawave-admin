@@ -54,6 +54,10 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { cn } from '@/lib/utils'
 import { QueryError } from '@/components/QueryError'
 import NodeCard, { type FleetNode, getNodeStatus } from '@/components/fleet/NodeCard'
+import { CompactNodeCard } from '@/components/fleet/CompactNodeCard'
+import { FleetTable } from '@/components/fleet/FleetTable'
+import { ViewToggle } from '@/components/ViewToggle'
+import { useViewMode } from '@/lib/useViewMode'
 import TerminalDialog from '@/components/fleet/TerminalDialog'
 import type { Script } from '@/components/fleet/ScriptCatalog'
 import type { ScheduledTask as FleetScheduledTask } from '@/api/fleet'
@@ -393,6 +397,7 @@ export default function Fleet() {
   const [expandedUuid, setExpandedUuid] = useState<string | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
+  const [viewMode, setViewMode] = useViewMode('fleet')
 
   // Terminal state
   const [terminalNode, setTerminalNode] = useState<{ uuid: string; name: string } | null>(null)
@@ -466,22 +471,23 @@ export default function Fleet() {
     }
   }
 
-  const sortedNodes = useMemo(() => {
+  const baseNodes = useMemo(() => {
     if (!fleet?.nodes) return []
     let nodes = [...fleet.nodes]
-
-    // Filter by search query
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase()
       nodes = nodes.filter(
         (n) => n.name.toLowerCase().includes(q) || n.address.toLowerCase().includes(q),
       )
     }
-
-    // Filter by status
     if (statusFilter !== 'all') {
       nodes = nodes.filter((n) => getNodeStatus(n) === statusFilter)
     }
+    return nodes
+  }, [fleet?.nodes, searchQuery, statusFilter])
+
+  const sortedNodes = useMemo(() => {
+    const nodes = [...baseNodes]
 
     // Custom order takes precedence: arrange by stored uuid sequence
     if (sortField === 'custom') {
@@ -532,7 +538,7 @@ export default function Fleet() {
     })
 
     return nodes
-  }, [fleet?.nodes, sortField, sortDir, searchQuery, statusFilter, customOrder])
+  }, [baseNodes, sortField, sortDir, customOrder])
 
   const sortedIds = sortedNodes.map((n) => n.uuid)
 
@@ -739,52 +745,57 @@ export default function Fleet() {
             </div>
             {/* Sort dropdown */}
             <div className="flex items-center gap-1.5 ml-auto">
-              {(sortField === 'custom' || customOrder.isCustomized) && (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-8 gap-1.5 text-xs text-dark-200 hover:text-white"
-                  onClick={resetCustomLayout}
-                  title={t('fleet.sort.resetCustom', { defaultValue: 'Сбросить порядок' })}
-                >
-                  <RotateCcw className="w-3.5 h-3.5" />
-                  <span className="hidden sm:inline">{t('fleet.sort.resetCustom', { defaultValue: 'Сбросить порядок' })}</span>
-                </Button>
+              {viewMode !== 'table' && (
+                <>
+                  {(sortField === 'custom' || customOrder.isCustomized) && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-8 gap-1.5 text-xs text-dark-200 hover:text-white"
+                      onClick={resetCustomLayout}
+                      title={t('fleet.sort.resetCustom', { defaultValue: 'Сбросить порядок' })}
+                    >
+                      <RotateCcw className="w-3.5 h-3.5" />
+                      <span className="hidden sm:inline">{t('fleet.sort.resetCustom', { defaultValue: 'Сбросить порядок' })}</span>
+                    </Button>
+                  )}
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button variant="secondary" size="sm" className="h-8 gap-1.5">
+                        <ArrowUpDown className="w-3.5 h-3.5" />
+                        <span className="text-xs">{t('fleet.sort.label')}</span>
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end">
+                      <DropdownMenuRadioGroup
+                        value={`${sortField}-${sortDir}`}
+                        onValueChange={(v) => {
+                          const [field, dir] = v.split('-') as [SortField, SortDir]
+                          setSortField(field)
+                          setSortDir(dir)
+                        }}
+                      >
+                        {SORT_FIELDS.map(({ value, labelKey }) => (
+                          value === 'custom' ? (
+                            <DropdownMenuRadioItem
+                              key="custom-asc"
+                              value="custom-asc"
+                              onClick={() => setSortField('custom')}
+                            >
+                              {t(labelKey)} {sortField === 'custom' ? '✓' : ''}
+                            </DropdownMenuRadioItem>
+                          ) : (
+                            <DropdownMenuRadioItem key={`${value}-asc`} value={`${value}-${sortField === value && sortDir === 'asc' ? 'desc' : 'asc'}`} onClick={() => toggleSort(value)}>
+                              {t(labelKey)} {sortField === value ? (sortDir === 'asc' ? '↑' : '↓') : ''}
+                            </DropdownMenuRadioItem>
+                          )
+                        ))}
+                      </DropdownMenuRadioGroup>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </>
               )}
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button variant="secondary" size="sm" className="h-8 gap-1.5">
-                    <ArrowUpDown className="w-3.5 h-3.5" />
-                    <span className="text-xs">{t('fleet.sort.label')}</span>
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
-                  <DropdownMenuRadioGroup
-                    value={`${sortField}-${sortDir}`}
-                    onValueChange={(v) => {
-                      const [field, dir] = v.split('-') as [SortField, SortDir]
-                      setSortField(field)
-                      setSortDir(dir)
-                    }}
-                  >
-                    {SORT_FIELDS.map(({ value, labelKey }) => (
-                      value === 'custom' ? (
-                        <DropdownMenuRadioItem
-                          key="custom-asc"
-                          value="custom-asc"
-                          onClick={() => setSortField('custom')}
-                        >
-                          {t(labelKey)} {sortField === 'custom' ? '✓' : ''}
-                        </DropdownMenuRadioItem>
-                      ) : (
-                        <DropdownMenuRadioItem key={`${value}-asc`} value={`${value}-${sortField === value && sortDir === 'asc' ? 'desc' : 'asc'}`} onClick={() => toggleSort(value)}>
-                          {t(labelKey)} {sortField === value ? (sortDir === 'asc' ? '↑' : '↓') : ''}
-                        </DropdownMenuRadioItem>
-                      )
-                    ))}
-                  </DropdownMenuRadioGroup>
-                </DropdownMenuContent>
-              </DropdownMenu>
+              <ViewToggle mode={viewMode} onChange={setViewMode} />
             </div>
           </div>
 
@@ -808,27 +819,58 @@ export default function Fleet() {
                 </p>
               </CardContent>
             </Card>
+          ) : viewMode === 'table' ? (
+            <FleetTable
+              nodes={baseNodes}
+              canEdit={canEditNodes}
+              canTerminal={canTerminal}
+              onRestart={(uuid) => restartNode.mutate(uuid)}
+              onEnable={(uuid) => enableNode.mutate(uuid)}
+              onDisable={(uuid) => disableNode.mutate(uuid)}
+              onTerminal={(n) => setTerminalNode({ uuid: n.uuid, name: n.name })}
+              isPending={mutationPending}
+            />
           ) : (
             <DndContext sensors={dndSensors} collisionDetection={closestCenter} onDragEnd={handleRowDragEnd}>
               <SortableContext items={sortedIds} strategy={rectSortingStrategy}>
-                <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4">
+                <div
+                  className={cn(
+                    'grid gap-4',
+                    viewMode === 'compact'
+                      ? 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4'
+                      : 'grid-cols-1 lg:grid-cols-2 xl:grid-cols-3',
+                  )}
+                >
                   {sortedNodes.map((node) => (
                     <SortableSection key={node.uuid} id={node.uuid} handlePosition="top-left">
-                      <NodeCard
-                        node={node}
-                        isExpanded={expandedUuid === node.uuid}
-                        onToggle={() => setExpandedUuid(expandedUuid === node.uuid ? null : node.uuid)}
-                        onTerminalConnect={canTerminal ? () => setTerminalNode({ uuid: node.uuid, name: node.name }) : undefined}
-                      >
-                        <NodeDetailPanel
+                      {viewMode === 'compact' ? (
+                        <CompactNodeCard
                           node={node}
                           canEdit={canEditNodes}
-                          onRestart={() => restartNode.mutate(node.uuid)}
-                          onEnable={() => enableNode.mutate(node.uuid)}
-                          onDisable={() => disableNode.mutate(node.uuid)}
+                          canTerminal={canTerminal}
+                          onRestart={(uuid) => restartNode.mutate(uuid)}
+                          onEnable={(uuid) => enableNode.mutate(uuid)}
+                          onDisable={(uuid) => disableNode.mutate(uuid)}
+                          onTerminal={(n) => setTerminalNode({ uuid: n.uuid, name: n.name })}
                           isPending={mutationPending}
                         />
-                      </NodeCard>
+                      ) : (
+                        <NodeCard
+                          node={node}
+                          isExpanded={expandedUuid === node.uuid}
+                          onToggle={() => setExpandedUuid(expandedUuid === node.uuid ? null : node.uuid)}
+                          onTerminalConnect={canTerminal ? () => setTerminalNode({ uuid: node.uuid, name: node.name }) : undefined}
+                        >
+                          <NodeDetailPanel
+                            node={node}
+                            canEdit={canEditNodes}
+                            onRestart={() => restartNode.mutate(node.uuid)}
+                            onEnable={() => enableNode.mutate(node.uuid)}
+                            onDisable={() => disableNode.mutate(node.uuid)}
+                            isPending={mutationPending}
+                          />
+                        </NodeCard>
+                      )}
                     </SortableSection>
                   ))}
                 </div>

@@ -66,6 +66,15 @@ export const LayoutDashboard = createIcon('LayoutDashboard', (
   </>
 ))
 
+export const LayoutGrid = createIcon('LayoutGrid', (
+  <>
+    <rect x="3.4" y="3.4" width="7.2" height="7.2" rx="1.6" fill="currentColor" fillOpacity="0.16" stroke="currentColor" strokeWidth={S} />
+    <rect x="13.4" y="3.4" width="7.2" height="7.2" rx="1.6" fill="currentColor" fillOpacity="0.16" stroke="currentColor" strokeWidth={S} />
+    <rect x="3.4" y="13.4" width="7.2" height="7.2" rx="1.6" fill="currentColor" fillOpacity="0.16" stroke="currentColor" strokeWidth={S} />
+    <rect x="13.4" y="13.4" width="7.2" height="7.2" rx="1.6" fill="currentColor" fillOpacity="0.16" stroke="currentColor" strokeWidth={S} />
+  </>
+))
+
 export const Users = createIcon('Users', (
   <>
     <circle cx="9.3" cy="8.1" r="3.3" fill="currentColor" fillOpacity="0.16" stroke="currentColor" strokeWidth={S} />
