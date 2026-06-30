@@ -43,6 +43,7 @@ from src.handlers.resources import _fetch_configs_text, _fetch_snippets_text, _s
 from src.handlers.users import _format_user_choice, _send_user_summary, _show_user_search_results, _start_user_search_flow
 from src.keyboards.subscription_actions import subscription_keyboard
 from src.utils.auth import BotAdmin
+from src.utils.branding import bot_menu_title
 from src.utils.formatters import build_quota_text, build_subscription_summary
 
 async def _fetch_main_menu_text(force_refresh: bool = False) -> str:
@@ -129,7 +130,7 @@ async def _fetch_main_menu_text(force_refresh: bool = False) -> str:
                 nodes_online = "—"
 
         lines = [
-            _("bot.menu"),
+            bot_menu_title(),
             "",
             f"{panel_status} {_('panel.status')}{panel_status_text}",
             "",
@@ -156,7 +157,7 @@ async def _fetch_main_menu_text(force_refresh: bool = False) -> str:
     except Exception:
         # Если не удалось получить статистику, возвращаем простое меню
         logger.exception("Failed to fetch main menu stats")
-        return _("bot.menu")
+        return bot_menu_title()
 
 router = Router(name="navigation")
 
@@ -386,7 +387,7 @@ async def _navigate(target: Message | CallbackQuery, destination: str, is_back: 
         await _send_clean_message(target, menu_text, reply_markup=main_menu_keyboard(admin=admin), parse_mode="HTML")
         return
     if destination == NavTarget.USERS_MENU:
-        await _send_clean_message(target, _("bot.menu"), reply_markup=users_menu_keyboard(admin=admin))
+        await _send_clean_message(target, bot_menu_title(), reply_markup=users_menu_keyboard(admin=admin))
         return
     if destination == NavTarget.USER_SEARCH_PROMPT:
         await _start_user_search_flow(target)
@@ -401,7 +402,7 @@ async def _navigate(target: Message | CallbackQuery, destination: str, is_back: 
             await _start_user_search_flow(target)
         return
     if destination == NavTarget.NODES_MENU:
-        await _send_clean_message(target, _("bot.menu"), reply_markup=nodes_menu_keyboard(admin=admin))
+        await _send_clean_message(target, bot_menu_title(), reply_markup=nodes_menu_keyboard(admin=admin))
         return
     if destination == NavTarget.NODES_LIST:
         from src.handlers.nodes import _fetch_nodes_with_keyboard, _get_nodes_page
@@ -422,7 +423,7 @@ async def _navigate(target: Message | CallbackQuery, destination: str, is_back: 
         await _send_clean_message(target, text, reply_markup=nodes_menu_keyboard(admin=admin))
         return
     if destination == NavTarget.RESOURCES_MENU:
-        await _send_clean_message(target, _("bot.menu"), reply_markup=resources_menu_keyboard(admin=admin))
+        await _send_clean_message(target, bot_menu_title(), reply_markup=resources_menu_keyboard(admin=admin))
         return
     if destination == NavTarget.TOKENS_MENU:
         await _show_tokens(target, reply_markup=resources_menu_keyboard(admin=admin))
@@ -435,7 +436,7 @@ async def _navigate(target: Message | CallbackQuery, destination: str, is_back: 
         await _send_clean_message(target, text, reply_markup=resources_menu_keyboard(admin=admin))
         return
     if destination == NavTarget.BILLING_OVERVIEW:
-        await _send_clean_message(target, _("bot.menu"), reply_markup=billing_overview_keyboard(admin=admin))
+        await _send_clean_message(target, bot_menu_title(), reply_markup=billing_overview_keyboard(admin=admin))
         return
     if destination == NavTarget.BILLING_MENU:
         text = await _fetch_billing_text()
@@ -450,10 +451,10 @@ async def _navigate(target: Message | CallbackQuery, destination: str, is_back: 
         await _send_clean_message(target, text, reply_markup=providers_menu_keyboard())
         return
     if destination == NavTarget.BULK_MENU:
-        await _send_clean_message(target, _("bot.menu"), reply_markup=bulk_menu_keyboard(admin=admin))
+        await _send_clean_message(target, bot_menu_title(), reply_markup=bulk_menu_keyboard(admin=admin))
         return
     if destination == NavTarget.SYSTEM_MENU:
-        await _send_clean_message(target, _("bot.menu"), reply_markup=system_menu_keyboard(admin=admin))
+        await _send_clean_message(target, bot_menu_title(), reply_markup=system_menu_keyboard(admin=admin))
         return
     if destination == NavTarget.STATS_MENU:
         from src.keyboards.stats_menu import stats_menu_keyboard
@@ -480,7 +481,7 @@ async def _navigate(target: Message | CallbackQuery, destination: str, is_back: 
             await _send_clean_message(target, _("errors.generic"), reply_markup=main_menu_keyboard(admin=admin))
         return
 
-    await _send_clean_message(target, _("bot.menu"), reply_markup=main_menu_keyboard(admin=admin))
+    await _send_clean_message(target, bot_menu_title(), reply_markup=main_menu_keyboard(admin=admin))
     
     # После успешной навигации добавляем пункт назначения в историю (если не назад)
     if not is_back:

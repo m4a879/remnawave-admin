@@ -1,6 +1,6 @@
 {
   "bot": {
-    "welcome": "👋 Добро пожаловать в админ-бот Remnawave. Управляй пользователями, нодами и биллингом из одного места.",
+    "welcome": "👋 Добро пожаловать в админ-бот {brand}. Управляй пользователями, нодами и биллингом из одного места.",
     "help": "ℹ️ Быстрые команды:\n\nОсновное:\n/start — приветствие\n/help — эта справка\n/health — проверка системы\n/stats — сводка\n/bandwidth — трафик\n\nПользователи:\nМеню «Пользователи → Найти пользователя» — поиск по никнейму/email/Telegram ID/описанию\n/user_create <username> <expire_iso> [telegram_id] — создать пользователя\n\nИнфраструктура:\n/nodes — список нод\n/node <uuid> — детали ноды\n/nodes_usage — онлайн-статистика\n/nodes_range <start_iso> <end_iso> — трафик за период\n/hosts — список хостов\n/host <uuid> — детали хоста\n\nДругое:\n/sub <short_uuid> — подписка\n/tokens — API токены\n/templates — шаблоны\n/snippets — сниппеты\n/configs — конфиги\n/billing — биллинг\n/providers — провайдеры",
     "menu": "🤖 Remnawave Admin Bot",
     "menu_stats": "📊 Статистика:\n\n  👥 Пользователей: {users}\n     └─ Онлайн: {online}\n\n  🛰 Нод: {nodes}\n     ├─ Включено: {nodes_enabled}\n     └─ Онлайн: {nodes_online}\n\n  🖥 Хостов: {hosts}\n     └─ Включено: {hosts_enabled}",

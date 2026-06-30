@@ -93,6 +93,22 @@ async def get_panel_name(
         return {"panel_name": ""}
 
 
+@router.get("/public-brand")
+async def get_public_brand():
+    """Brand name for the login screen and browser tab title.
+
+    Public (no auth) — exposes only the display name, no secrets. Falls back to
+    ``Remnawave Admin`` when the superadmin has not set a custom ``panel_name``.
+    """
+    try:
+        from shared.config_service import config_service
+        val = (config_service.get("panel_name") or "").strip()
+        return {"name": val or "Remnawave Admin"}
+    except Exception as e:
+        logger.debug("Non-critical: %s", e)
+        return {"name": "Remnawave Admin"}
+
+
 @router.get("", response_model=ConfigByCategoryResponse)
 async def get_all_settings(
     admin: AdminUser = Depends(require_permission("settings", "view")),

@@ -7,6 +7,7 @@ from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMar
 from aiogram.utils.i18n import gettext as _
 
 from src.utils.auth import BotAdmin
+from src.utils.branding import bot_menu_title
 
 from src.handlers.common import _cleanup_message, _edit_text_safe, _get_target_user_id, _not_admin, require_permission, _send_clean_message
 from src.handlers.state import NODES_FILTER_BY_USER, NODES_PAGE_BY_USER, NODES_PAGE_SIZE, PENDING_INPUT
@@ -1016,7 +1017,7 @@ async def cb_nodes(callback: CallbackQuery) -> None:
     await callback.answer()
     from src.keyboards.nodes_menu import nodes_list_keyboard
 
-    await callback.message.edit_text(_("bot.menu"), reply_markup=nodes_list_keyboard())
+    await callback.message.edit_text(bot_menu_title(), reply_markup=nodes_list_keyboard())
 
 
 @router.callback_query(F.data.startswith("nodes:") | F.data.startswith("node_create:"))

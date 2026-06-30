@@ -14,6 +14,7 @@ from src.keyboards.main_menu import bulk_menu_keyboard, main_menu_keyboard, node
 from src.keyboards.providers_menu import providers_menu_keyboard
 from src.keyboards.stats_menu import stats_menu_keyboard
 from src.utils.auth import BotAdmin
+from src.utils.branding import brand_name
 from src.utils.formatters import build_quota_text
 
 # Импорты из соответствующих модулей
@@ -57,7 +58,7 @@ async def cmd_start(message: Message, admin: BotAdmin) -> None:
     if await _not_admin(message):
         return
 
-    await _send_clean_message(message, _("bot.welcome"))
+    await _send_clean_message(message, _("bot.welcome").format(brand=brand_name()))
     menu_text = await _fetch_main_menu_text()
     quota_text = build_quota_text(admin)
     await _send_clean_message(message, f"{menu_text}\n\n{quota_text}", reply_markup=main_menu_keyboard(admin=admin), parse_mode="HTML")

@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Link, useLocation } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
@@ -202,7 +202,11 @@ export default function Sidebar({ mobileOpen, onClose }: SidebarProps) {
     staleTime: 60_000,
     retry: 1,
   })
-  const panelName = panelNameData?.panel_name || ''
+  const panelName = panelNameData?.panel_name || 'Remnawave Admin'
+
+  useEffect(() => {
+    document.title = panelName
+  }, [panelName])
 
   const handleNavClick = () => {
     if (onClose) onClose()
