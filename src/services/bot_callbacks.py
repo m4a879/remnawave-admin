@@ -114,6 +114,7 @@ async def panel_event(request: Request):
         body = await request.json()
         event = body.get("event", "")
         event_data = body.get("data", {})
+        meta = body.get("meta") or {}
 
         logger.info("Panel event callback: %s", event)
 
@@ -148,6 +149,10 @@ async def panel_event(request: Request):
                 action = "updated"
             elif event == "user.deleted":
                 action = "deleted"
+            elif event == "user.expiration":
+                # 2.8.0: единое событие истечения с часами в meta.expiration
+                from src.services.webhook import _expiration_action_from_hours
+                action = _expiration_action_from_hours(meta.get("expiration"))
             elif event in special_events:
                 action = special_events[event]
             else:

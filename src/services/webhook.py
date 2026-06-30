@@ -202,6 +202,7 @@ async def remnawave_webhook(request: Request):
         data = json.loads(body.decode('utf-8'))
         event = data.get("event", "")
         timestamp = data.get("timestamp")
+        meta = data.get("meta") or {}
 
         logger.info("📩 Webhook: %s", event)
         
@@ -223,7 +224,7 @@ async def remnawave_webhook(request: Request):
         
         # Обрабатываем события по категориям
         if event.startswith("user."):
-            await _handle_user_event(bot, event, event_data, diff_result)
+            await _handle_user_event(bot, event, event_data, diff_result, meta)
         elif event.startswith("node."):
             await _handle_node_event(bot, event, event_data, diff_result)
         elif event.startswith("service."):
@@ -255,7 +256,22 @@ async def remnawave_webhook(request: Request):
         raise HTTPException(status_code=500, detail=str(exc))
 
 
-async def _handle_user_event(bot: Bot, event: str, event_data: dict, diff_result: dict = None) -> None:
+def _expiration_action_from_hours(hours) -> str:
+    """2.8.0: единое событие user.expiration несёт meta.expiration (часы
+    относительно expireAt). Маппим стандартные значения на прежние действия,
+    чтобы логика уведомлений осталась без изменений. Отрицательное — за N часов
+    ДО истечения, положительное — через N часов ПОСЛЕ."""
+    try:
+        h = int(hours)
+    except (TypeError, ValueError):
+        return "expired"
+    mapping = {-72: "expires_in_72h", -48: "expires_in_48h", -24: "expires_in_24h", 24: "expired_24h_ago"}
+    if h in mapping:
+        return mapping[h]
+    return "expired_24h_ago" if h > 0 else "expires_in_24h"
+
+
+async def _handle_user_event(bot: Bot, event: str, event_data: dict, diff_result: dict = None, meta: dict = None) -> None:
     """Обрабатывает события пользователей с поддержкой diff."""
     if not event_data:
         logger.warning("User data not found in webhook payload")
@@ -297,6 +313,9 @@ async def _handle_user_event(bot: Bot, event: str, event_data: dict, diff_result
         action = "updated"
     elif event == "user.deleted":
         action = "deleted"
+    elif event == "user.expiration":
+        # 2.8.0: единое событие истечения с количеством часов в meta.expiration
+        action = _expiration_action_from_hours((meta or {}).get("expiration"))
     elif event in special_events:
         action = special_events[event]
     else:
