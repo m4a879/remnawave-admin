@@ -951,7 +951,7 @@ function BulkEditHostsModal({ open, count, onClose, onApply, isPending }: {
           <div className="space-y-2">
             <label className="flex items-center gap-2 text-sm text-dark-100 cursor-pointer select-none">
               <input type="checkbox" className="accent-primary-500" checked={setPort} onChange={(e) => setSetPort(e.target.checked)} />
-              {t('hosts.form.port')}
+              {t('hosts.editHost.port')}
             </label>
             {setPort && (
               <Input type="number" min={1} max={65535} value={portVal} onChange={(e) => setPortVal(e.target.value)} placeholder="443" />
