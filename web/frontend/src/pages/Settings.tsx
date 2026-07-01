@@ -256,7 +256,10 @@ function SyncStatusBlock({
                           <RotateCcw className={cn('w-3.5 h-3.5', isSyncing && 'animate-spin')} />
                         </Button>
                       )}
-                      <span className={cn(
+                      <span
+                        title={item.sync_status}
+                        aria-label={item.sync_status}
+                        className={cn(
                         'w-2 h-2 rounded-full',
                         item.sync_status === 'success' ? 'bg-green-500' :
                         item.sync_status === 'error' ? 'bg-red-500' :
@@ -452,6 +455,7 @@ function SettingsPasswordInput({
   autoComplete?: string
   disabled?: boolean
 }) {
+  const { t } = useTranslation()
   const [show, setShow] = useState(false)
 
   return (
@@ -470,7 +474,7 @@ function SettingsPasswordInput({
         type="button"
         onClick={() => setShow(!show)}
         className="absolute right-3 top-1/2 -translate-y-1/2 text-dark-400 hover:text-dark-200 transition-colors"
-        tabIndex={-1}
+        aria-label={show ? t('common.hide') : t('common.show')}
       >
         {show ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
       </button>
@@ -808,6 +812,7 @@ function IpWhitelistBlock() {
               placeholder="1.2.3.4 or 10.0.0.0/24"
               className="flex-1 font-mono text-sm"
               disabled={saving}
+              aria-label={t('settings.ipWhitelist.title')}
             />
             <Button
               onClick={addIp}

@@ -574,6 +574,7 @@ function PaginatedDeviceList({
                       size="sm"
                       onClick={() => onDeleteDevice(device.hwid!)}
                       className="h-6 w-6 p-0 text-red-400 hover:text-red-300 hover:bg-red-500/10"
+                      aria-label={t('common.delete')}
                     >
                       <Trash2 className="h-3.5 w-3.5" />
                     </Button>
@@ -677,6 +678,7 @@ function PaginatedDeviceList({
             onClick={() => setDevicePage(Math.max(1, devicePage - 1))}
             disabled={devicePage <= 1}
             className="h-7 w-7 p-0"
+            aria-label={t('common.previousPage')}
           >
             <ChevronLeft className="h-4 w-4" />
           </Button>
@@ -689,6 +691,7 @@ function PaginatedDeviceList({
             onClick={() => setDevicePage(Math.min(totalDevicePages, devicePage + 1))}
             disabled={devicePage >= totalDevicePages}
             className="h-7 w-7 p-0"
+            aria-label={t('common.nextPage')}
           >
             <ChevronRight className="h-4 w-4" />
           </Button>
@@ -1270,6 +1273,7 @@ export default function UserDetail() {
     return () => { timersRef.current.forEach(clearTimeout) }
   }, [])
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
+  const [resetTrafficConfirm, setResetTrafficConfirm] = useState(false)
   const [showRevokeFullConfirm, setShowRevokeFullConfirm] = useState(false)
   const [showRevokePasswordsConfirm, setShowRevokePasswordsConfirm] = useState(false)
   const [exclusionDialogOpen, setExclusionDialogOpen] = useState(false)
@@ -1830,7 +1834,7 @@ export default function UserDetail() {
                     <Button
                       variant="outline"
                       size="sm"
-                      onClick={() => resetTrafficMutation.mutate()}
+                      onClick={() => setResetTrafficConfirm(true)}
                       disabled={resetTrafficMutation.isPending}
                       className="text-primary-400"
                     >
@@ -2499,6 +2503,7 @@ export default function UserDetail() {
                           'flex-shrink-0',
                           copied && 'bg-green-600 hover:bg-green-500 text-white'
                         )}
+                        aria-label={t('common.copy')}
                       >
                         {copied ? (
                           <Check className="h-3.5 w-3.5" />
@@ -2682,6 +2687,17 @@ export default function UserDetail() {
         confirmLabel={t('userDetail.deleteConfirm.confirm')}
         variant="destructive"
         onConfirm={() => { deleteMutation.mutate(); setShowDeleteConfirm(false) }}
+      />
+
+      {/* Reset traffic confirm */}
+      <ConfirmDialog
+        open={resetTrafficConfirm}
+        onOpenChange={(o) => { if (!o) setResetTrafficConfirm(false) }}
+        title={t('userDetail.actions.resetTraffic')}
+        description={t('userDetail.resetTrafficConfirm', { defaultValue: 'Сбросить счётчик трафика текущего периода? Действие необратимо.' })}
+        confirmLabel={t('userDetail.actions.resetTraffic')}
+        variant="destructive"
+        onConfirm={() => { resetTrafficMutation.mutate(); setResetTrafficConfirm(false) }}
       />
 
       {/* Reassign user to another admin */}

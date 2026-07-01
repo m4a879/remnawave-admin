@@ -155,7 +155,7 @@ export function FleetTable({
                   {canTerminal && (
                     <Tooltip>
                       <TooltipTrigger asChild>
-                        <Button size="icon" variant="ghost" className="h-7 w-7 text-dark-200 hover:text-white" onClick={() => onTerminal(node)}>
+                        <Button size="icon" variant="ghost" aria-label={t('fleet.terminal.connect', { defaultValue: 'Терминал' })} className="h-7 w-7 text-dark-200 hover:text-white" onClick={() => onTerminal(node)}>
                           <Terminal className="w-3.5 h-3.5" />
                         </Button>
                       </TooltipTrigger>
@@ -165,7 +165,7 @@ export function FleetTable({
                   {canEdit && status === 'online' && (
                     <Tooltip>
                       <TooltipTrigger asChild>
-                        <Button size="icon" variant="ghost" className="h-7 w-7 text-dark-200 hover:text-white" disabled={isPending} onClick={() => onRestart(node.uuid)}>
+                        <Button size="icon" variant="ghost" aria-label={t('fleet.actions.restart')} className="h-7 w-7 text-dark-200 hover:text-white" disabled={isPending} onClick={() => onRestart(node.uuid)}>
                           <RotateCcw className="w-3.5 h-3.5" />
                         </Button>
                       </TooltipTrigger>
@@ -175,7 +175,7 @@ export function FleetTable({
                   {canEdit && (
                     <Tooltip>
                       <TooltipTrigger asChild>
-                        <Button size="icon" variant="ghost" className={cn('h-7 w-7', node.is_disabled ? 'text-green-400 hover:text-green-300' : 'text-red-400 hover:text-red-300')} disabled={isPending} onClick={() => (node.is_disabled ? onEnable(node.uuid) : onDisable(node.uuid))}>
+                        <Button size="icon" variant="ghost" aria-label={node.is_disabled ? t('fleet.actions.enable') : t('fleet.actions.disable')} className={cn('h-7 w-7', node.is_disabled ? 'text-green-400 hover:text-green-300' : 'text-red-400 hover:text-red-300')} disabled={isPending} onClick={() => (node.is_disabled ? onEnable(node.uuid) : onDisable(node.uuid))}>
                           {node.is_disabled ? <Play className="w-3.5 h-3.5" /> : <Square className="w-3.5 h-3.5" />}
                         </Button>
                       </TooltipTrigger>

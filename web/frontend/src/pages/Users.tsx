@@ -1236,6 +1236,7 @@ export default function Users() {
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
                   placeholder={t('users.searchPlaceholder')}
+                  aria-label={t('common.search')}
                   className="pl-10"
                   onKeyDown={(e) => {
                     if (e.key === 'Enter' && search.trim()) resolveMutation.mutate(search.trim())
@@ -1998,10 +1999,11 @@ export default function Users() {
 
 // Filter chip component
 const FilterChip = memo(function FilterChip({ label, onRemove }: { label: string; onRemove: () => void }) {
+  const { t } = useTranslation()
   return (
     <span className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-primary-500/10 border border-primary-500/20 text-[11px] text-primary-300">
       {label}
-      <button onClick={onRemove} className="hover:text-white ml-0.5">
+      <button onClick={onRemove} className="hover:text-white ml-0.5" aria-label={t('common.remove')}>
         <X className="w-3 h-3" />
       </button>
     </span>

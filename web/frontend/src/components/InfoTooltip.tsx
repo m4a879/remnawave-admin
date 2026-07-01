@@ -26,8 +26,9 @@ export function InfoTooltip({
       <TooltipTrigger asChild>
         <button
           type="button"
+          aria-label={text}
           className={cn(
-            'inline-flex items-center justify-center rounded-full p-0.5 text-dark-300 hover:text-dark-100 transition-colors focus:outline-none',
+            'inline-flex items-center justify-center rounded-full p-0.5 text-dark-300 hover:text-dark-100 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500',
             className,
           )}
           onClick={(e) => e.stopPropagation()}

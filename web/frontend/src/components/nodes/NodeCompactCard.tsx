@@ -72,7 +72,7 @@ export function NodeCompactCard({
     <Card className={cn('group', node.is_disabled && 'opacity-60')}>
       <CardContent className="p-3 space-y-2">
         <div className="flex items-center gap-2 min-w-0">
-          <span className={cn('w-2 h-2 rounded-full shrink-0', STATUS_STYLE[status])} />
+          <span className={cn('w-2 h-2 rounded-full shrink-0', STATUS_STYLE[status])} role="img" title={t(`nodes.status.${status}`)} aria-label={t(`nodes.status.${status}`)} />
           <div className="min-w-0 flex-1">
             <div className="font-medium text-white text-sm truncate leading-tight">{node.name}</div>
             <div className="text-[11px] text-dark-300 font-mono truncate">{node.address}:{node.port}</div>
@@ -80,7 +80,7 @@ export function NodeCompactCard({
           {(scopeEdit || scopeDelete) && (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button size="icon" variant="ghost" className="h-6 w-6 text-dark-300 hover:text-white shrink-0">
+                <Button size="icon" variant="ghost" aria-label={t('common.openMenu')} className="h-6 w-6 text-dark-300 hover:text-white shrink-0">
                   <MoreVertical className="w-4 h-4" />
                 </Button>
               </DropdownMenuTrigger>

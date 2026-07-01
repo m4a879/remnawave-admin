@@ -179,7 +179,7 @@ export function NodesTable({
                 {(scopeEdit || scopeDelete) && (
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
-                      <Button size="icon" variant="ghost" className="h-7 w-7 text-dark-200 hover:text-white">
+                      <Button size="icon" variant="ghost" aria-label={t('common.openMenu')} className="h-7 w-7 text-dark-200 hover:text-white">
                         <MoreVertical className="w-4 h-4" />
                       </Button>
                     </DropdownMenuTrigger>

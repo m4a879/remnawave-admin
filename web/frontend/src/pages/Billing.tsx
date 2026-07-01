@@ -300,7 +300,7 @@ export default function Billing({ embedded }: { embedded?: boolean } = {}) {
           <div className="flex items-center justify-between">
             <p className="text-sm text-dark-200">{t('billing.providers.description')}</p>
             <div className="flex gap-2">
-              <Button variant="outline" size="sm" onClick={() => refetchProviders()}>
+              <Button variant="outline" size="sm" onClick={() => refetchProviders()} aria-label={t('common.refresh')}>
                 <RefreshCw className="w-4 h-4" />
               </Button>
               {canCreate && (
@@ -354,6 +354,7 @@ export default function Billing({ embedded }: { embedded?: boolean } = {}) {
                               size="sm"
                               onClick={() => openProviderDialog(provider)}
                               className="h-7 px-2"
+                              aria-label={t('common.edit')}
                             >
                               <Pencil className="w-4 h-4" />
                             </Button>
@@ -364,6 +365,7 @@ export default function Billing({ embedded }: { embedded?: boolean } = {}) {
                               size="sm"
                               onClick={() => setDeleteProviderConfirm(provider.uuid)}
                               className="text-red-400 hover:text-red-300 hover:bg-red-500/10 h-7 px-2"
+                              aria-label={t('common.delete')}
                             >
                               <Trash2 className="w-4 h-4" />
                             </Button>
@@ -404,7 +406,7 @@ export default function Billing({ embedded }: { embedded?: boolean } = {}) {
           <div className="flex items-center justify-between">
             <p className="text-sm text-dark-200">{t('billing.history.description')}</p>
             <div className="flex gap-2">
-              <Button variant="outline" size="sm" onClick={() => refetchHistory()}>
+              <Button variant="outline" size="sm" onClick={() => refetchHistory()} aria-label={t('common.refresh')}>
                 <RefreshCw className="w-4 h-4" />
               </Button>
               {canCreate && (
@@ -492,6 +494,7 @@ export default function Billing({ embedded }: { embedded?: boolean } = {}) {
                                 size="sm"
                                 onClick={() => setDeleteHistoryConfirm(record.uuid)}
                                 className="text-red-400 hover:text-red-300 hover:bg-red-500/10"
+                                aria-label={t('common.delete')}
                               >
                                 <Trash2 className="w-4 h-4" />
                               </Button>
@@ -512,7 +515,7 @@ export default function Billing({ embedded }: { embedded?: boolean } = {}) {
           <div className="flex items-center justify-between">
             <p className="text-sm text-dark-200">{t('billing.nodes.description')}</p>
             <div className="flex gap-2">
-              <Button variant="outline" size="sm" onClick={() => refetchNodes()}>
+              <Button variant="outline" size="sm" onClick={() => refetchNodes()} aria-label={t('common.refresh')}>
                 <RefreshCw className="w-4 h-4" />
               </Button>
               {canCreate && (
@@ -620,6 +623,7 @@ export default function Billing({ embedded }: { embedded?: boolean } = {}) {
                                 size="sm"
                                 onClick={() => setDeleteNodeConfirm(node.uuid)}
                                 className="text-red-400 hover:text-red-300 hover:bg-red-500/10"
+                                aria-label={t('common.delete')}
                               >
                                 <Trash2 className="w-4 h-4" />
                               </Button>

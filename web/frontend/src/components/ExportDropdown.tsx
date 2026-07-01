@@ -19,7 +19,7 @@ export function ExportDropdown({ onExportCSV, onExportJSON, disabled }: ExportDr
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button variant="outline" size="sm" disabled={disabled} className="gap-1.5">
+        <Button variant="outline" size="sm" disabled={disabled} aria-label={t('common.export.export')} className="gap-1.5">
           <Download className="w-3.5 h-3.5" />
           <span className="hidden sm:inline">{t('common.export.export')}</span>
         </Button>

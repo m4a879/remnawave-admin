@@ -332,6 +332,7 @@ function BackupsTab() {
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             className="pl-8 h-8 w-40 text-xs bg-[var(--glass-bg)]"
+            aria-label={t('common.search')}
           />
         </div>
       </div>
@@ -504,6 +505,8 @@ function ImportTab() {
   const { t } = useTranslation()
   const queryClient = useQueryClient()
 
+  const [confirmOverwrite, setConfirmOverwrite] = useState<string | null>(null)
+
   const { data: files = [] } = useQuery({
     queryKey: ['backup-files'],
     queryFn: backupApi.listFiles,
@@ -567,7 +570,7 @@ function ImportTab() {
                     <Button
                       size="sm" variant="destructive" className="gap-1.5 text-xs"
                       disabled={importConfig.isPending}
-                      onClick={() => importConfig.mutate({ filename: file.filename, overwrite: true })}
+                      onClick={() => setConfirmOverwrite(file.filename)}
                     >
                       <RefreshCw className="w-3.5 h-3.5" />
                       {t('backup.importOverwrite')}
@@ -617,6 +620,16 @@ function ImportTab() {
           )}
         </CardContent>
       </Card>
+
+      <ConfirmDialog
+        open={confirmOverwrite !== null}
+        onOpenChange={(open) => { if (!open) setConfirmOverwrite(null) }}
+        title={t('backup.confirmOverwriteTitle', { defaultValue: 'Перезаписать настройки?' })}
+        description={t('backup.confirmOverwriteDesc', { defaultValue: 'Существующие настройки будут перезаписаны значениями из файла. Действие необратимо.' })}
+        confirmLabel={t('backup.importOverwrite')}
+        variant="destructive"
+        onConfirm={() => { if (confirmOverwrite) importConfig.mutate({ filename: confirmOverwrite, overwrite: true }) }}
+      />
     </div>
   )
 }
@@ -681,6 +694,7 @@ function HistoryTab() {
               value={searchInput}
               onChange={(e) => setSearchInput(e.target.value)}
               className="pl-8 h-8 text-xs bg-[var(--glass-bg)]"
+              aria-label={t('common.search')}
             />
           </div>
           <div className="flex flex-wrap items-center gap-1">

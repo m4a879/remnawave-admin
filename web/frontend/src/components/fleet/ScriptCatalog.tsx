@@ -128,6 +128,7 @@ export default function ScriptCatalog({ onRunScript }: ScriptCatalogProps) {
         <div className="relative flex-1 max-w-sm">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-dark-300" />
           <Input
+            aria-label={t('common.search')}
             placeholder={t('fleet.scripts.searchPlaceholder')}
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}

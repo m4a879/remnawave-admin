@@ -659,7 +659,7 @@ export function RuleConstructor({ open, onOpenChange, editRule }: RuleConstructo
                         {(nodesList || []).map((node) => (
                           <SelectItem key={node.uuid} value={node.uuid}>
                             <span className="flex items-center gap-2">
-                              <span className={`w-1.5 h-1.5 rounded-full ${node.is_connected ? 'bg-green-400' : 'bg-red-400'}`} />
+                              <span title={node.is_connected ? t('common.online') : t('common.offline')} className={`w-1.5 h-1.5 rounded-full ${node.is_connected ? 'bg-green-400' : 'bg-red-400'}`} />
                               {node.name}
                             </span>
                           </SelectItem>
@@ -759,6 +759,7 @@ export function RuleConstructor({ open, onOpenChange, editRule }: RuleConstructo
                     size="icon"
                     className="h-6 w-6 text-red-400 hover:text-red-300 hover:bg-red-500/10"
                     onClick={() => removeCondition(idx)}
+                    aria-label={t('common.delete')}
                   >
                     <Trash2 className="w-3.5 h-3.5" />
                   </Button>
@@ -1132,6 +1133,7 @@ export function RuleConstructor({ open, onOpenChange, editRule }: RuleConstructo
                                   <span>{node.name}</span>
                                   <span className="text-dark-500 text-[10px]">{node.address}</span>
                                   <span
+                                    title={node.is_connected ? t('common.online') : t('common.offline')}
                                     className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${
                                       node.is_connected ? 'bg-emerald-400' : 'bg-red-400'
                                     }`}

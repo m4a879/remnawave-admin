@@ -486,7 +486,7 @@ function PolicyEditor({
                     </div>
                   </div>
                   <div className="col-span-2 md:col-span-1 pt-5">
-                    <Button size="sm" variant="ghost" onClick={() => removeRule(i)}>
+                    <Button size="sm" variant="ghost" onClick={() => removeRule(i)} aria-label={t('common.delete')}>
                       <Trash2 className="w-4 h-4" />
                     </Button>
                   </div>

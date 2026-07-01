@@ -125,6 +125,7 @@ function RangeFilter({
         <Input
           type="number"
           value={toDisplay(min)}
+          aria-label={t('common.min', 'Мин')}
           placeholder={t('common.min', 'Мин')}
           onChange={(e) => onChange({ min: parse(e.target.value), max })}
           className="h-8 text-sm"
@@ -133,6 +134,7 @@ function RangeFilter({
         <Input
           type="number"
           value={toDisplay(max)}
+          aria-label={t('common.max', 'Макс')}
           placeholder={t('common.max', 'Макс')}
           onChange={(e) => onChange({ min, max: parse(e.target.value) })}
           className="h-8 text-sm"

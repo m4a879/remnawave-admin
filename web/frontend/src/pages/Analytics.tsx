@@ -187,6 +187,7 @@ function DateRangePicker({
           onClick={onClear}
           className="text-xs text-muted-foreground hover:text-white px-1.5 py-0.5 rounded hover:bg-[var(--glass-bg-hover)]"
           title={t('common.clear', { defaultValue: 'Clear' })}
+          aria-label={t('common.clear', { defaultValue: 'Clear' })}
         >
           ✕
         </button>

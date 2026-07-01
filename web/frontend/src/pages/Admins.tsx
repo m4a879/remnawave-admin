@@ -185,6 +185,8 @@ function PermissionMatrix({
                           type="button"
                           disabled={disabled}
                           onClick={() => toggle(resource, action)}
+                          aria-label={`${t(`admins.resources.${resource}`, { defaultValue: resource })}: ${action}`}
+                          aria-pressed={checked}
                           className={cn(
                             "w-5 h-5 rounded border transition-all mx-auto flex items-center justify-center",
                             checked

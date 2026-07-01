@@ -54,7 +54,7 @@ export function SavedFiltersDropdown({
   return (
     <DropdownMenu onOpenChange={(open) => { if (!open) setShowNameInput(false) }}>
       <DropdownMenuTrigger asChild>
-        <Button variant="outline" size="sm" className="gap-1.5">
+        <Button variant="outline" size="sm" aria-label={t('common.savedFilters.title')} className="gap-1.5">
           <Bookmark className="w-3.5 h-3.5" />
           <span className="hidden sm:inline">{t('common.savedFilters.title')}</span>
           {pageFilters.length > 0 && (
@@ -73,6 +73,7 @@ export function SavedFiltersDropdown({
             <span className="truncate">{filter.name}</span>
             <button
               onClick={(e) => handleDelete(e, filter)}
+              aria-label={t('common.delete')}
               className="md:opacity-0 md:group-hover:opacity-100 ml-2 p-0.5 rounded hover:bg-[var(--glass-bg-hover)] transition-opacity"
             >
               <X className="w-3 h-3 text-dark-300" />

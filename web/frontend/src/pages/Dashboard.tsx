@@ -982,6 +982,9 @@ function SystemStatusCard({
                       <span className="text-[10px] text-muted-foreground font-mono">{detail}</span>
                     )}
                     <span
+                      role="img"
+                      aria-label={comp.status}
+                      title={comp.status}
                       className={cn("w-1.5 h-1.5 rounded-full", comp.status === 'online' && "animate-pulse")}
                       style={{
                         background: statusColor,

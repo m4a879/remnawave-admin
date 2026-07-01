@@ -311,6 +311,7 @@ export default function Automations() {
                       className="h-8 w-8"
                       onClick={() => setPage((p) => Math.max(1, p - 1))}
                       disabled={page <= 1}
+                      aria-label={t('common.previousPage')}
                     >
                       <ChevronLeft className="w-4 h-4" />
                     </Button>
@@ -320,6 +321,7 @@ export default function Automations() {
                       className="h-8 w-8"
                       onClick={() => setPage((p) => Math.min(data.pages, p + 1))}
                       disabled={page >= data.pages}
+                      aria-label={t('common.nextPage')}
                     >
                       <ChevronRight className="w-4 h-4" />
                     </Button>

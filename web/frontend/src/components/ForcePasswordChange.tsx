@@ -55,6 +55,7 @@ function PasswordInput({ value, onChange, placeholder, autoComplete, disabled }:
   autoComplete?: string
   disabled?: boolean
 }) {
+  const { t } = useTranslation()
   const [show, setShow] = useState(false)
   return (
     <div className="relative">
@@ -69,7 +70,7 @@ function PasswordInput({ value, onChange, placeholder, autoComplete, disabled }:
       />
       <button
         type="button"
-        tabIndex={-1}
+        aria-label={show ? t('common.hide') : t('common.show')}
         onClick={() => setShow(!show)}
         className="absolute right-3 top-1/2 -translate-y-1/2 text-dark-300 hover:text-dark-100"
       >

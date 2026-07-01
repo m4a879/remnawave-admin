@@ -414,6 +414,7 @@ function HwidBlacklistTab() {
   const [newAction, setNewAction] = useState<'alert' | 'block'>('alert')
   const [newReason, setNewReason] = useState('')
   const [expandedHwid, setExpandedHwid] = useState<string | null>(null)
+  const [confirmRemoveHwid, setConfirmRemoveHwid] = useState<string | null>(null)
 
   const { data, isLoading } = useQuery({
     queryKey: ['hwid-blacklist'],
@@ -530,6 +531,16 @@ function HwidBlacklistTab() {
         </DialogContent>
       </Dialog>
 
+      <ConfirmDialog
+        open={confirmRemoveHwid !== null}
+        onOpenChange={(open) => { if (!open) setConfirmRemoveHwid(null) }}
+        title={t('violations.hwidBlacklist.confirmRemove', { defaultValue: 'Снять HWID-блокировку?' })}
+        description={t('violations.hwidBlacklist.confirmRemoveDesc', { defaultValue: 'HWID будет удалён из чёрного списка.' })}
+        confirmLabel={t('common.delete')}
+        variant="destructive"
+        onConfirm={() => { if (confirmRemoveHwid) removeMutation.mutate(confirmRemoveHwid) }}
+      />
+
       {/* List */}
       {isLoading ? (
         <div className="space-y-2">{[1,2,3].map(i => <Skeleton key={i} className="h-16 w-full" />)}</div>
@@ -566,7 +577,7 @@ function HwidBlacklistTab() {
                     {item.action === 'block' ? t('violations.hwidBlacklist.actionBlock') : t('violations.hwidBlacklist.actionAlert')}
                   </Badge>
                   {canEdit && (
-                    <Button variant="ghost" size="sm" onClick={() => removeMutation.mutate(item.hwid)} className="text-dark-400 hover:text-red-400 h-8 w-8 p-0">
+                    <Button variant="ghost" size="sm" onClick={() => setConfirmRemoveHwid(item.hwid)} className="text-dark-400 hover:text-red-400 h-8 w-8 p-0" aria-label={t('common.delete')}>
                       <Trash2 className="w-3.5 h-3.5" />
                     </Button>
                   )}
@@ -938,6 +949,7 @@ function WhitelistTab() {
                       size="sm"
                       onClick={() => setConfirmRemoveUuid(item.user_uuid)}
                       className="text-dark-300 hover:text-red-400 flex-shrink-0"
+                      aria-label={t('common.delete')}
                     >
                       <Trash2 className="w-4 h-4" />
                     </Button>

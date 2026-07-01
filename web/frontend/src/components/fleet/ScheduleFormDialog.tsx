@@ -310,6 +310,7 @@ export default function ScheduleFormDialog({
                       type="button"
                       size="icon"
                       variant="ghost"
+                      aria-label={t('common.delete')}
                       onClick={() => handleRemoveEnvVar(i)}
                       className="h-8 w-8 text-red-400"
                     >
