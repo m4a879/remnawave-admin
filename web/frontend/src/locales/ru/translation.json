@@ -1416,6 +1416,7 @@
     },
     "bulk": {
       "selectAll": "Выбрать все",
+      "selectOne": "Выбрать {{name}}",
       "selected": "Выбрано: {{count}}",
       "enable": "Включить",
       "disable": "Выключить",

@@ -130,6 +130,7 @@ export function HostsTable({ hosts, canEdit, canDelete, selected, onToggleSelect
                     className="accent-primary-500 w-4 h-4 cursor-pointer"
                     checked={selected?.has(host.uuid) || false}
                     onChange={() => onToggleSelect(host.uuid)}
+                    aria-label={t('hosts.bulk.selectOne', { name: host.remark || host.address })}
                   />
                 </TableCell>
               )}

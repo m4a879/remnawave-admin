@@ -990,6 +990,7 @@ export default function Hosts() {
   const [viewMode, setViewMode] = useViewMode('hosts')
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [bulkEditOpen, setBulkEditOpen] = useState(false)
+  const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false)
 
   const toggleSelect = (uuid: string) =>
     setSelected((prev) => {
@@ -1189,7 +1190,7 @@ export default function Hosts() {
           {canEdit && <Button size="sm" variant="secondary" onClick={() => bulkAction.mutate({ action: 'enable' })} disabled={bulkAction.isPending}>{t('hosts.bulk.enable')}</Button>}
           {canEdit && <Button size="sm" variant="secondary" onClick={() => bulkAction.mutate({ action: 'disable' })} disabled={bulkAction.isPending}>{t('hosts.bulk.disable')}</Button>}
           {canEdit && <Button size="sm" variant="secondary" onClick={() => setBulkEditOpen(true)} disabled={bulkAction.isPending}>{t('hosts.bulk.edit')}</Button>}
-          {canDelete && <Button size="sm" variant="destructive" onClick={() => { if (window.confirm(t('hosts.bulk.confirmDelete', { count: selected.size }))) bulkAction.mutate({ action: 'delete' }) }} disabled={bulkAction.isPending}>{t('hosts.bulk.delete')}</Button>}
+          {canDelete && <Button size="sm" variant="destructive" onClick={() => setBulkDeleteOpen(true)} disabled={bulkAction.isPending}>{t('hosts.bulk.delete')}</Button>}
           <Button size="sm" variant="ghost" onClick={clearSelected}>{t('hosts.bulk.clear')}</Button>
         </div>
       )}
@@ -1234,6 +1235,7 @@ export default function Hosts() {
                     className="absolute top-3 left-3 z-10 accent-primary-500 w-4 h-4 cursor-pointer"
                     checked={selected.has(host.uuid)}
                     onChange={() => toggleSelect(host.uuid)}
+                    aria-label={t('hosts.bulk.selectOne', { name: host.remark || host.address })}
                   />
                 )}
                 {viewMode === 'compact' ? (
@@ -1307,6 +1309,17 @@ export default function Hosts() {
             setDeleteConfirmUuid(null)
           }
         }}
+      />
+
+      {/* Confirm bulk delete dialog */}
+      <ConfirmDialog
+        open={bulkDeleteOpen}
+        onOpenChange={(open) => { if (!open) setBulkDeleteOpen(false) }}
+        title={t('hosts.bulk.delete')}
+        description={t('hosts.bulk.confirmDelete', { count: selected.size })}
+        confirmLabel={t('hosts.bulk.delete')}
+        variant="destructive"
+        onConfirm={() => { bulkAction.mutate({ action: 'delete' }); setBulkDeleteOpen(false) }}
       />
     </div>
   )

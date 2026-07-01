@@ -1416,6 +1416,7 @@
     },
     "bulk": {
       "selectAll": "Select all",
+      "selectOne": "Select {{name}}",
       "selected": "Selected: {{count}}",
       "enable": "Enable",
       "disable": "Disable",
