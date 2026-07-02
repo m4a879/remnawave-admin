@@ -12,7 +12,6 @@ services:
     volumes:
       - /var/log/remnanode:/var/log/remnanode:ro
       - ./logs:/app/logs
-      - /var/run/docker.sock:/var/run/docker.sock
     deploy:
       resources:
         limits:
