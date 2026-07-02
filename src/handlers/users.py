@@ -1159,7 +1159,7 @@ async def _handle_user_create_input(message: Message, ctx: dict, admin: BotAdmin
         return
 
     if stage == "traffic_strategy":
-        if text not in ("NO_RESET", "MONTHLY", "WEEKLY", "DAILY"):
+        if text not in ("NO_RESET", "MONTH", "MONTH_ROLLING", "WEEK", "DAY"):
             PENDING_INPUT[user_id] = ctx
             await _send_user_create_prompt(
                 message, _("user.invalid_traffic_strategy"), user_create_traffic_strategy_keyboard(), ctx=ctx
@@ -1403,7 +1403,7 @@ async def _handle_user_create_callback(callback: CallbackQuery, admin: BotAdmin 
 
     if action == "traffic_strategy" and len(parts) >= 3:
         value = parts[2]
-        if value in ("NO_RESET", "MONTHLY", "WEEKLY", "DAILY"):
+        if value in ("NO_RESET", "MONTH", "MONTH_ROLLING", "WEEK", "DAY"):
             data["traffic_limit_strategy"] = value
         ctx["stage"] = "hwid"
         PENDING_INPUT[user_id] = ctx
