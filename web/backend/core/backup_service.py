@@ -71,7 +71,9 @@ async def create_database_backup(database_url: str) -> dict:
 
 async def restore_database_backup(database_url: str, filename: str) -> None:
     """Restore a PostgreSQL dump from a backup file."""
-    filepath = BACKUP_DIR / filename
+    filepath = _safe_backup_path(filename)
+    if filepath is None:
+        raise ValueError(f"Invalid backup filename: {filename}")
     if not filepath.exists():
         raise FileNotFoundError(f"Backup file not found: {filename}")
 
@@ -162,7 +164,9 @@ async def import_config(filename: str, overwrite: bool = False) -> dict:
 
     Returns dict with imported_count, skipped_count.
     """
-    filepath = BACKUP_DIR / filename
+    filepath = _safe_backup_path(filename)
+    if filepath is None:
+        raise ValueError(f"Invalid config filename: {filename}")
     if not filepath.exists():
         raise FileNotFoundError(f"Config file not found: {filename}")
 
@@ -209,7 +213,9 @@ async def import_users_from_file(filename: str) -> dict:
 
     Returns dict with imported_count, skipped_count, errors.
     """
-    filepath = BACKUP_DIR / filename
+    filepath = _safe_backup_path(filename)
+    if filepath is None:
+        raise ValueError(f"Invalid import filename: {filename}")
     if not filepath.exists():
         raise FileNotFoundError(f"File not found: {filename}")
 
