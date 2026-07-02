@@ -2826,6 +2826,61 @@ async def cb_user_happ_link(callback: CallbackQuery) -> None:
         await callback.message.edit_text(_("errors.generic"), reply_markup=nav_keyboard(back_to))
 
 
+@router.callback_query(F.data.startswith("uimport:"))
+async def cb_user_import_links(callback: CallbackQuery, admin: BotAdmin) -> None:
+    """Показывает deep-links импорта подписки в клиентские приложения.
+
+    Схемы happ://, incy:// и т.п. в Telegram некликабельны, поэтому выводим
+    их в <code> — тап копирует ссылку.
+    """
+    if await _not_admin(callback):
+        return
+    if not await require_permission(callback, admin, "users", "view"):
+        return
+    await callback.answer()
+
+    user_uuid = callback.data.split(":", 1)[1]
+    back_to = _get_user_detail_back_target(callback.from_user.id)
+
+    try:
+        user = await data_access.get_user_by_uuid_wrapped(user_uuid)
+        user_info = user.get("response", user)
+        subscription_url = user_info.get("subscriptionUrl")
+        status = user_info.get("status", "UNKNOWN")
+
+        if not subscription_url:
+            await callback.message.edit_text(
+                _("user.no_subscription_url"),
+                reply_markup=user_actions_keyboard(user_uuid, status, back_to=back_to, admin=admin),
+            )
+            return
+
+        from shared.deeplinks import build_deeplinks
+        name = user_info.get("username") or ""
+        links = build_deeplinks(subscription_url, name or None)
+
+        lines = [_("user.import_title"), "", _("user.import_hint"), ""]
+        for item in links:
+            lines.append(f"<b>{_esc(item['label'])}</b>")
+            lines.append(f"<code>{_esc(item['link'])}</code>")
+        text = "\n".join(lines)
+
+        keyboard = InlineKeyboardMarkup(
+            inline_keyboard=[
+                [InlineKeyboardButton(text=_("actions.back"), callback_data=f"user:{user_uuid}")],
+                nav_row(back_to),
+            ]
+        )
+        await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
+    except UnauthorizedError:
+        await callback.message.edit_text(_("errors.unauthorized"), reply_markup=nav_keyboard(back_to))
+    except NotFoundError:
+        await callback.message.edit_text(_("user.not_found"), reply_markup=nav_keyboard(back_to))
+    except ApiClientError:
+        logger.exception("Failed to build import links for user_uuid=%s actor_id=%s", user_uuid, callback.from_user.id)
+        await callback.message.edit_text(_("errors.generic"), reply_markup=nav_keyboard(back_to))
+
+
 @router.callback_query(F.data.startswith("uqr:"))
 async def cb_user_qr(callback: CallbackQuery, admin: BotAdmin) -> None:
     """Обработчик показа QR-кода подписной ссылки пользователя."""

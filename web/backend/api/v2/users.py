@@ -1538,6 +1538,52 @@ async def sync_user_hwid_devices(
         raise api_error(500, E.SYNC_FAILED)
 
 
+@router.get("/{user_uuid}/deeplinks")
+async def get_user_deeplinks(
+    user_uuid: str,
+    admin: AdminUser = Depends(require_permission("users", "view")),
+):
+    """Ссылки быстрого импорта подписки юзера в клиентские приложения.
+
+    Открытые URL-схемы (Happ/v2rayNG/Streisand/Hiddify/Clash) + шифрованный
+    incy://crypt1 (см. shared/deeplinks.py). Имя импорта — panel_name либо
+    username юзера.
+    """
+    await _ensure_user_visible(admin, user_uuid)
+
+    user_data = None
+    try:
+        from shared.database import db_service
+        if db_service.is_connected:
+            user_data = await db_service.get_user_by_uuid(user_uuid)
+    except Exception:
+        pass
+    if not user_data:
+        try:
+            from shared.api_client import api_client
+            resp = await api_client.get_user_by_uuid(user_uuid)
+            user_data = resp.get("response", resp) if isinstance(resp, dict) else resp
+        except ImportError:
+            raise api_error(503, E.API_SERVICE_UNAVAILABLE)
+        except Exception as e:
+            logger.error("Failed to fetch user %s for deeplinks: %s", user_uuid, e)
+            raise api_error(502, E.API_SERVICE_UNAVAILABLE)
+    if not user_data:
+        raise api_error(404, E.USER_NOT_FOUND)
+
+    sub_url = user_data.get("subscription_url") or user_data.get("subscriptionUrl")
+    if not sub_url:
+        raise api_error(404, E.USER_NOT_FOUND, "User has no subscription URL")
+
+    from shared.config_service import config_service
+    from shared.deeplinks import build_deeplinks
+    name = config_service.get("panel_name", "") or user_data.get("username") or ""
+    return {
+        "subscription_url": sub_url,
+        "links": build_deeplinks(sub_url, name or None),
+    }
+
+
 @router.get("/{user_uuid}/hwid-devices", response_model=List[HwidDevice])
 async def get_user_hwid_devices(
     user_uuid: str,
