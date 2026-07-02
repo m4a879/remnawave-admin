@@ -623,6 +623,10 @@ async def get_external_squads(
             logger.error("Error fetching external squads: %s", e)
             return []
 
+    scope = await get_scope(admin, "squad", "view")
+    if scope is not None:
+        squads = [sq for sq in squads if isinstance(sq, dict) and str(sq.get("uuid", "")).lower() in scope]
+
     return [_normalize_squad(sq) for sq in squads if isinstance(sq, dict)]
 
 
