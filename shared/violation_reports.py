@@ -232,9 +232,12 @@ class ViolationReportService:
         )
 
         report.total_violations = stats.get('total', 0)
+        # SQL-статистика отдаёт severity-бакеты critical/high/medium, а не
+        # warning/monitor — исторические имена полей отчёта маппим на них,
+        # иначе warning_count/monitor_count всегда 0.
         report.critical_count = stats.get('critical', 0)
-        report.warning_count = stats.get('warning', 0)
-        report.monitor_count = stats.get('monitor', 0)
+        report.warning_count = stats.get('high', 0)
+        report.monitor_count = stats.get('medium', 0)
         report.unique_users = stats.get('unique_users', 0)
         report.avg_score = stats.get('avg_score', 0.0)
         report.max_score = stats.get('max_score', 0.0)
@@ -490,9 +493,12 @@ class ViolationReportService:
         )
 
         report.total_violations = stats.get('total', 0)
+        # SQL-статистика отдаёт severity-бакеты critical/high/medium, а не
+        # warning/monitor — исторические имена полей отчёта маппим на них,
+        # иначе warning_count/monitor_count всегда 0.
         report.critical_count = stats.get('critical', 0)
-        report.warning_count = stats.get('warning', 0)
-        report.monitor_count = stats.get('monitor', 0)
+        report.warning_count = stats.get('high', 0)
+        report.monitor_count = stats.get('medium', 0)
         report.unique_users = stats.get('unique_users', 0)
         report.avg_score = stats.get('avg_score', 0.0)
         report.max_score = stats.get('max_score', 0.0)

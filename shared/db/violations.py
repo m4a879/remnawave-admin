@@ -439,8 +439,8 @@ class ViolationsMixin:
                 return dict(row) if row else {
                     'total': 0,
                     'critical': 0,
-                    'warning': 0,
-                    'monitor': 0,
+                    'high': 0,
+                    'medium': 0,
                     'unique_users': 0,
                     'avg_score': 0.0,
                     'max_score': 0.0
