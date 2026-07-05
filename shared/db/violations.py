@@ -60,31 +60,48 @@ class ViolationsMixin:
         hwid_matched_users: Optional[str] = None,
         user_agent_score: Optional[float] = None,
         suspicious_user_agents: Optional[str] = None,
-    ) -> Optional[int]:
+    ) -> Tuple[Optional[int], bool]:
         """
         Сохранить нарушение в базу данных.
 
         Returns:
-            ID созданной записи или None при ошибке
+            (ID записи, created): created=False — дедуп вернул существующую
+            pending-запись (или ошибка/нет БД). Downstream-события
+            (violation.created, автоблок) должны срабатывать только при created=True.
         """
         if not self.is_connected:
-            return None
+            return None, False
 
         try:
             async with self.acquire() as conn:
                 async with conn.transaction():
-                    # Deduplication: skip if user already has an unresolved violation
-                    existing = await conn.fetchval(
+                    # Deduplication: в пределах окна не плодим записи об одном инциденте.
+                    # Без окна старое pending-нарушение (вне выборки UI) глушило бы новые
+                    # записи вечно — уведомления идут, а во вкладке «Нарушения» пусто.
+                    # Эскалация: более высокий скор (напр. торрент=100) пробивает дедуп.
+                    try:
+                        from shared.config_service import config_service
+                        raw_window = config_service.get("violation_dedup_window_hours", 24)
+                        dedup_hours = int(raw_window) if raw_window is not None else 24
+                    except Exception:
+                        dedup_hours = 24
+
+                    existing = await conn.fetchrow(
                         select_sql(
                             VIOLATIONS_TABLE,
-                            "id",
-                            "WHERE user_uuid = $1 AND action_taken IS NULL ORDER BY detected_at DESC LIMIT 1",
+                            "id, score",
+                            "WHERE user_uuid = $1 AND action_taken IS NULL "
+                            "AND detected_at > NOW() - ($2 * INTERVAL '1 hour') "
+                            "ORDER BY detected_at DESC LIMIT 1",
                         ),
-                        user_uuid,
+                        user_uuid, dedup_hours,
                     )
-                    if existing:
-                        logger.debug("Skipping duplicate violation for user %s (pending id=%d)", user_uuid, existing)
-                        return existing
+                    if existing and float(existing["score"] or 0) >= score:
+                        logger.debug(
+                            "Skipping duplicate violation for user %s (pending id=%d, score %.1f >= %.1f)",
+                            user_uuid, existing["id"], float(existing["score"] or 0), score,
+                        )
+                        return existing["id"], False
 
                     result = await conn.fetchval(
                         insert_sql(
@@ -115,11 +132,11 @@ class ViolationsMixin:
                         VIOLATIONS_DETECTED.labels(
                             action=(recommended_action or "unknown").lower()
                         ).inc()
-                    return result
+                    return result, result is not None
 
         except Exception as e:
             logger.error("Error saving violation for user %s: %s", user_uuid, e, exc_info=True)
-            return None
+            return None, False
 
     async def get_violations_for_period(
         self,

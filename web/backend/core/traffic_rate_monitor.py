@@ -356,7 +356,7 @@ class TrafficRateMonitor:
             auto_block_gb = cfg.get("auto_block_gb", 50.0)
             rec_action = "hard_block" if auto_action == "block_user" and delta_gb >= auto_block_gb else "monitor"
 
-            violation_id = await db_service.save_violation(
+            violation_id, violation_created = await db_service.save_violation(
                 user_uuid=user_uuid,
                 username=username,
                 score=min(rate / 10, 10.0),  # normalize: 10 GB/h → 1.0, 100 GB/h → 10.0
@@ -365,16 +365,17 @@ class TrafficRateMonitor:
                 reasons=[reason],
             )
 
-            from web.backend.core.webhook_security import fire_event
-            fire_event("violation.created", {
-                "violation_id": violation_id,
-                "user_uuid": user_uuid,
-                "username": username,
-                "score": min(rate / 10, 10.0),
-                "recommended_action": rec_action,
-                "reasons": [reason],
-                "source": "traffic_rate",
-            })
+            if violation_created:
+                from web.backend.core.webhook_security import fire_event
+                fire_event("violation.created", {
+                    "violation_id": violation_id,
+                    "user_uuid": user_uuid,
+                    "username": username,
+                    "score": min(rate / 10, 10.0),
+                    "recommended_action": rec_action,
+                    "reasons": [reason],
+                    "source": "traffic_rate",
+                })
         except Exception as e:
             logger.error("Failed to send traffic rate notification for %s: %s",
                          violator["username"], e)

@@ -586,7 +586,7 @@ async def _process_torrent_violations(
                 ips = list(set(e.ip_address for e in user_events))
 
                 # Save as violation (score=100)
-                violation_id = await db_service.save_violation(
+                violation_id, violation_created = await db_service.save_violation(
                     user_uuid=user_uuid,
                     score=100.0,
                     recommended_action="hard_block",
@@ -602,6 +602,11 @@ async def _process_torrent_violations(
                     simultaneous_connections=len(ips),
                     unique_ips_count=len(ips),
                 )
+
+                if not violation_created:
+                    # Дедуп: свежая pending-запись уже есть — не спамим событиями
+                    logger.debug("Torrent violation deduplicated for user %s (id=%s)", user_uuid, violation_id)
+                    continue
 
                 fire_event("violation.created", {
                     "violation_id": violation_id,
@@ -915,7 +920,7 @@ async def _handle_violation(
         telegram_id = user_info.get("telegram_id") if user_info else None
         device_limit = user_info.get("hwidDeviceLimit", 1) if user_info else 1
 
-        violation_id = await db_service.save_violation(
+        violation_id, violation_created = await db_service.save_violation(
             user_uuid=user_uuid,
             score=violation_score.total,
             recommended_action=violation_score.recommended_action.value,
@@ -951,6 +956,13 @@ async def _handle_violation(
             ]) if ua and ua.suspicious_agents else None,
         )
 
+        if not violation_created:
+            # Дедуп вернул существующую pending-запись: события и автоблок уже
+            # отработали при её создании — повторные срабатывания (в т.ч.
+            # автоматизаций на violation.created) только путают админа.
+            logger.debug("Violation deduplicated for user %s (id=%s)", user_uuid, violation_id)
+            return
+
         fire_event("violation.created", {
             "violation_id": violation_id,
             "user_uuid": user_uuid,
@@ -965,20 +977,26 @@ async def _handle_violation(
 
         from shared.violation_detector import ViolationAction
         if violation_score.recommended_action == ViolationAction.HARD_BLOCK:
-            try:
-                from shared.api_client import api_client
-                await api_client.disable_user(user_uuid)
-                logger.warning("Auto-blocked user %s score=%.1f", user_uuid[:8], violation_score.total)
-                fire_event("user.blocked", {
-                    "uuid": user_uuid,
-                    "username": username,
-                    "reason": "violation",
-                    "details": f"hard_block recommended (score={violation_score.total:.1f})",
-                    "violation_id": violation_id,
-                    "blocked_by": "auto",
-                })
-            except Exception as block_error:
-                logger.warning("Failed to auto-block user %s: %s", user_uuid, block_error)
+            if config_service.get("violation_auto_hard_block", True):
+                try:
+                    from shared.api_client import api_client
+                    await api_client.disable_user(user_uuid)
+                    logger.warning("Auto-blocked user %s score=%.1f", user_uuid[:8], violation_score.total)
+                    fire_event("user.blocked", {
+                        "uuid": user_uuid,
+                        "username": username,
+                        "reason": "violation",
+                        "details": f"hard_block recommended (score={violation_score.total:.1f})",
+                        "violation_id": violation_id,
+                        "blocked_by": "auto",
+                    })
+                except Exception as block_error:
+                    logger.warning("Failed to auto-block user %s: %s", user_uuid, block_error)
+            else:
+                logger.info(
+                    "Auto-block skipped for user %s (violation_auto_hard_block=off, score=%.1f)",
+                    user_uuid[:8], violation_score.total,
+                )
 
         try:
             from web.backend.api.v2.websocket import broadcast_violation

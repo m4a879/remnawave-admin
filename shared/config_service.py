@@ -1094,6 +1094,26 @@ DEFAULT_CONFIG_DEFINITIONS: List[Dict[str, Any]] = [
         "default_value": "30",
         "sort_order": 43,
     },
+    {
+        "key": "violation_dedup_window_hours",
+        "value_type": "int",
+        "category": "violations",
+        "subcategory": "violation_pipeline",
+        "display_name": "Окно дедупликации записей (часы)",
+        "description": "Пока у пользователя есть неразрешённое нарушение свежее этого окна, повторные детекты не создают новую запись (кроме случаев с более высоким скором). 0 — дедупликация отключена.",
+        "default_value": "24",
+        "sort_order": 44,
+    },
+    {
+        "key": "violation_auto_hard_block",
+        "value_type": "bool",
+        "category": "violations",
+        "subcategory": "violation_pipeline",
+        "display_name": "Автоблокировка при hard_block",
+        "description": "Автоматически отключать пользователя через Panel API, когда детектор рекомендует жёсткую блокировку. Если выключено — только уведомление и запись нарушения.",
+        "default_value": "true",
+        "sort_order": 45,
+    },
     # === USER BLACKLIST ===
     {
         "key": "user_blacklist_enabled",
