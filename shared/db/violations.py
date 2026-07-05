@@ -764,7 +764,8 @@ class ViolationsMixin:
                             VIOLATIONS_TABLE,
                             "action_taken = $1, action_taken_at = NOW(), action_taken_by = $2, "
                             "admin_comment = $3, score = 0, temporal_score = 0, geo_score = 0, "
-                            "asn_score = 0, profile_score = 0, device_score = 0, hwid_score = 0",
+                            "asn_score = 0, profile_score = 0, device_score = 0, hwid_score = 0, "
+                            "user_agent_score = 0",
                             "id = $4",
                         ),
                         action_taken, admin_telegram_id, admin_comment, violation_id
@@ -807,7 +808,8 @@ class ViolationsMixin:
                         VIOLATIONS_TABLE,
                         "action_taken = 'annulled', action_taken_at = NOW(), action_taken_by = $1, "
                         "admin_comment = $2, score = 0, temporal_score = 0, geo_score = 0, "
-                        "asn_score = 0, profile_score = 0, device_score = 0, hwid_score = 0",
+                        "asn_score = 0, profile_score = 0, device_score = 0, hwid_score = 0, "
+                        "user_agent_score = 0",
                         "user_uuid = $3 AND action_taken IS NULL",
                     ),
                     admin_telegram_id, admin_comment, user_uuid,
@@ -841,7 +843,8 @@ class ViolationsMixin:
                         VIOLATIONS_TABLE,
                         "action_taken = 'annulled', action_taken_at = NOW(), action_taken_by = $1, "
                         "admin_comment = $2, score = 0, temporal_score = 0, geo_score = 0, "
-                        "asn_score = 0, profile_score = 0, device_score = 0, hwid_score = 0",
+                        "asn_score = 0, profile_score = 0, device_score = 0, hwid_score = 0, "
+                        "user_agent_score = 0",
                         "action_taken IS NULL",
                     ),
                     admin_telegram_id, admin_comment,
