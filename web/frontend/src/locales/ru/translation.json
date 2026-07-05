@@ -1600,7 +1600,8 @@
       "dateTo": "По",
       "username": "Имя пользователя",
       "usernamePlaceholder": "Поиск по имени пользователя",
-      "sortByCount": "Сортировать по количеству"
+      "sortByCount": "Сортировать по количеству",
+      "includeAnnulled": "Показывать аннулированные"
     },
     "stats": {
       "total": "Всего",

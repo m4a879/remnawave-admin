@@ -1600,7 +1600,8 @@
       "dateTo": "To",
       "username": "Username",
       "usernamePlaceholder": "Search by username",
-      "sortByCount": "Sort by count"
+      "sortByCount": "Sort by count",
+      "includeAnnulled": "Show annulled"
     },
     "stats": {
       "total": "Total",

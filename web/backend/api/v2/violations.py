@@ -93,6 +93,7 @@ async def list_violations(
     order: str = Query("desc", description="Sort order: asc or desc"),
     recommended_action: Optional[str] = Query(None, description="Filter by recommended action"),
     username: Optional[str] = Query(None, description="Search by username (partial match)"),
+    include_annulled: bool = Query(False, description="Include annulled (false-positive) violations"),
     admin: AdminUser = Depends(require_permission("violations", "view")),
     db: DatabaseService = Depends(get_db),
 ):
@@ -108,6 +109,8 @@ async def list_violations(
     - **country**: Фильтр по коду страны
     - **date_from**: Фильтр от даты (ISO формат)
     - **date_to**: Фильтр до даты (ISO формат)
+    - **include_annulled**: Показывать аннулированные (по умолчанию скрыты, чтобы
+      список совпадал со счётчиками статистики)
     """
     try:
         if not db.is_connected:
@@ -151,6 +154,7 @@ async def list_violations(
             recommended_action=recommended_action,
             username=username,
             user_uuid_whitelist=user_uuid_whitelist,
+            include_annulled=include_annulled,
         )
 
         # Подсчёт для пагинации

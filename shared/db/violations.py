@@ -155,6 +155,7 @@ class ViolationsMixin:
         recommended_action: Optional[str] = None,
         username: Optional[str] = None,
         user_uuid_whitelist: Optional[List[str]] = None,
+        include_annulled: bool = False,
     ) -> List[Dict[str, Any]]:
         """
         Получить нарушения за указанный период с фильтрацией на стороне БД.
@@ -217,6 +218,12 @@ class ViolationsMixin:
                         conditions.append("action_taken IS NOT NULL")
                     else:
                         conditions.append("action_taken IS NULL")
+
+                # Аннулированные — ложные срабатывания (score обнулён). По умолчанию
+                # скрыты, чтобы список совпадал со статистикой (та всегда исключает
+                # 'annulled'); показываются только по явному запросу include_annulled.
+                if not include_annulled:
+                    conditions.append("action_taken IS DISTINCT FROM 'annulled'")
 
                 if ip:
                     conditions.append(f"${idx} = ANY(ip_addresses)")
@@ -286,6 +293,7 @@ class ViolationsMixin:
         recommended_action: Optional[str] = None,
         username: Optional[str] = None,
         user_uuid_whitelist: Optional[List[str]] = None,
+        include_annulled: bool = False,
     ) -> int:
         """Подсчитать количество нарушений за период с фильтрами (для пагинации)."""
         if not self.is_connected:
@@ -331,6 +339,11 @@ class ViolationsMixin:
                         conditions.append("action_taken IS NOT NULL")
                     else:
                         conditions.append("action_taken IS NULL")
+
+                # См. get_violations_for_period: аннулированные скрыты по умолчанию,
+                # иначе count списка расходится со статистикой.
+                if not include_annulled:
+                    conditions.append("action_taken IS DISTINCT FROM 'annulled'")
 
                 if ip:
                     conditions.append(f"${idx} = ANY(ip_addresses)")

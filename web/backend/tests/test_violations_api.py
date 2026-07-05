@@ -76,6 +76,27 @@ class TestListViolations:
         assert resp.status_code == 200
 
     @pytest.mark.asyncio
+    async def test_list_hides_annulled_by_default(self, app, client):
+        """H1: без include_annulled список исключает аннулированные (совпадает со статистикой)."""
+        from web.backend.api.deps import get_db
+
+        mock_db = MagicMock()
+        mock_db.is_connected = True
+        mock_db.count_violations_for_period = AsyncMock(return_value=0)
+        mock_db.get_violations_for_period = AsyncMock(return_value=[])
+        app.dependency_overrides[get_db] = lambda: mock_db
+
+        resp = await client.get("/api/v2/violations")
+        assert resp.status_code == 200
+        # дефолт: include_annulled=False прокидывается в оба запроса
+        assert mock_db.get_violations_for_period.call_args.kwargs["include_annulled"] is False
+        assert mock_db.count_violations_for_period.call_args.kwargs["include_annulled"] is False
+
+        resp = await client.get("/api/v2/violations", params={"include_annulled": "true"})
+        assert resp.status_code == 200
+        assert mock_db.get_violations_for_period.call_args.kwargs["include_annulled"] is True
+
+    @pytest.mark.asyncio
     async def test_list_violations_as_viewer_allowed(self, app, viewer):
         """Viewers have violations.view permission."""
         from web.backend.api.deps import get_db as _get_db

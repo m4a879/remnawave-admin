@@ -85,6 +85,7 @@ const fetchViolations = async (params: {
   recommended_action?: string
   user_uuid?: string
   username?: string
+  include_annulled?: boolean
 }): Promise<PaginatedResponse> => {
   const p: Record<string, unknown> = {
     page: params.page,
@@ -103,6 +104,7 @@ const fetchViolations = async (params: {
   if (params.recommended_action) p.recommended_action = params.recommended_action
   if (params.user_uuid) p.user_uuid = params.user_uuid
   if (params.username) p.username = params.username
+  if (params.include_annulled) p.include_annulled = true
   const { data } = await client.get('/violations', { params: p })
   return data
 }
@@ -1587,6 +1589,7 @@ export default function Violations() {
   const usernameFilter = getP('username', '')
   const dateFrom = getP('dateFrom', '')
   const dateTo = getP('dateTo', '')
+  const includeAnnulled = getP('annulled', '') === '1'
   const selectedViolationId = getN('vid', 0) || null
 
   // Batch param update helper — atomic, no race conditions
@@ -1618,6 +1621,7 @@ export default function Violations() {
   const setUsernameFilter = useCallback((v: string) => setParams({ username: v || null, page: null }), [setParams])
   const setDateFrom = useCallback((v: string) => setParams({ dateFrom: v || null, page: null }), [setParams])
   const setDateTo = useCallback((v: string) => setParams({ dateTo: v || null, page: null }), [setParams])
+  const setIncludeAnnulled = useCallback((v: boolean) => setParams({ annulled: v ? '1' : null, page: null }), [setParams])
   const setSelectedViolationId = useCallback((v: number | null) => setParams({ vid: v ? String(v) : null }), [setParams])
 
   // Auto-select first violation when coming from Top Violators
@@ -1681,7 +1685,7 @@ export default function Violations() {
 
   // Fetch violations list
   const { data, isLoading, isFetching, isError, refetch } = useQuery({
-    queryKey: ['violations', page, perPage, severity, days, resolved, minScore, ipFilter, countryFilter, dateFrom, dateTo, sortBy, sortOrder, actionFilter, userUuidFilter, usernameFilter],
+    queryKey: ['violations', page, perPage, severity, days, resolved, minScore, ipFilter, countryFilter, dateFrom, dateTo, sortBy, sortOrder, actionFilter, userUuidFilter, usernameFilter, includeAnnulled],
     queryFn: () =>
       fetchViolations({
         page,
@@ -1692,6 +1696,7 @@ export default function Violations() {
         min_score: minScore,
         sort_by: sortBy,
         order: sortOrder,
+        include_annulled: includeAnnulled,
         ...(ipFilter && { ip: ipFilter }),
         ...(countryFilter && { country: countryFilter }),
         ...(dateFrom && { date_from: dateFrom }),
@@ -2028,7 +2033,8 @@ export default function Violations() {
                     setParams({
                       severity: null, days: null, minScore: null, ip: null,
                       country: null, dateFrom: null, dateTo: null, sortBy: null,
-                      order: null, action: null, user: null, username: null, page: null,
+                      order: null, action: null, user: null, username: null,
+                      annulled: null, page: null,
                     })
                   }}
                   className="w-full"
@@ -2131,6 +2137,17 @@ export default function Violations() {
                     className="flex h-10 w-full rounded-md border border-[var(--glass-border)] bg-[var(--glass-bg)] pl-9 pr-3 py-2 text-sm text-white ring-offset-background placeholder:text-dark-300 focus:outline-none focus:ring-2 focus:ring-primary-500/50 focus:ring-offset-2 focus:ring-offset-dark-800"
                   />
                 </div>
+              </div>
+              <div className="flex items-end">
+                <label className="flex items-center gap-2 h-10 cursor-pointer text-sm text-dark-100 select-none">
+                  <input
+                    type="checkbox"
+                    checked={includeAnnulled}
+                    onChange={(e) => setIncludeAnnulled(e.target.checked)}
+                    className="w-4 h-4 rounded border-[var(--glass-border)] bg-[var(--glass-bg)] accent-primary-500 cursor-pointer"
+                  />
+                  {t('violations.filters.includeAnnulled', 'Показывать аннулированные')}
+                </label>
               </div>
               {(userUuidFilter || usernameFilter) && (
                 <div className="flex items-end">
