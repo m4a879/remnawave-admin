@@ -119,6 +119,57 @@ class TestListViolations:
         assert resp.status_code == 401
 
 
+class TestAnnulScope:
+    """H4: scope-проверки на аннулировании."""
+
+    @pytest.mark.asyncio
+    async def test_annul_all_forbidden_for_scoped_admin(self, app, client):
+        """Глобальный annul-all запрещён админу с ограниченной видимостью."""
+        from web.backend.api.deps import get_db
+        mock_db = MagicMock()
+        mock_db.is_connected = True
+        mock_db.annul_all_pending_violations = AsyncMock(return_value=99)
+        app.dependency_overrides[get_db] = lambda: mock_db
+
+        with patch("web.backend.core.rbac.get_visible_user_uuids",
+                   new_callable=AsyncMock, return_value={"aaaa"}):
+            resp = await client.post("/api/v2/violations/annul-all", json={})
+        assert resp.status_code == 403
+        mock_db.annul_all_pending_violations.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_annul_all_allowed_for_unrestricted_admin(self, app, client):
+        """Админ без ограничения видимости (visible=None) проходит гейт."""
+        from web.backend.api.deps import get_db
+        mock_db = MagicMock()
+        mock_db.is_connected = True
+        mock_db.annul_all_pending_violations = AsyncMock(return_value=5)
+        app.dependency_overrides[get_db] = lambda: mock_db
+
+        with patch("web.backend.core.rbac.get_visible_user_uuids",
+                   new_callable=AsyncMock, return_value=None), \
+             patch("web.backend.api.v2.violations.write_audit_log", new_callable=AsyncMock):
+            resp = await client.post("/api/v2/violations/annul-all", json={})
+        assert resp.status_code == 200
+        mock_db.annul_all_pending_violations.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_annul_by_id_forbidden_out_of_scope(self, app, client):
+        """Аннулирование нарушения юзера вне scope → 403."""
+        from web.backend.api.deps import get_db
+        mock_db = MagicMock()
+        mock_db.is_connected = True
+        mock_db.get_violation_by_id = AsyncMock(return_value={"id": 7, "user_uuid": "dead-beef"})
+        mock_db.update_violation_action = AsyncMock(return_value=True)
+        app.dependency_overrides[get_db] = lambda: mock_db
+
+        with patch("web.backend.core.rbac.get_visible_user_uuids",
+                   new_callable=AsyncMock, return_value={"other-uuid"}):
+            resp = await client.post("/api/v2/violations/7/annul", json={})
+        assert resp.status_code == 403
+        mock_db.update_violation_action.assert_not_called()
+
+
 class TestRowToListItem:
     """Tests for _row_to_list_item helper."""
 
