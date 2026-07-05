@@ -3971,6 +3971,12 @@
       "nodeLabel": "Node",
       "nodePlaceholder": "Select node",
       "nextBillingLabel": "Next Billing Date",
+      "tabExistingNode": "Existing node",
+      "tabCustomName": "Custom name",
+      "customNameLabel": "Custom name",
+      "customNamePlaceholder": "Management Server",
+      "customNameHint": "For servers that are not panel nodes — a router, standalone VPS, etc.",
+      "customBadge": "External",
       "deleteTitle": "Remove Billing Node",
       "deleteDescription": "Are you sure you want to remove this billing node association?"
     }

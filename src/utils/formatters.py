@@ -771,10 +771,11 @@ def build_billing_nodes(data: dict, t: Callable[[str], str]) -> str:
         f"<b>{t('billing_nodes.nodes_section')}</b>",
     ]
     for item in nodes[:10]:
-        node = item.get("node", {})
+        # 2.8.0: кастомная биллинг-нода не привязана к ноде панели — node=null, имя в item.name
+        node = item.get("node") or {}
         prov = item.get("provider", {})
-        node_name = node.get("name", NA)
-        country_code = node.get("countryCode", NA)
+        node_name = node.get("name") or item.get("name") or NA
+        country_code = node.get("countryCode") or "—"
         provider_name = prov.get("name", NA)
         next_billing = format_datetime(item.get("nextBillingAt"))
         lines.append(

@@ -193,6 +193,42 @@ class TestBillingNodes:
             "nodeUuid": "node-1",
         })
         assert resp.status_code == 200
+        kwargs = mock_create.call_args.kwargs
+        assert kwargs["node_uuid"] == "node-1"
+        assert kwargs["name"] is None
+        # 2.8.0 требует nextBillingAt всегда — без даты подставляется «сегодня»
+        assert kwargs["next_billing_at"]
+
+    @pytest.mark.asyncio
+    @patch("shared.api_client.api_client.create_infra_billing_node", new_callable=AsyncMock, return_value={"response": {"uuid": "bn-new"}})
+    async def test_create_node_custom_name(self, mock_create, client):
+        """2.8.0: биллинг-нода с пользовательским названием, без реальной ноды."""
+        resp = await client.post("/api/v2/billing/nodes", json={
+            "providerUuid": "prov-1",
+            "name": "Management Server",
+            "nextBillingAt": "2026-08-01T00:00:00.000Z",
+        })
+        assert resp.status_code == 200
+        kwargs = mock_create.call_args.kwargs
+        assert kwargs["node_uuid"] is None
+        assert kwargs["name"] == "Management Server"
+        assert kwargs["next_billing_at"] == "2026-08-01T00:00:00.000Z"
+
+    @pytest.mark.asyncio
+    async def test_create_node_both_node_and_name_rejected(self, client):
+        resp = await client.post("/api/v2/billing/nodes", json={
+            "providerUuid": "prov-1",
+            "nodeUuid": "node-1",
+            "name": "Management Server",
+        })
+        assert resp.status_code == 422
+
+    @pytest.mark.asyncio
+    async def test_create_node_neither_node_nor_name_rejected(self, client):
+        resp = await client.post("/api/v2/billing/nodes", json={
+            "providerUuid": "prov-1",
+        })
+        assert resp.status_code == 422
 
     @pytest.mark.asyncio
     @patch("shared.api_client.api_client.update_infra_billing_nodes", new_callable=AsyncMock, return_value={"response": {}})

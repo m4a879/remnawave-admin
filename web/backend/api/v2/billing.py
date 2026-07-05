@@ -3,7 +3,7 @@ import logging
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
 
 from web.backend.api.deps import AdminUser, require_permission
 
@@ -225,8 +225,17 @@ async def delete_billing_record(
 
 class BillingNodeCreate(BaseModel):
     providerUuid: str
-    nodeUuid: str
+    # 2.8.0: биллинг-нода привязывается либо к реальной ноде (nodeUuid),
+    # либо создаётся с пользовательским названием (name) — ровно одно из двух
+    nodeUuid: Optional[str] = None
+    name: Optional[str] = None
     nextBillingAt: Optional[str] = None
+
+    @model_validator(mode="after")
+    def _node_or_name(self):
+        if bool(self.nodeUuid) == bool(self.name):
+            raise ValueError("Exactly one of nodeUuid or name must be provided")
+        return self
 
 
 class BillingNodeUpdate(BaseModel):
@@ -254,13 +263,21 @@ async def create_billing_node(
     data: BillingNodeCreate,
     admin: AdminUser = Depends(require_permission("billing", "create")),
 ):
-    """Associate a node with billing."""
+    """Associate a node with billing (real node or custom-named)."""
     try:
         from shared.api_client import api_client
+
+        # 2.8.0 требует nextBillingAt всегда — дефолт как в панели: сегодня
+        next_billing_at = data.nextBillingAt
+        if not next_billing_at:
+            from datetime import datetime, timezone
+            next_billing_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+
         result = await api_client.create_infra_billing_node(
             provider_uuid=data.providerUuid,
             node_uuid=data.nodeUuid,
-            next_billing_at=data.nextBillingAt,
+            next_billing_at=next_billing_at,
+            name=data.name,
         )
         return result.get("response", result)
     except Exception as e:
@@ -419,13 +436,16 @@ async def billing_per_node(
         for bn in billing_nodes:
             if not isinstance(bn, dict):
                 continue
-            node_uuid = bn.get("nodeUuid") or bn.get("node_uuid", "")
+            node_uuid = bn.get("nodeUuid") or bn.get("node_uuid") or ""
             provider_uuid = bn.get("providerUuid") or bn.get("provider_uuid", "")
             metrics = node_metrics.get(node_uuid, {})
+            # 2.8.0: кастомная биллинг-нода без реальной ноды — имя лежит в bn.name
+            node_info = bn.get("node") or {}
+            node_name = metrics.get("name") or node_info.get("name") or bn.get("name") or "Unknown"
 
             items.append({
                 "node_uuid": node_uuid,
-                "node_name": metrics.get("name", "Unknown"),
+                "node_name": node_name,
                 "provider": provider_map.get(provider_uuid, "Unknown"),
                 "next_billing_at": bn.get("nextBillingAt"),
                 "is_connected": metrics.get("is_connected", False),

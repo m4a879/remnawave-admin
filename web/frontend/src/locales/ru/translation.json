@@ -3971,6 +3971,12 @@
       "nodeLabel": "Нода",
       "nodePlaceholder": "Выберите ноду",
       "nextBillingLabel": "Дата следующего платежа",
+      "tabExistingNode": "Существующий узел",
+      "tabCustomName": "Пользовательское название",
+      "customNameLabel": "Пользовательское название",
+      "customNamePlaceholder": "Management Server",
+      "customNameHint": "Для серверов, которых нет среди нод панели — роутер, отдельный VPS и т.п.",
+      "customBadge": "Внешняя",
       "deleteTitle": "Удалить биллинговую ноду",
       "deleteDescription": "Вы уверены, что хотите удалить привязку биллинга к этой ноде?"
     }

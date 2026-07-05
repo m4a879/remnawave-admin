@@ -738,6 +738,8 @@
     "create": "➕ Add billing node",
     "update": "✏️ Update billing date",
     "delete": "🗑 Delete billing entry",
+    "custom_name_btn": "✏️ Custom name",
+    "prompt_custom_name": "✏️ Enter a name for the billing entry.\n\nFor servers that are not panel nodes — a router, standalone VPS, etc.\nExample: <code>Management Server</code>",
     "prompt_create": "Send: <provider_uuid> <node_uuid> [nextBillingAt ISO].",
     "prompt_update": "Send: <nextBillingAt ISO> <uuid1> <uuid2> ...",
     "prompt_delete": "Send billing node UUID to delete.",
@@ -745,7 +747,7 @@
     "deleted": "🗑 Billing node deleted.",
     "invalid": "⚠️ Invalid billing node payload.",
     "prompt_new_date": "✏️ Enter new payment date:\n\nFormat: `YYYY-MM-DDTHH:mm:ss.sssZ`\nExample: `2025-01-17T15:38:45.065Z`",
-    "prompt_date_optional": "💡 Enter next payment date (optional):\n\nFormat: `YYYY-MM-DDTHH:mm:ss.sssZ`\nExample: `2025-01-17T15:38:45.065Z`\n\nOr send an empty message to skip.",
+    "prompt_date_optional": "💡 Enter next payment date:\n\nFormat: <code>YYYY-MM-DD</code> or <code>YYYY-MM-DDTHH:mm:ss.sssZ</code>\nExample: <code>2026-08-01</code>\n\n\"Skip step\" — use today's date.",
     "stats_by_provider_line": "  • *{provider_name}*: `{count}` nodes"
   },
   "bulk_hosts": {

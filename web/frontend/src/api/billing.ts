@@ -20,7 +20,10 @@ export interface BillingRecord {
 export interface BillingNode {
   uuid: string
   provider: { uuid: string; name: string }
-  node: { uuid: string; name: string; countryCode: string }
+  // 2.8.0: биллинг-нода с пользовательским названием не привязана к реальной ноде
+  node: { uuid: string; name: string; countryCode: string } | null
+  nodeUuid: string | null
+  name: string | null
   nextBillingAt: string
   createdAt: string
 }
@@ -79,7 +82,7 @@ export const billingApi = {
     const { data } = await client.get('/billing/nodes')
     return data
   },
-  createNode: async (payload: { providerUuid: string; nodeUuid: string; nextBillingAt?: string }) => {
+  createNode: async (payload: { providerUuid: string; nodeUuid?: string; name?: string; nextBillingAt?: string }) => {
     const { data } = await client.post('/billing/nodes', payload)
     return data
   },
