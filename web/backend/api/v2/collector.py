@@ -1098,7 +1098,7 @@ async def collector_stats(request: Request):
             "config": {
                 "drain_interval_sec": config_service.get("violation_drain_interval", _VIOLATION_DRAIN_INTERVAL),
                 "chunk_size": config_service.get("violation_chunk_size", _VIOLATION_CHUNK_SIZE),
-                "cooldown_minutes": config_service.get("violations_check_cooldown_minutes", VIOLATION_CHECK_COOLDOWN_MINUTES),
+                "cooldown_minutes": config_service.get("violation_check_cooldown_minutes", VIOLATION_CHECK_COOLDOWN_MINUTES),
                 "max_background_tasks": config_service.get("violation_max_background_tasks", _MAX_BACKGROUND_TASKS),
             },
             "worker_started_at": _stats["worker_started_at"],
