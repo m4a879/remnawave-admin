@@ -193,12 +193,12 @@ class ViolationsMixin:
                 idx = 4
 
                 if user_uuid_whitelist is not None:
-                    conditions.append(f"user_uuid::text = ANY(${idx})")
+                    conditions.append(f"user_uuid = ANY(${idx}::uuid[])")
                     params.append(user_uuid_whitelist)
                     idx += 1
 
                 if user_uuid:
-                    conditions.append(f"user_uuid::text = ${idx}")
+                    conditions.append(f"user_uuid = ${idx}::uuid")
                     params.append(user_uuid)
                     idx += 1
 
@@ -314,12 +314,12 @@ class ViolationsMixin:
                 idx = 4
 
                 if user_uuid_whitelist is not None:
-                    conditions.append(f"user_uuid::text = ANY(${idx})")
+                    conditions.append(f"user_uuid = ANY(${idx}::uuid[])")
                     params.append(user_uuid_whitelist)
                     idx += 1
 
                 if user_uuid:
-                    conditions.append(f"user_uuid::text = ${idx}")
+                    conditions.append(f"user_uuid = ${idx}::uuid")
                     params.append(user_uuid)
                     idx += 1
 
@@ -525,7 +525,7 @@ class ViolationsMixin:
                     FROM (
                         SELECT user_uuid, unnest(reasons) as reason
                         FROM {VIOLATIONS_TABLE}
-                        WHERE user_uuid::text = ANY($1)
+                        WHERE user_uuid = ANY($1::uuid[])
                         AND detected_at >= $2
                         AND detected_at < $3
                         AND score >= $4
