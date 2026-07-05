@@ -1008,6 +1008,8 @@
     "invalid_format": "❌ Invalid format",
     "unknown_action": "❌ Unknown action: {action}",
     "error": "❌ Error: {e}",
+    "no_permission": "⛔️ You don't have permission for this action",
+    "out_of_scope": "⛔️ User is outside your visibility scope",
     "user_info": "👤 {username}\nStatus: {status}\nTraffic: {traffic}\nUUID: {uuid}",
     "info_failed": "❌ Failed to get info: {e}",
     "blocked": "🔒 {username} blocked",

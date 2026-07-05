@@ -1008,6 +1008,8 @@
     "invalid_format": "❌ Неверный формат",
     "unknown_action": "❌ Неизвестное действие: {action}",
     "error": "❌ Ошибка: {e}",
+    "no_permission": "⛔️ Недостаточно прав для этого действия",
+    "out_of_scope": "⛔️ Пользователь вне вашей зоны видимости",
     "user_info": "👤 {username}\nСтатус: {status}\nТрафик: {traffic}\nUUID: {uuid}",
     "info_failed": "❌ Не удалось получить инфо: {e}",
     "blocked": "🔒 {username} заблокирован",

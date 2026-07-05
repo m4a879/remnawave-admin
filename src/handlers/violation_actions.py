@@ -36,6 +36,17 @@ async def handle_violation_action(callback: CallbackQuery, admin: BotAdmin) -> N
     admin_name = callback.from_user.first_name or str(callback.from_user.id)
     logger.info("Violation action: %s on user %s by %s", action, user_uuid[:8], admin_name)
 
+    # RBAC: мутирующие действия требуют права violations:resolve — как в веб-API
+    # (require_permission("violations","resolve")). Приходящий admin подтверждает
+    # только доступ к боту, но не право на действие над нарушением.
+    if action in ("block", "kill", "dismiss", "reset"):
+        if not await admin.has_permission("violations", "resolve"):
+            logger.warning(
+                "Violation action %s DENIED for %s (no violations:resolve)", action, admin_name
+            )
+            await callback.answer(_("vact.no_permission"), show_alert=True)
+            return
+
     try:
         if action == "info":
             await _show_user_info(callback, user_uuid)
