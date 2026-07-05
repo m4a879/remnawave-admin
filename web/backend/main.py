@@ -591,6 +591,20 @@ async def lifespan(app: FastAPI):
                             logger.info("Periodic table maintenance completed")
                         except Exception as exc:
                             logger.warning("Table maintenance failed: %s", exc)
+                        # M5: retention-очистка по расписанию, независимо от ingest
+                        # коллектора — иначе при простое нод старые данные не чистятся.
+                        # cleanup-методы идемпотентны, дубль с collector-путём безопасен.
+                        try:
+                            v_days = int(config_service.get("violation_retention_days", 90) or 90)
+                            c_days = int(config_service.get("connections_retention_days", 30) or 30)
+                            t_days = int(config_service.get("torrent_retention_days", 90) or 90)
+                            v = await db_service.cleanup_old_violations(v_days)
+                            c = await db_service.cleanup_old_connections(c_days)
+                            t = await db_service.cleanup_old_torrent_events(t_days)
+                            if (v or 0) + (c or 0) + (t or 0) > 0:
+                                logger.info("Retention cleanup: %s violations, %s connections, %s torrent events", v, c, t)
+                        except Exception as exc:
+                            logger.warning("Retention cleanup failed: %s", exc)
                 _bg_tasks.append(asyncio.create_task(_maintenance_loop()))
 
                 # ── Plugins (api and full only) ──

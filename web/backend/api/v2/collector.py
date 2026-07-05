@@ -377,7 +377,8 @@ async def receive_connections(
         except Exception as e:
             logger.warning("Failed to cleanup old metrics snapshots: %s", e)
         try:
-            deleted = await db_service.cleanup_old_connections(CONNECTIONS_RETENTION_DAYS)
+            c_days = int(config_service.get("connections_retention_days", CONNECTIONS_RETENTION_DAYS) or CONNECTIONS_RETENTION_DAYS)
+            deleted = await db_service.cleanup_old_connections(c_days)
             if deleted > 0:
                 logger.info("Cleaned up %d old connections", deleted)
         except Exception as e:
@@ -389,7 +390,8 @@ async def receive_connections(
         except Exception as e:
             logger.debug("Failed to ensure connection partitions: %s", e)
         try:
-            deleted = await db_service.cleanup_old_torrent_events(90)
+            t_days = int(config_service.get("torrent_retention_days", 90) or 90)
+            deleted = await db_service.cleanup_old_torrent_events(t_days)
             if deleted > 0:
                 logger.info("Cleaned up %d old torrent events", deleted)
         except Exception as e:
