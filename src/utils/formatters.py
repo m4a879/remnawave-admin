@@ -296,15 +296,15 @@ def format_hwid_device(device: dict, index: int | None = None, show_hwid: bool =
     prefix = f"{index}. " if index is not None else ""
 
     # Платформа + версия ОС
-    device_str = platform_display
+    device_str = _esc(platform_display)
     if os_version:
-        device_str += f" {os_version}"
+        device_str += f" {_esc(os_version)}"
 
     parts.append(device_str)
 
     # Версия приложения
     if app_version:
-        parts.append(f"v{app_version}")
+        parts.append(f"v{_esc(app_version)}")
 
     # Дата добавления
     if created_at:
@@ -314,7 +314,7 @@ def format_hwid_device(device: dict, index: int | None = None, show_hwid: bool =
     # HWID (укороченный)
     if show_hwid and hwid:
         hwid_short = hwid[:16] + "..." if len(hwid) > 16 else hwid
-        parts.append(f"ID: <code>{hwid_short}</code>")
+        parts.append(f"ID: <code>{_esc(hwid_short)}</code>")
 
     return f"{prefix}{' | '.join(parts)}"
 
@@ -771,10 +771,11 @@ def build_billing_nodes(data: dict, t: Callable[[str], str]) -> str:
         f"<b>{t('billing_nodes.nodes_section')}</b>",
     ]
     for item in nodes[:10]:
-        node = item.get("node", {})
+        # 2.8.0: кастомная биллинг-нода не привязана к ноде панели — node=null, имя в item.name
+        node = item.get("node") or {}
         prov = item.get("provider", {})
-        node_name = node.get("name", NA)
-        country_code = node.get("countryCode", NA)
+        node_name = node.get("name") or item.get("name") or NA
+        country_code = node.get("countryCode") or "—"
         provider_name = prov.get("name", NA)
         next_billing = format_datetime(item.get("nextBillingAt"))
         lines.append(

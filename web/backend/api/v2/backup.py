@@ -9,9 +9,9 @@ from typing import List, Optional
 
 from fastapi import APIRouter, Depends, Request, UploadFile, File
 from fastapi.responses import FileResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
-from web.backend.api.deps import AdminUser, require_permission
+from web.backend.api.deps import AdminUser, require_permission, require_superadmin
 from web.backend.core.errors import api_error, E
 from shared.db_schema import (
     ADMIN_PERMISSIONS_TABLE,
@@ -43,13 +43,28 @@ class BackupResult(BaseModel):
     backup_type: str
 
 
+def _reject_path_traversal(value: str) -> str:
+    """Отсекает обход каталога на уровне схемы (второй барьер к _safe_backup_path).
+
+    Имя бэкапа — всегда basename внутри BACKUP_DIR; разделители пути,
+    '..' и абсолютные пути недопустимы.
+    """
+    if not value or ".." in value or "/" in value or "\\" in value:
+        raise ValueError("filename must be a bare name without path separators")
+    return value
+
+
 class RestoreRequest(BaseModel):
     filename: str
+
+    _v = field_validator("filename")(_reject_path_traversal)
 
 
 class ImportConfigRequest(BaseModel):
     filename: str
     overwrite: bool = False
+
+    _v = field_validator("filename")(_reject_path_traversal)
 
 
 class ImportConfigResult(BaseModel):
@@ -59,6 +74,8 @@ class ImportConfigResult(BaseModel):
 
 class ImportUsersRequest(BaseModel):
     filename: str
+
+    _v = field_validator("filename")(_reject_path_traversal)
 
 
 class ImportUsersResult(BaseModel):
@@ -225,7 +242,7 @@ async def delete_backup(
 @router.post("/restore")
 async def restore_db_backup(
     body: RestoreRequest,
-    admin: AdminUser = Depends(require_permission("backups", "create")),
+    admin: AdminUser = Depends(require_superadmin()),
 ):
     """Restore a database from a backup file."""
     database_url = os.environ.get("DATABASE_URL")
@@ -256,7 +273,7 @@ async def restore_db_backup(
 @router.post("/import-config", response_model=ImportConfigResult)
 async def import_config(
     body: ImportConfigRequest,
-    admin: AdminUser = Depends(require_permission("backups", "create")),
+    admin: AdminUser = Depends(require_superadmin()),
 ):
     """Import settings from a config backup file."""
     try:
@@ -283,7 +300,7 @@ async def import_config(
 @router.post("/import-users", response_model=ImportUsersResult)
 async def import_users(
     body: ImportUsersRequest,
-    admin: AdminUser = Depends(require_permission("backups", "create")),
+    admin: AdminUser = Depends(require_superadmin()),
 ):
     """Import users from a JSON file."""
     try:
@@ -437,7 +454,7 @@ class ImportConfigRequest(BaseModel):
 @router.post("/import-full-config")
 async def import_full_config(
     body: ImportConfigRequest,
-    admin: AdminUser = Depends(require_permission("backups", "create")),
+    admin: AdminUser = Depends(require_superadmin()),
 ):
     """Import configuration from exported JSON. Strategy: skip (don't touch existing), overwrite."""
     from shared.database import db_service
@@ -588,7 +605,7 @@ async def get_disk_usage(
 @router.post("/upload", response_model=BackupFileItem, status_code=201)
 async def upload_backup(
     file: UploadFile = File(...),
-    admin: AdminUser = Depends(require_permission("backups", "create")),
+    admin: AdminUser = Depends(require_superadmin()),
 ):
     """Upload a backup file (.sql.gz or .json)."""
     from web.backend.core.backup_service import save_uploaded_file

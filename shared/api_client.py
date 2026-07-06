@@ -1226,9 +1226,19 @@ class RemnawaveApiClient(BaseHttpClient):
         return result
 
     async def create_infra_billing_node(
-        self, provider_uuid: str, node_uuid: str, next_billing_at: str | None = None
+        self,
+        provider_uuid: str,
+        node_uuid: str | None = None,
+        next_billing_at: str | None = None,
+        name: str | None = None,
     ) -> dict:
-        payload: dict[str, object] = {"providerUuid": provider_uuid, "nodeUuid": node_uuid}
+        # 2.8.0: nodeUuid и name — обязательные nullable-ключи (задаётся ровно одно),
+        # nextBillingAt обязателен
+        payload: dict[str, object] = {
+            "providerUuid": provider_uuid,
+            "nodeUuid": node_uuid,
+            "name": name,
+        }
         if next_billing_at:
             payload["nextBillingAt"] = next_billing_at
         result = await self._post("/api/infra-billing/nodes", json=payload)

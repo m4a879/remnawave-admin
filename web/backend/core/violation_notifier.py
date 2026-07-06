@@ -390,6 +390,18 @@ async def send_violation_notification(
         action_label = action_labels.get(action_key, action_key)
         lines.append("")
         lines.append(f"\U0001f3af Действие: <b>{action_label.upper()}</b> ({action_label})")
+        if action_key == "hard_block":
+            # Явно говорим админу, заблокирует ли система пользователя сама —
+            # иначе блокировка выглядит как «сработала кнопка, которую я не жал»
+            try:
+                from shared.config_service import config_service
+                auto_block_on = bool(config_service.get("violation_auto_hard_block", True))
+            except Exception:
+                auto_block_on = True
+            if auto_block_on:
+                lines.append("⛔ Автоблокировка включена — пользователь будет заблокирован автоматически")
+            else:
+                lines.append("ℹ️ Автоблокировка выключена — требуется ручное решение")
         lines.append(f"\U0001f4ca Скор: <b>{total_score:.1f}</b> / 100")
         lines.append(f"\U0001f550 Время (МСК): {moscow_time_str}")
 

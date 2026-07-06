@@ -22,7 +22,12 @@ from shared.logger import logger
 class DeviceFingerprintAnalyzer:
     """
     Анализ устройств по fingerprint (User-Agent и другие данные).
-    
+
+    Основной источник — User-Agent подписочных запросов (SRH): node-agent
+    парсит Xray access.log и per-connection UA не пишет, поэтому fingerprint
+    по подключениям всегда пуст. UA из SRH позволяет определить платформу
+    клиента (iOS/Android/Windows/…) и поймать разные устройства сверх лимита.
+
     Правила:
     - Один fingerprint, разные IP = 0 (один человек, разные сети)
     - Разные версии одного клиента = +10
@@ -30,7 +35,122 @@ class DeviceFingerprintAnalyzer:
     - Разные ОС = +40
     - > 3 разных fingerprint одновременно = +60
     """
-    
+
+    # Маппинг клиента подписки → платформа (устройство). Только однозначные:
+    # кроссплатформенные (Hiddify, FlClash, Clash-Verge, Mihomo, sing-box, Xray)
+    # намеренно НЕ включены — по ним ОС не определить, ложный сигнал шаринга.
+    _CLIENT_PLATFORM = {
+        # iOS
+        "happ": "iOS", "shadowrocket": "iOS", "stash": "iOS", "streisand": "iOS",
+        "v2box": "iOS", "karing": "iOS", "foxray": "iOS", "loon": "iOS",
+        "wingsx": "iOS", "quantumult": "iOS", "shadowrocketp": "iOS",
+        # Android
+        "v2rayng": "Android", "v2raytun": "Android", "nekobox": "Android",
+        "sagernet": "Android", "matsuri": "Android", "exclave": "Android", "husi": "Android",
+        # Desktop
+        "clashx": "macOS", "v2rayu": "macOS",
+        "v2rayn": "Windows", "nekoray": "Windows", "invisiman": "Windows",
+    }
+
+    # Явные маркеры ОС внутри строки UA (приоритетнее маппинга клиента)
+    _OS_MARKERS = (
+        ("android", "Android"),
+        ("iphone", "iOS"), ("ipad", "iOS"), ("ios", "iOS"), ("cfnetwork", "iOS"),
+        ("windows", "Windows"),
+        ("mac os", "macOS"), ("macos", "macOS"), ("darwin", "macOS"),
+        ("linux", "Linux"),
+    )
+
+    def _platform_client_from_ua(self, ua: Optional[str]) -> tuple[Optional[str], Optional[str]]:
+        """Извлечь (платформа, клиент) из User-Agent подписочного запроса."""
+        if not ua or not ua.strip():
+            return None, None
+        s = ua.strip().lower()
+
+        # Клиент — префикс до '/' (Happ/1.2.3 → happ)
+        client = None
+        head = s.split("/", 1)[0].strip()
+        head = re.sub(r"[^a-z0-9]", "", head)  # WingsX, Clash-Verge → wingsx / clashverge
+        if head:
+            client = head
+
+        # Платформа: сначала явные ОС-маркеры, затем маппинг клиента
+        platform = None
+        for marker, name in self._OS_MARKERS:
+            if marker in s:
+                platform = name
+                break
+        if platform is None and client:
+            platform = self._CLIENT_PLATFORM.get(client)
+
+        return platform, client
+
+    def analyze_srh(
+        self,
+        srh_records: List[Dict[str, Any]],
+        user_device_count: int = 1,
+        window_days: int = 7,
+    ) -> DeviceScore:
+        """
+        Определить число разных устройств по User-Agent подписочных запросов.
+
+        Считает уникальные ПЛАТФОРМЫ (iOS/Android/Windows/macOS/Linux) за окно:
+        разные ОС при малом лимите устройств — надёжный признак шаринга. Разные
+        клиенты одной платформы за отдельные устройства НЕ считаются (юзер мог
+        сменить клиент) — только справочно в client_list.
+        """
+        if not srh_records:
+            return DeviceScore(score=0.0, reasons=[], unique_fingerprints_count=0, different_os_count=0)
+
+        cutoff = datetime.now(tz.utc) - timedelta(days=window_days) if window_days > 0 else None
+
+        platforms: Set[str] = set()
+        clients: Set[str] = set()
+        fingerprints: Set[tuple] = set()
+
+        for rec in srh_records:
+            request_at = rec.get("request_at")
+            if cutoff and isinstance(request_at, datetime):
+                ra = request_at if request_at.tzinfo else request_at.replace(tzinfo=tz.utc)
+                if ra < cutoff:
+                    continue
+            platform, client = self._platform_client_from_ua(rec.get("user_agent"))
+            if platform:
+                platforms.add(platform)
+            if client:
+                clients.add(client)
+            if platform or client:
+                fingerprints.add((platform or "?", client or "?"))
+
+        different_os_count = len(platforms)
+        os_list = sorted(platforms)
+        client_list = sorted(clients)
+
+        # Сигнал только по РАЗНЫМ платформам сверх лимита устройств
+        score = 0.0
+        reasons: List[str] = []
+        if different_os_count > user_device_count and different_os_count >= 2:
+            excess = different_os_count - user_device_count
+            if excess >= 2 or different_os_count >= 3:
+                score = 40.0
+                reasons.append(
+                    f"Разные платформы устройств ({different_os_count}) при лимите {user_device_count}: {', '.join(os_list)}"
+                )
+            else:
+                score = 25.0
+                reasons.append(
+                    f"Две платформы устройств при лимите {user_device_count}: {', '.join(os_list)}"
+                )
+
+        return DeviceScore(
+            score=min(score, 100.0),
+            reasons=reasons,
+            unique_fingerprints_count=len(fingerprints),
+            different_os_count=different_os_count,
+            os_list=os_list or None,
+            client_list=client_list or None,
+        )
+
     def _extract_fingerprint(self, connection: Dict[str, Any]) -> Optional[Dict[str, str]]:
         """
         Извлекает fingerprint из данных подключения.

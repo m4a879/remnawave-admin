@@ -36,6 +36,27 @@ async def handle_violation_action(callback: CallbackQuery, admin: BotAdmin) -> N
     admin_name = callback.from_user.first_name or str(callback.from_user.id)
     logger.info("Violation action: %s on user %s by %s", action, user_uuid[:8], admin_name)
 
+    # RBAC: мутирующие действия требуют права violations:resolve — как в веб-API
+    # (require_permission("violations","resolve")). Приходящий admin подтверждает
+    # только доступ к боту, но не право на действие над нарушением.
+    if action in ("block", "kill", "dismiss", "reset"):
+        if not await admin.has_permission("violations", "resolve"):
+            logger.warning(
+                "Violation action %s DENIED for %s (no violations:resolve)", action, admin_name
+            )
+            await callback.answer(_("vact.no_permission"), show_alert=True)
+            return
+
+    # Access-policy scope: не даём действовать (в т.ч. смотреть) на юзеров вне
+    # зоны видимости админа — веб-API так проверяет resolve/annul/detail.
+    visible = await admin.get_visible_user_uuids()
+    if visible is not None and user_uuid.lower() not in visible:
+        logger.warning(
+            "Violation action %s DENIED for %s (user %s out of scope)", action, admin_name, user_uuid[:8]
+        )
+        await callback.answer(_("vact.out_of_scope"), show_alert=True)
+        return
+
     try:
         if action == "info":
             await _show_user_info(callback, user_uuid)
@@ -75,8 +96,9 @@ async def _show_user_info(callback: CallbackQuery, user_uuid: str) -> None:
         else:
             traffic_str += " / ∞"
 
+        # callback.answer — это plain-text алерт, HTML тут не рендерится и эскейп не нужен
         text = _("vact.user_info").format(
-            username=_esc(username),
+            username=username,
             status=status,
             traffic=traffic_str,
             uuid=f"{user_uuid[:16]}...",

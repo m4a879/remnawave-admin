@@ -6,7 +6,7 @@
   - H2 strong-signal bypass (geo impossible-travel создаёт нарушение на ПЕРВОМ срабатывании)
   - C2 HWID per_account_abuse (мультитариф детектится)
   - H3 HWID floor 80 при score>=85
-  - device-анализатор подтверждённо мёртв (всегда 0 — нет UA в данных коллектора)
+  - device-анализатор оживлён по SRH-UA (M6): платформы устройств, разные ОС = шаринг
 
 Это первые unit-тесты детектора в проекте (раньше их не было вообще).
 """
@@ -167,19 +167,92 @@ async def test_hwid_multitariff_creates_violation():
     assert res.total >= 50.0, "C2: мультитариф должен создавать нарушение"
 
 
-# ── DEVICE (подтверждаем, что мёртв) ──────────────────────────────
+# ── DEVICE (оживлён по SRH-UA, M6) ────────────────────────────────
 
 @pytest.mark.asyncio
-async def test_device_analyzer_is_dead():
-    """Находка аудита: device всегда 0, т.к. коллектор не пишет user_agent в подключения.
-    Даже 5 разных IP при лимите 1 -> device score 0 (fingerprint всегда пустой)."""
+async def test_device_zero_without_srh():
+    """Без SRH device падает на connection-based fingerprint (UA нет) -> 0."""
     geo_map = {f"{i}.{i}.{i}.{i}": meta(f"{i}.{i}.{i}.{i}", country_code="RU", asn=1,
                                         asn_org="ISP", connection_type="residential")
                for i in range(1, 6)}
     det = make_detector(geo_map, recent_violations=3)
     conns = [conn(f"{i}.{i}.{i}.{i}", 60) for i in range(1, 6)]
-    res = await run_check(det, conns, devices=1)
-    assert res.breakdown["device"].score == 0.0, "device-анализатор мёртв (нет UA в данных)"
+    res = await run_check(det, conns, devices=1)  # srh пуст
+    assert res.breakdown["device"].score == 0.0
+
+
+@pytest.mark.asyncio
+async def test_device_scores_different_platforms_from_srh():
+    """M6: iOS + Android в SRH-UA при лимите 1 устройство -> device > 0 (разные платформы)."""
+    geo_map = {"1.1.1.1": meta("1.1.1.1", country_code="RU", asn=1, asn_org="ISP",
+                               connection_type="residential")}
+    det = make_detector(geo_map, recent_violations=3)
+    srh = [
+        {"user_agent": "Happ/1.9.0", "request_ip": "1.1.1.1", "request_at": datetime.utcnow(), "request_id": 1},
+        {"user_agent": "v2rayNG/1.8.5", "request_ip": "2.2.2.2", "request_at": datetime.utcnow(), "request_id": 2},
+    ]
+    res = await run_check(det, [conn("1.1.1.1", 60)], srh=srh, devices=1)
+    assert res.breakdown["device"].score > 0.0
+    assert res.breakdown["device"].different_os_count >= 2
+
+
+class TestDeviceAnalyzeSrh:
+    """Unit-тесты analyze_srh напрямую на анализаторе."""
+
+    def _analyzer(self):
+        from shared.analyzers.detector import DeviceFingerprintAnalyzer
+        return DeviceFingerprintAnalyzer()
+
+    def _srh(self, *uas):
+        return [{"user_agent": ua, "request_at": datetime.utcnow(), "request_ip": None, "request_id": i}
+                for i, ua in enumerate(uas)]
+
+    def test_single_platform_zero(self):
+        res = self._analyzer().analyze_srh(self._srh("Happ/1.9", "Happ/2.0", "Shadowrocket/2.2"), user_device_count=1)
+        # все iOS -> одна платформа -> 0
+        assert res.different_os_count == 1
+        assert res.score == 0.0
+
+    def test_two_platforms_over_limit(self):
+        res = self._analyzer().analyze_srh(self._srh("Happ/1.9", "v2rayNG/1.8"), user_device_count=1)
+        assert res.different_os_count == 2
+        assert res.score >= 25.0
+
+    def test_three_platforms_strong(self):
+        res = self._analyzer().analyze_srh(
+            self._srh("Happ/1.9", "v2rayNG/1.8", "v2rayN/6.0"), user_device_count=1)
+        assert res.different_os_count == 3
+        assert res.score == 40.0
+
+    def test_two_platforms_within_limit(self):
+        # лимит 2 устройства, 2 платформы -> в пределах, 0
+        res = self._analyzer().analyze_srh(self._srh("Happ/1.9", "v2rayNG/1.8"), user_device_count=2)
+        assert res.score == 0.0
+
+    def test_cross_platform_client_ignored(self):
+        # Hiddify кроссплатформенный -> платформа не определяется, не считается разной ОС
+        res = self._analyzer().analyze_srh(self._srh("Happ/1.9", "Hiddify/2.0"), user_device_count=1)
+        assert res.different_os_count == 1  # только iOS от Happ
+
+    def test_explicit_os_marker_wins(self):
+        # явный маркер ОС в UA (даже у кроссплатформенного клиента)
+        res = self._analyzer().analyze_srh(
+            self._srh("ClashMetaForAndroid/2.0 (Android 13)", "FlClash/1.0 (Windows NT 10)"),
+            user_device_count=1)
+        assert res.different_os_count == 2
+
+    def test_old_records_outside_window_ignored(self):
+        old = datetime.utcnow() - timedelta(days=30)
+        recs = [
+            {"user_agent": "Happ/1.9", "request_at": datetime.utcnow(), "request_ip": None, "request_id": 1},
+            {"user_agent": "v2rayNG/1.8", "request_at": old, "request_ip": None, "request_id": 2},
+        ]
+        res = self._analyzer().analyze_srh(recs, user_device_count=1, window_days=7)
+        assert res.different_os_count == 1  # старый Android отброшен
+
+    def test_empty_srh_zero(self):
+        res = self._analyzer().analyze_srh([], user_device_count=1)
+        assert res.score == 0.0
 
 
 # ── USER-AGENT ────────────────────────────────────────────────────

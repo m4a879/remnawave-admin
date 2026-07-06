@@ -145,6 +145,11 @@ def run_migrations_online() -> None:
 
     if connection is not None:
         # Reuse the connection provided by main.py — no extra engine needed.
+        # NB: main.py may already have executed statements on this connection
+        # (plugin-revision detach) — SQLAlchemy autobegins a transaction, so
+        # alembic treats it as *external* and autocommit_block() inside a
+        # migration asserts. Don't use CONCURRENTLY / autocommit_block in
+        # panel migrations (see 0043, 0072).
         context.configure(
             connection=connection, target_metadata=target_metadata
         )

@@ -823,6 +823,9 @@
       "title": "Subscription",
       "link": "Subscription link",
       "copy": "Copy",
+      "importToClient": "Import",
+      "importPickClient": "Pick a client",
+      "importCopied": "{{client}} link copied",
       "uuid": "Subscription UUID",
       "noSubscription": "No active subscription",
       "noActive": "No active subscription",
@@ -1597,7 +1600,8 @@
       "dateTo": "To",
       "username": "Username",
       "usernamePlaceholder": "Search by username",
-      "sortByCount": "Sort by count"
+      "sortByCount": "Sort by count",
+      "includeAnnulled": "Show annulled"
     },
     "stats": {
       "total": "Total",
@@ -3331,13 +3335,9 @@
         "label": "👥 Max accounts per HWID",
         "description": "Number of accounts sharing one HWID that triggers a violation (default 2)"
       },
-      "violations_max_unique_ips_per_day": {
-        "label": "📊 Max unique IPs per day",
-        "description": "Exceeding this many unique IPs in a day raises a warning (0 = auto from profile)"
-      },
-      "violations_notification_cooldown_minutes": {
-        "label": "🔕 Notification cooldown (min)",
-        "description": "Minimum interval between notifications for the same user"
+      "violations_mobile_cgnat_buffer": {
+        "label": "📱 Mobile CGNAT buffer (IPs)",
+        "description": "Extra simultaneous IPs allowed for mobile connections beyond the device limit (CGNAT gives 3-5 IPs from one device)"
       },
       "violations_hard_block_ips": {
         "label": "🚫 Hard block: max IPs",
@@ -3968,6 +3968,12 @@
       "nodeLabel": "Node",
       "nodePlaceholder": "Select node",
       "nextBillingLabel": "Next Billing Date",
+      "tabExistingNode": "Existing node",
+      "tabCustomName": "Custom name",
+      "customNameLabel": "Custom name",
+      "customNamePlaceholder": "Management Server",
+      "customNameHint": "For servers that are not panel nodes — a router, standalone VPS, etc.",
+      "customBadge": "External",
       "deleteTitle": "Remove Billing Node",
       "deleteDescription": "Are you sure you want to remove this billing node association?"
     }

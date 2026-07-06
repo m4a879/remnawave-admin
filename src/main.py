@@ -319,7 +319,10 @@ async def main() -> None:
         config_initialized = await config_service.initialize()
         if config_initialized:
             logger.info("✅ Dynamic config initialized")
-            config_service.start_auto_reload(interval_seconds=120)
+            # Интервал из настройки (как в web-backend), а не хардкод — иначе
+            # UI-значение config_auto_reload_interval на бот не влияло.
+            reload_interval = int(config_service.get("config_auto_reload_interval", 30) or 30)
+            config_service.start_auto_reload(interval_seconds=reload_interval)
 
         # sync_service запускается только в web-backend (единый источник синхронизации)
 

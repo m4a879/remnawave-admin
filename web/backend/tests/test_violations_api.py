@@ -76,6 +76,27 @@ class TestListViolations:
         assert resp.status_code == 200
 
     @pytest.mark.asyncio
+    async def test_list_hides_annulled_by_default(self, app, client):
+        """H1: без include_annulled список исключает аннулированные (совпадает со статистикой)."""
+        from web.backend.api.deps import get_db
+
+        mock_db = MagicMock()
+        mock_db.is_connected = True
+        mock_db.count_violations_for_period = AsyncMock(return_value=0)
+        mock_db.get_violations_for_period = AsyncMock(return_value=[])
+        app.dependency_overrides[get_db] = lambda: mock_db
+
+        resp = await client.get("/api/v2/violations")
+        assert resp.status_code == 200
+        # дефолт: include_annulled=False прокидывается в оба запроса
+        assert mock_db.get_violations_for_period.call_args.kwargs["include_annulled"] is False
+        assert mock_db.count_violations_for_period.call_args.kwargs["include_annulled"] is False
+
+        resp = await client.get("/api/v2/violations", params={"include_annulled": "true"})
+        assert resp.status_code == 200
+        assert mock_db.get_violations_for_period.call_args.kwargs["include_annulled"] is True
+
+    @pytest.mark.asyncio
     async def test_list_violations_as_viewer_allowed(self, app, viewer):
         """Viewers have violations.view permission."""
         from web.backend.api.deps import get_db as _get_db
@@ -96,6 +117,57 @@ class TestListViolations:
     async def test_list_violations_anon_unauthorized(self, anon_client):
         resp = await anon_client.get("/api/v2/violations")
         assert resp.status_code == 401
+
+
+class TestAnnulScope:
+    """H4: scope-проверки на аннулировании."""
+
+    @pytest.mark.asyncio
+    async def test_annul_all_forbidden_for_scoped_admin(self, app, client):
+        """Глобальный annul-all запрещён админу с ограниченной видимостью."""
+        from web.backend.api.deps import get_db
+        mock_db = MagicMock()
+        mock_db.is_connected = True
+        mock_db.annul_all_pending_violations = AsyncMock(return_value=99)
+        app.dependency_overrides[get_db] = lambda: mock_db
+
+        with patch("web.backend.core.rbac.get_visible_user_uuids",
+                   new_callable=AsyncMock, return_value={"aaaa"}):
+            resp = await client.post("/api/v2/violations/annul-all", json={})
+        assert resp.status_code == 403
+        mock_db.annul_all_pending_violations.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_annul_all_allowed_for_unrestricted_admin(self, app, client):
+        """Админ без ограничения видимости (visible=None) проходит гейт."""
+        from web.backend.api.deps import get_db
+        mock_db = MagicMock()
+        mock_db.is_connected = True
+        mock_db.annul_all_pending_violations = AsyncMock(return_value=5)
+        app.dependency_overrides[get_db] = lambda: mock_db
+
+        with patch("web.backend.core.rbac.get_visible_user_uuids",
+                   new_callable=AsyncMock, return_value=None), \
+             patch("web.backend.api.v2.violations.write_audit_log", new_callable=AsyncMock):
+            resp = await client.post("/api/v2/violations/annul-all", json={})
+        assert resp.status_code == 200
+        mock_db.annul_all_pending_violations.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_annul_by_id_forbidden_out_of_scope(self, app, client):
+        """Аннулирование нарушения юзера вне scope → 403."""
+        from web.backend.api.deps import get_db
+        mock_db = MagicMock()
+        mock_db.is_connected = True
+        mock_db.get_violation_by_id = AsyncMock(return_value={"id": 7, "user_uuid": "dead-beef"})
+        mock_db.update_violation_action = AsyncMock(return_value=True)
+        app.dependency_overrides[get_db] = lambda: mock_db
+
+        with patch("web.backend.core.rbac.get_visible_user_uuids",
+                   new_callable=AsyncMock, return_value={"other-uuid"}):
+            resp = await client.post("/api/v2/violations/7/annul", json={})
+        assert resp.status_code == 403
+        mock_db.update_violation_action.assert_not_called()
 
 
 class TestRowToListItem:

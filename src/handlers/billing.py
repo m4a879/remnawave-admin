@@ -1,4 +1,7 @@
 """Обработчики для работы с биллингом и провайдерами."""
+import re
+from datetime import datetime, timezone
+
 from aiogram import F, Router
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 from aiogram.utils.i18n import gettext as _
@@ -31,6 +34,20 @@ _BILLING_ACTIONS_SHORT = {
     "billing_nodes_update": "bu",
 }
 _BILLING_ACTIONS_LONG = {v: k for k, v in _BILLING_ACTIONS_SHORT.items()}
+
+
+def _normalize_billing_date(text: str) -> str:
+    """Приводит ввод даты к ISO-формату панели.
+
+    Панель 2.8.0 требует nextBillingAt всегда — пустой ввод превращаем
+    в «сегодня» (дефолт самой панели). Голую дату дополняем временем.
+    """
+    s = (text or "").strip()
+    if not s:
+        return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+    if re.fullmatch(r"\d{4}-\d{2}-\d{2}", s):
+        return f"{s}T00:00:00.000Z"
+    return s
 
 
 def _billing_providers_keyboard(providers: list[dict], action_prefix: str, nav_target: str = NavTarget.BILLING_MENU) -> InlineKeyboardMarkup:
@@ -538,6 +555,17 @@ async def _handle_billing_history_input(message: Message, ctx: dict, admin: BotA
         await _send_clean_message(message, _("billing.invalid"), reply_markup=billing_menu_keyboard(admin=admin), parse_mode="HTML")
 
 
+async def _create_billing_node_from_ctx(ctx: dict, next_billing_at: str) -> str:
+    """Создаёт биллинг-запись из FSM-контекста и возвращает обновлённый список."""
+    await internal_api_client.create_infra_billing_node(
+        ctx.get("provider_uuid"),
+        ctx.get("node_uuid"),
+        next_billing_at,
+        name=ctx.get("custom_name"),
+    )
+    return await _fetch_billing_nodes_text()
+
+
 async def _handle_billing_nodes_input(message: Message, ctx: dict, admin: BotAdmin | None = None) -> None:
     """Обрабатывает ввод для создания/обновления биллинга нод."""
     action = ctx.get("action")
@@ -550,13 +578,24 @@ async def _handle_billing_nodes_input(message: Message, ctx: dict, admin: BotAdm
             if not _admin or not await require_permission(message, _admin, "billing", "create"):
                 PENDING_INPUT.pop(user_id, None)
                 return
-            provider_uuid = ctx.get("provider_uuid")
-            node_uuid = ctx.get("node_uuid")
-            next_billing_at = text if text else None
-            await internal_api_client.create_infra_billing_node(provider_uuid, node_uuid, next_billing_at)
-            billing_text = await _fetch_billing_nodes_text()
+            billing_text = await _create_billing_node_from_ctx(ctx, _normalize_billing_date(text))
             await _send_clean_message(message, billing_text, reply_markup=billing_nodes_menu_keyboard(admin=admin), parse_mode="HTML")
             PENDING_INPUT.pop(user_id, None)
+        elif action == "billing_nodes_create_custom_name":
+            # 2.8.0: имя для биллинг-записи без ноды панели
+            if not text:
+                PENDING_INPUT[user_id] = ctx
+                await _send_clean_message(message, _("billing_nodes.prompt_custom_name"), reply_markup=input_keyboard(action), parse_mode="HTML")
+                return
+            ctx["custom_name"] = text[:255]
+            ctx["action"] = "billing_nodes_create_confirm"
+            PENDING_INPUT[user_id] = ctx
+            await _send_clean_message(
+                message,
+                _("billing_nodes.prompt_date_optional"),
+                reply_markup=input_keyboard("billing_nodes_create_confirm", allow_skip=True, skip_callback="billing_nodes:skipdate"),
+                parse_mode="HTML",
+            )
         elif action == "billing_nodes_update_date":
             # UUID записи биллинга уже в контексте
             if not text:
@@ -570,7 +609,7 @@ async def _handle_billing_nodes_input(message: Message, ctx: dict, admin: BotAdm
             if not _admin or not await require_permission(message, _admin, "billing", "edit"):
                 PENDING_INPUT.pop(user_id, None)
                 return
-            await internal_api_client.update_infra_billing_nodes([record_uuid], text)
+            await internal_api_client.update_infra_billing_nodes([record_uuid], _normalize_billing_date(text))
             billing_text = await _fetch_billing_nodes_text()
             await _send_clean_message(message, billing_text, reply_markup=billing_nodes_menu_keyboard(admin=admin), parse_mode="HTML")
             PENDING_INPUT.pop(user_id, None)
@@ -776,14 +815,16 @@ async def cb_billing_actions(callback: CallbackQuery, admin: BotAdmin) -> None:
             try:
                 nodes_data = await internal_api_client.get_nodes()
                 all_nodes = nodes_data.get("response", {}).get("nodes", [])
-                if not all_nodes:
-                    await _edit_text_safe(callback.message, _("billing_nodes.no_nodes"), reply_markup=billing_nodes_menu_keyboard(admin=admin), parse_mode="HTML")
-                    return
                 PENDING_INPUT[callback.from_user.id] = {
                     "action": "billing_nodes_create_pick_node",
                     "provider_uuid": provider_uuid,
                 }
                 keyboard = _billing_nodes_keyboard(all_nodes, "billing_nodes_create")
+                # 2.8.0: запись можно создать и без ноды панели — с произвольным названием
+                keyboard.inline_keyboard.insert(
+                    len(keyboard.inline_keyboard) - 1,
+                    [InlineKeyboardButton(text=_("billing_nodes.custom_name_btn"), callback_data="billing_nodes:custom")],
+                )
                 await _edit_text_safe(callback.message, _("billing_nodes.select_node"), reply_markup=keyboard, parse_mode="HTML")
             except Exception:
                 await _edit_text_safe(callback.message, _("errors.generic"), reply_markup=billing_nodes_menu_keyboard(admin=admin), parse_mode="HTML")
@@ -824,6 +865,40 @@ async def cb_billing_nodes_actions(callback: CallbackQuery, admin: BotAdmin) -> 
             await _edit_text_safe(callback.message, _("billing_nodes.select_provider"), reply_markup=keyboard, parse_mode="HTML")
         except Exception:
             await _edit_text_safe(callback.message, _("errors.generic"), reply_markup=billing_nodes_menu_keyboard(admin=admin), parse_mode="HTML")
+    elif action == "custom":
+        # 2.8.0: биллинг-запись с произвольным названием (без ноды панели).
+        # provider_uuid уже лежит в FSM state с шага выбора провайдера.
+        fsm_state = PENDING_INPUT.get(callback.from_user.id, {})
+        provider_uuid = fsm_state.get("provider_uuid")
+        if not provider_uuid:
+            await _edit_text_safe(callback.message, _("errors.generic"), reply_markup=billing_nodes_menu_keyboard(admin=admin), parse_mode="HTML")
+            return
+        PENDING_INPUT[callback.from_user.id] = {
+            "action": "billing_nodes_create_custom_name",
+            "provider_uuid": provider_uuid,
+        }
+        await _edit_text_safe(
+            callback.message, _("billing_nodes.prompt_custom_name"), reply_markup=input_keyboard("billing_nodes_create_custom_name"), parse_mode="HTML"
+        )
+    elif action == "skipdate":
+        # Кнопка «Пропустить шаг» на вводе даты — создаём с датой «сегодня»
+        fsm_state = PENDING_INPUT.get(callback.from_user.id, {})
+        if fsm_state.get("action") != "billing_nodes_create_confirm":
+            await _edit_text_safe(callback.message, _("errors.generic"), reply_markup=billing_nodes_menu_keyboard(admin=admin), parse_mode="HTML")
+            return
+        if not await require_permission(callback, admin, "billing", "create"):
+            return
+        try:
+            billing_text = await _create_billing_node_from_ctx(fsm_state, _normalize_billing_date(""))
+            PENDING_INPUT.pop(callback.from_user.id, None)
+            await _edit_text_safe(callback.message, billing_text, reply_markup=billing_nodes_menu_keyboard(admin=admin), parse_mode="HTML")
+        except UnauthorizedError:
+            PENDING_INPUT.pop(callback.from_user.id, None)
+            await _edit_text_safe(callback.message, _("errors.unauthorized"), reply_markup=billing_nodes_menu_keyboard(admin=admin), parse_mode="HTML")
+        except ApiClientError:
+            PENDING_INPUT.pop(callback.from_user.id, None)
+            logger.exception("❌ Billing node create (skip date) failed")
+            await _edit_text_safe(callback.message, _("billing_nodes.invalid"), reply_markup=billing_nodes_menu_keyboard(admin=admin), parse_mode="HTML")
     elif action in ("node", "n"):
         # Обработка выбора ноды после выбора провайдера. Короткий `n`
         # пришёл с укороченной клавиатуры (issue #248); полный `node`
@@ -839,14 +914,17 @@ async def cb_billing_nodes_actions(callback: CallbackQuery, admin: BotAdmin) -> 
         provider_uuid = (parts[4] if len(parts) > 4 else None) or fsm_state.get("provider_uuid")
 
         if node_action == "billing_nodes_create" and provider_uuid:
-            # Запрашиваем дату следующей оплаты (опционально)
+            # Запрашиваем дату следующей оплаты (скип = сегодня)
             PENDING_INPUT[callback.from_user.id] = {
                 "action": "billing_nodes_create_confirm",
                 "provider_uuid": provider_uuid,
                 "node_uuid": node_uuid,
             }
             await _edit_text_safe(
-                callback.message, _("billing_nodes.prompt_date_optional"), reply_markup=input_keyboard("billing_nodes_create_confirm"), parse_mode="HTML"
+                callback.message,
+                _("billing_nodes.prompt_date_optional"),
+                reply_markup=input_keyboard("billing_nodes_create_confirm", allow_skip=True, skip_callback="billing_nodes:skipdate"),
+                parse_mode="HTML",
             )
         elif node_action == "billing_nodes_update":
             # Находим UUID записи биллинга для этой ноды
@@ -855,7 +933,7 @@ async def cb_billing_nodes_actions(callback: CallbackQuery, admin: BotAdmin) -> 
                 billing_nodes = nodes_data.get("response", {}).get("billingNodes", [])
                 record_uuid = None
                 for item in billing_nodes:
-                    if item.get("node", {}).get("uuid") == node_uuid:
+                    if (item.get("node") or {}).get("uuid") == node_uuid:
                         record_uuid = item.get("uuid")
                         break
                 if not record_uuid:
@@ -890,19 +968,39 @@ async def cb_billing_nodes_actions(callback: CallbackQuery, admin: BotAdmin) -> 
             logger.exception("❌ Billing node delete failed")
             await _edit_text_safe(callback.message, _("billing_nodes.invalid"), reply_markup=billing_nodes_menu_keyboard(admin=admin), parse_mode="HTML")
     elif action == "update":
-        # Показываем список нод с биллингом для обновления
+        # Показываем список записей биллинга для обновления даты.
+        # Выбор идёт по uuid записи (а не ноды) — так работают и кастомные
+        # записи 2.8.0, у которых реальной ноды нет.
         try:
             nodes_data = await internal_api_client.get_infra_billing_nodes()
             billing_nodes = nodes_data.get("response", {}).get("billingNodes", [])
             if not billing_nodes:
                 await _edit_text_safe(callback.message, _("billing_nodes.empty"), reply_markup=billing_nodes_menu_keyboard(admin=admin), parse_mode="HTML")
                 return
-            # Создаем список нод для выбора
-            nodes_list = [item.get("node", {}) for item in billing_nodes if item.get("node")]
-            keyboard = _billing_nodes_keyboard(nodes_list, "billing_nodes_update")
+            rows: list[list[InlineKeyboardButton]] = []
+            for item in billing_nodes[:10]:
+                node = item.get("node") or {}
+                node_name = node.get("name") or item.get("name") or "—"
+                provider_name = (item.get("provider") or {}).get("name", "—")
+                record_uuid = item.get("uuid", "")
+                rows.append([InlineKeyboardButton(text=f"{node_name} ({provider_name})", callback_data=f"billing_nodes:ud:{record_uuid}")])
+            rows.append(nav_row(NavTarget.BILLING_NODES_MENU))
+            keyboard = InlineKeyboardMarkup(inline_keyboard=rows)
             await _edit_text_safe(callback.message, _("billing_nodes.select_nodes_update"), reply_markup=keyboard, parse_mode="HTML")
         except Exception:
             await _edit_text_safe(callback.message, _("errors.generic"), reply_markup=billing_nodes_menu_keyboard(admin=admin), parse_mode="HTML")
+    elif action == "ud":
+        # Обновление даты по uuid записи биллинга
+        if len(parts) < 3:
+            await _edit_text_safe(callback.message, _("errors.generic"), reply_markup=billing_nodes_menu_keyboard(admin=admin), parse_mode="HTML")
+            return
+        PENDING_INPUT[callback.from_user.id] = {
+            "action": "billing_nodes_update_date",
+            "record_uuid": parts[2],
+        }
+        await _edit_text_safe(
+            callback.message, _("billing_nodes.prompt_new_date"), reply_markup=input_keyboard("billing_nodes_update_date"), parse_mode="HTML"
+        )
     elif action == "stats":
         # Показываем статистику биллинга нод
         text = await _fetch_billing_nodes_stats_text()
@@ -917,11 +1015,11 @@ async def cb_billing_nodes_actions(callback: CallbackQuery, admin: BotAdmin) -> 
                 return
             rows: list[list[InlineKeyboardButton]] = []
             for item in billing_nodes[:10]:
-                node = item.get("node", {})
-                provider = item.get("provider", {})
+                node = item.get("node") or {}
+                provider = item.get("provider") or {}
                 next_billing = item.get("nextBillingAt", "—")
                 record_uuid = item.get("uuid", "")
-                node_name = node.get("name", "—")
+                node_name = node.get("name") or item.get("name") or "—"
                 provider_name = provider.get("name", "—")
                 label = f"{node_name} ({provider_name}) — {next_billing}"
                 rows.append([InlineKeyboardButton(text=label, callback_data=f"billing_nodes:delete_confirm:{record_uuid}")])

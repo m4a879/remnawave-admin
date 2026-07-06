@@ -556,7 +556,7 @@ async def _compute_trends(
                         select_sql(
                             VIOLATIONS_TABLE,
                             "DATE(detected_at) as day, COUNT(*) as count",
-                            "WHERE detected_at >= $1 AND user_uuid::text = ANY($2) GROUP BY DATE(detected_at) ORDER BY day",
+                            "WHERE detected_at >= $1 AND user_uuid = ANY($2::uuid[]) GROUP BY DATE(detected_at) ORDER BY day",
                         ),
                         since, user_uuid_whitelist,
                     )

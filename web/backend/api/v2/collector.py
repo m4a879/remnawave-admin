@@ -252,9 +252,8 @@ async def verify_agent_token(
     authorization: str = Header(..., alias="Authorization"),
 ) -> str:
     """Проверяет Bearer token агента. Возвращает node_uuid."""
-    client_ip = request.headers.get("x-forwarded-for", "").split(",")[0].strip() or (
-        request.client.host if request.client else "unknown"
-    )
+    from web.backend.api.deps import get_client_ip
+    client_ip = get_client_ip(request)
 
     logger.debug("Verifying agent token (length: %d) from %s", len(authorization) if authorization else 0, client_ip)
 
@@ -378,7 +377,8 @@ async def receive_connections(
         except Exception as e:
             logger.warning("Failed to cleanup old metrics snapshots: %s", e)
         try:
-            deleted = await db_service.cleanup_old_connections(CONNECTIONS_RETENTION_DAYS)
+            c_days = int(config_service.get("connections_retention_days", CONNECTIONS_RETENTION_DAYS) or CONNECTIONS_RETENTION_DAYS)
+            deleted = await db_service.cleanup_old_connections(c_days)
             if deleted > 0:
                 logger.info("Cleaned up %d old connections", deleted)
         except Exception as e:
@@ -390,7 +390,8 @@ async def receive_connections(
         except Exception as e:
             logger.debug("Failed to ensure connection partitions: %s", e)
         try:
-            deleted = await db_service.cleanup_old_torrent_events(90)
+            t_days = int(config_service.get("torrent_retention_days", 90) or 90)
+            deleted = await db_service.cleanup_old_torrent_events(t_days)
             if deleted > 0:
                 logger.info("Cleaned up %d old torrent events", deleted)
         except Exception as e:
@@ -587,7 +588,7 @@ async def _process_torrent_violations(
                 ips = list(set(e.ip_address for e in user_events))
 
                 # Save as violation (score=100)
-                violation_id = await db_service.save_violation(
+                violation_id, violation_created = await db_service.save_violation(
                     user_uuid=user_uuid,
                     score=100.0,
                     recommended_action="hard_block",
@@ -603,6 +604,11 @@ async def _process_torrent_violations(
                     simultaneous_connections=len(ips),
                     unique_ips_count=len(ips),
                 )
+
+                if not violation_created:
+                    # Дедуп: свежая pending-запись уже есть — не спамим событиями
+                    logger.debug("Torrent violation deduplicated for user %s (id=%s)", user_uuid, violation_id)
+                    continue
 
                 fire_event("violation.created", {
                     "violation_id": violation_id,
@@ -916,7 +922,7 @@ async def _handle_violation(
         telegram_id = user_info.get("telegram_id") if user_info else None
         device_limit = user_info.get("hwidDeviceLimit", 1) if user_info else 1
 
-        violation_id = await db_service.save_violation(
+        violation_id, violation_created = await db_service.save_violation(
             user_uuid=user_uuid,
             score=violation_score.total,
             recommended_action=violation_score.recommended_action.value,
@@ -952,6 +958,13 @@ async def _handle_violation(
             ]) if ua and ua.suspicious_agents else None,
         )
 
+        if not violation_created:
+            # Дедуп вернул существующую pending-запись: события и автоблок уже
+            # отработали при её создании — повторные срабатывания (в т.ч.
+            # автоматизаций на violation.created) только путают админа.
+            logger.debug("Violation deduplicated for user %s (id=%s)", user_uuid, violation_id)
+            return
+
         fire_event("violation.created", {
             "violation_id": violation_id,
             "user_uuid": user_uuid,
@@ -966,20 +979,26 @@ async def _handle_violation(
 
         from shared.violation_detector import ViolationAction
         if violation_score.recommended_action == ViolationAction.HARD_BLOCK:
-            try:
-                from shared.api_client import api_client
-                await api_client.disable_user(user_uuid)
-                logger.warning("Auto-blocked user %s score=%.1f", user_uuid[:8], violation_score.total)
-                fire_event("user.blocked", {
-                    "uuid": user_uuid,
-                    "username": username,
-                    "reason": "violation",
-                    "details": f"hard_block recommended (score={violation_score.total:.1f})",
-                    "violation_id": violation_id,
-                    "blocked_by": "auto",
-                })
-            except Exception as block_error:
-                logger.warning("Failed to auto-block user %s: %s", user_uuid, block_error)
+            if config_service.get("violation_auto_hard_block", True):
+                try:
+                    from shared.api_client import api_client
+                    await api_client.disable_user(user_uuid)
+                    logger.warning("Auto-blocked user %s score=%.1f", user_uuid[:8], violation_score.total)
+                    fire_event("user.blocked", {
+                        "uuid": user_uuid,
+                        "username": username,
+                        "reason": "violation",
+                        "details": f"hard_block recommended (score={violation_score.total:.1f})",
+                        "violation_id": violation_id,
+                        "blocked_by": "auto",
+                    })
+                except Exception as block_error:
+                    logger.warning("Failed to auto-block user %s: %s", user_uuid, block_error)
+            else:
+                logger.info(
+                    "Auto-block skipped for user %s (violation_auto_hard_block=off, score=%.1f)",
+                    user_uuid[:8], violation_score.total,
+                )
 
         try:
             from web.backend.api.v2.websocket import broadcast_violation
@@ -1081,7 +1100,7 @@ async def collector_stats(request: Request):
             "config": {
                 "drain_interval_sec": config_service.get("violation_drain_interval", _VIOLATION_DRAIN_INTERVAL),
                 "chunk_size": config_service.get("violation_chunk_size", _VIOLATION_CHUNK_SIZE),
-                "cooldown_minutes": config_service.get("violations_check_cooldown_minutes", VIOLATION_CHECK_COOLDOWN_MINUTES),
+                "cooldown_minutes": config_service.get("violation_check_cooldown_minutes", VIOLATION_CHECK_COOLDOWN_MINUTES),
                 "max_background_tasks": config_service.get("violation_max_background_tasks", _MAX_BACKGROUND_TASKS),
             },
             "worker_started_at": _stats["worker_started_at"],

@@ -8,6 +8,21 @@ import App from './App'
 import './i18n'
 import './index.css'
 
+// A tab holding a pre-deploy build references chunk hashes that no longer
+// exist on the server — lazy imports fail with "Failed to fetch dynamically
+// imported module". One reload picks up the fresh index.html; the
+// sessionStorage window guards against a reload loop if a chunk is missing
+// for any other reason.
+window.addEventListener('vite:preloadError', (event) => {
+  const KEY = 'chunk-reload-at'
+  const last = Number(sessionStorage.getItem(KEY) ?? 0)
+  if (Date.now() - last > 30_000) {
+    sessionStorage.setItem(KEY, String(Date.now()))
+    event.preventDefault()
+    window.location.reload()
+  }
+})
+
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {

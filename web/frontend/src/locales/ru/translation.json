@@ -823,6 +823,9 @@
       "title": "Подписка",
       "link": "Ссылка подписки",
       "copy": "Копировать",
+      "importToClient": "Импорт",
+      "importPickClient": "Выберите приложение",
+      "importCopied": "Ссылка для {{client}} скопирована",
       "uuid": "UUID подписки",
       "noSubscription": "Нет активной подписки",
       "noActive": "Нет активной подписки",
@@ -1597,7 +1600,8 @@
       "dateTo": "По",
       "username": "Имя пользователя",
       "usernamePlaceholder": "Поиск по имени пользователя",
-      "sortByCount": "Сортировать по количеству"
+      "sortByCount": "Сортировать по количеству",
+      "includeAnnulled": "Показывать аннулированные"
     },
     "stats": {
       "total": "Всего",
@@ -3331,13 +3335,9 @@
         "label": "👥 Макс. аккаунтов на один HWID",
         "description": "Количество аккаунтов на одном HWID для срабатывания (по умолчанию 2)"
       },
-      "violations_max_unique_ips_per_day": {
-        "label": "📊 Макс. уникальных IP в день",
-        "description": "Превышение этого количества уникальных IP за день вызывает предупреждение (0 = авто по профилю)"
-      },
-      "violations_notification_cooldown_minutes": {
-        "label": "🔕 Кулдаун уведомлений (мин)",
-        "description": "Минимальный интервал между уведомлениями по одному пользователю"
+      "violations_mobile_cgnat_buffer": {
+        "label": "📱 Буфер CGNAT для мобильных (IP)",
+        "description": "Сколько дополнительных одновременных IP допускается для мобильных подключений сверх лимита устройств (CGNAT даёт 3-5 IP с одного устройства)"
       },
       "violations_hard_block_ips": {
         "label": "🚫 Жёсткая блокировка: макс. IP",
@@ -3968,6 +3968,12 @@
       "nodeLabel": "Нода",
       "nodePlaceholder": "Выберите ноду",
       "nextBillingLabel": "Дата следующего платежа",
+      "tabExistingNode": "Существующий узел",
+      "tabCustomName": "Пользовательское название",
+      "customNameLabel": "Пользовательское название",
+      "customNamePlaceholder": "Management Server",
+      "customNameHint": "Для серверов, которых нет среди нод панели — роутер, отдельный VPS и т.п.",
+      "customBadge": "Внешняя",
       "deleteTitle": "Удалить биллинговую ноду",
       "deleteDescription": "Вы уверены, что хотите удалить привязку биллинга к этой ноде?"
     }

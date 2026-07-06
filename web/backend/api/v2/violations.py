@@ -93,6 +93,7 @@ async def list_violations(
     order: str = Query("desc", description="Sort order: asc or desc"),
     recommended_action: Optional[str] = Query(None, description="Filter by recommended action"),
     username: Optional[str] = Query(None, description="Search by username (partial match)"),
+    include_annulled: bool = Query(False, description="Include annulled (false-positive) violations"),
     admin: AdminUser = Depends(require_permission("violations", "view")),
     db: DatabaseService = Depends(get_db),
 ):
@@ -108,6 +109,8 @@ async def list_violations(
     - **country**: Фильтр по коду страны
     - **date_from**: Фильтр от даты (ISO формат)
     - **date_to**: Фильтр до даты (ISO формат)
+    - **include_annulled**: Показывать аннулированные (по умолчанию скрыты, чтобы
+      список совпадал со счётчиками статистики)
     """
     try:
         if not db.is_connected:
@@ -151,6 +154,7 @@ async def list_violations(
             recommended_action=recommended_action,
             username=username,
             user_uuid_whitelist=user_uuid_whitelist,
+            include_annulled=include_annulled,
         )
 
         # Подсчёт для пагинации
@@ -495,6 +499,13 @@ async def annul_all_violations(
     db: DatabaseService = Depends(get_db),
 ):
     """Аннулировать все нерассмотренные нарушения (глобально)."""
+    # Access-policy: глобальное аннулирование затрагивает ВСЕХ юзеров, поэтому
+    # доступно только админам без ограничения видимости (visible is None).
+    # Scoped-админ должен использовать per-user annul-all в пределах своего scope.
+    from web.backend.core.rbac import get_visible_user_uuids
+    if await get_visible_user_uuids(admin) is not None:
+        raise api_error(403, E.FORBIDDEN)
+
     comment = data.comment if data else None
     count = await db.annul_all_pending_violations(
         admin_telegram_id=admin.telegram_id,
@@ -932,6 +943,17 @@ async def annul_violation(
     db: DatabaseService = Depends(get_db),
 ):
     """Аннулировать нарушение (ложное срабатывание)."""
+    # Access-policy: не даём аннулировать нарушение юзера вне scope админа
+    # (как в resolve/annul-user; раньше этот путь scope не проверял).
+    violation_check = await db.get_violation_by_id(violation_id)
+    if violation_check:
+        from web.backend.core.rbac import get_visible_user_uuids
+        visible = await get_visible_user_uuids(admin)
+        if visible is not None:
+            uuser = str(violation_check.get("user_uuid", "")).lower()
+            if uuser not in visible:
+                raise api_error(403, E.FORBIDDEN)
+
     comment = data.comment if data else None
     success = await db.update_violation_action(
         violation_id=violation_id,

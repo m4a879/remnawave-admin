@@ -23,6 +23,7 @@ from web.backend.core.admin_accounts import (
 )
 from web.backend.core.audit import write_audit_log, get_audit_logs
 from web.backend.core.rbac import get_role_by_id
+from shared.rbac import get_all_permissions_for_role_id
 from web.backend.core.admin_credentials import hash_password, validate_password_strength
 from web.backend.schemas.admin import (
     AdminAccountCreate,
@@ -106,6 +107,39 @@ async def get_admin(
     return _account_to_response(account)
 
 
+def _actor_is_superadmin(admin: AdminUser) -> bool:
+    # Legacy env-admin (account_id is None) резолвится как superadmin в deps.
+    return admin.role == "superadmin" or admin.account_id is None
+
+
+async def _assert_can_assign_role(admin: AdminUser, role_id: int) -> None:
+    """Запрещает не-superadmin назначать роль superadmin или роль с правами
+    шире собственных (privilege escalation через admins:create/edit)."""
+    if _actor_is_superadmin(admin):
+        return
+    role = await get_role_by_id(role_id)
+    if role and role.get("name") == "superadmin":
+        raise api_error(403, E.FORBIDDEN, "Only a superadmin can assign the superadmin role")
+    target_perms = await get_all_permissions_for_role_id(role_id)
+    if target_perms - admin.permissions:
+        raise api_error(403, E.FORBIDDEN, "Cannot assign a role with permissions you do not hold")
+
+
+async def _assert_can_manage_target(admin: AdminUser, target: dict) -> None:
+    """Запрещает не-superadmin редактировать/удалять аккаунт, чья роль выше его
+    прав — иначе можно сменить пароль вышестоящему аккаунту и войти под ним."""
+    if _actor_is_superadmin(admin):
+        return
+    if target.get("role_name") == "superadmin":
+        raise api_error(403, E.FORBIDDEN, "Cannot manage a superadmin account")
+    target_role_id = target.get("role_id")
+    if target_role_id is None:
+        return
+    target_perms = await get_all_permissions_for_role_id(target_role_id)
+    if target_perms - admin.permissions:
+        raise api_error(403, E.FORBIDDEN, "Cannot manage an account whose role exceeds your permissions")
+
+
 @router.post("", response_model=AdminAccountResponse, status_code=201)
 async def create_admin(
     request: Request,
@@ -117,6 +151,9 @@ async def create_admin(
     role = await get_role_by_id(data.role_id)
     if not role:
         raise api_error(400, E.ROLE_NOT_FOUND)
+
+    # Privilege-escalation guard: can't grant a role above the actor's own.
+    await _assert_can_assign_role(admin, data.role_id)
 
     # Check username uniqueness
     existing = await get_admin_account_by_username(data.username)
@@ -178,6 +215,11 @@ async def update_admin(
     if not existing:
         raise api_error(404, E.ADMIN_NOT_FOUND)
 
+    # Can't edit an account whose role outranks the actor (else a non-superadmin
+    # could reset a superadmin's password/role and take it over).
+    if admin.account_id != admin_id:
+        await _assert_can_manage_target(admin, existing)
+
     # Cannot edit own role / deactivate self
     if admin.account_id == admin_id:
         # model_fields_set catches an explicit null too — otherwise a null role_id
@@ -210,6 +252,8 @@ async def update_admin(
         role = await get_role_by_id(data.role_id)
         if not role:
             raise api_error(400, E.ROLE_NOT_FOUND)
+        # Privilege-escalation guard: can't promote to a role above the actor's own.
+        await _assert_can_assign_role(admin, data.role_id)
         fields["role_id"] = data.role_id
     # For numeric quota fields, accept null as "clear" (set to NULL → unlimited).
     if data.max_users is not None or "max_users" in data.model_fields_set:
@@ -279,6 +323,9 @@ async def delete_admin_endpoint(
     existing = await get_admin_account_by_id(admin_id)
     if not existing:
         raise api_error(404, E.ADMIN_NOT_FOUND)
+
+    # Can't delete an account whose role outranks the actor.
+    await _assert_can_manage_target(admin, existing)
 
     success = await delete_admin_account(admin_id)
     if not success:

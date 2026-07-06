@@ -35,9 +35,9 @@ WEIGHTS = {
     'geo': 0.20,           # География (было 0.25)
     'asn': 0.10,           # Тип провайдера (было 0.15)
     'profile': 0.15,       # Отклонение от профиля (было 0.20)
-    'device': 0.10,        # ⚠️ ФИКТИВЕН: коллектор не пишет per-connection User-Agent
-                           # (node-agent парсит Xray access.log — там только IP+email),
-                           # поэтому device-score всегда 0. Вес сохранён на случай источника UA.
+    'device': 0.10,        # Платформы устройств по SRH-UA (analyze_srh): per-connection
+                           # UA нет (node-agent пишет только IP+email), поэтому источник —
+                           # User-Agent подписочных запросов. Разные ОС сверх лимита = шаринг.
     'hwid': 0.25,          # Кросс-аккаунт HWID (сильный сигнал)
 }
 
@@ -214,8 +214,22 @@ class IntelligentViolationDetector:
                 connection_history_30d=connection_history_30d,
             )
 
-            # Анализируем fingerprint устройств (с учётом лимита устройств)
-            device_score = self.device_analyzer.analyze(active_connections, connection_history, user_device_count)
+            # SRH (User-Agent подписочных запросов) — общий источник для device и
+            # user_agent анализаторов. Грузим один раз: per-connection UA нет
+            # (node-agent пишет только IP+email), поэтому device определяет
+            # платформы устройств именно по SRH-UA.
+            srh_records: Optional[List[Dict[str, Any]]] = None
+            try:
+                srh_records = prefetched_srh_records if prefetched_srh_records is not None else await self._fetch_srh_records(user_uuid)
+            except Exception as srh_err:
+                logger.warning("SRH fetch failed for %s: %s", user_uuid, srh_err)
+
+            # Анализируем устройства: по SRH-UA (основной путь), иначе fallback на
+            # per-connection fingerprint (обычно пустой → 0).
+            if srh_records:
+                device_score = self.device_analyzer.analyze_srh(srh_records, user_device_count)
+            else:
+                device_score = self.device_analyzer.analyze(active_connections, connection_history, user_device_count)
 
             # Анализируем кросс-аккаунт HWID
             hwid_score = await self.hwid_analyzer.analyze(user_uuid, prefetched_shared=prefetched_shared_hwids)
@@ -224,7 +238,6 @@ class IntelligentViolationDetector:
             ua_score = UserAgentScore(score=0.0, reasons=[])
             if config_service.get("violations_analyzer_user_agent", True) and "user_agent" not in (excluded_analyzers or []):
                 try:
-                    srh_records = prefetched_srh_records if prefetched_srh_records is not None else await self._fetch_srh_records(user_uuid)
                     if srh_records is not None:
                         ua_whitelist_extra = config_service.get("violation_ua_whitelist_extra", []) or []
                         ua_blacklist_extra = config_service.get("violation_ua_blacklist_extra", []) or []

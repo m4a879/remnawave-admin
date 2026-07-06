@@ -41,3 +41,7 @@ skills-lock.json
 
 # MCP-сервер для админки — локальный инструмент диагностики (не в репо, содержит прод-доступ)
 mcp_server/
+
+# DesignSync — локальный инструментарий, не часть проекта
+web/frontend/.design-sync/
+web/frontend/.gitignore

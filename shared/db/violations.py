@@ -60,31 +60,48 @@ class ViolationsMixin:
         hwid_matched_users: Optional[str] = None,
         user_agent_score: Optional[float] = None,
         suspicious_user_agents: Optional[str] = None,
-    ) -> Optional[int]:
+    ) -> Tuple[Optional[int], bool]:
         """
         Сохранить нарушение в базу данных.
 
         Returns:
-            ID созданной записи или None при ошибке
+            (ID записи, created): created=False — дедуп вернул существующую
+            pending-запись (или ошибка/нет БД). Downstream-события
+            (violation.created, автоблок) должны срабатывать только при created=True.
         """
         if not self.is_connected:
-            return None
+            return None, False
 
         try:
             async with self.acquire() as conn:
                 async with conn.transaction():
-                    # Deduplication: skip if user already has an unresolved violation
-                    existing = await conn.fetchval(
+                    # Deduplication: в пределах окна не плодим записи об одном инциденте.
+                    # Без окна старое pending-нарушение (вне выборки UI) глушило бы новые
+                    # записи вечно — уведомления идут, а во вкладке «Нарушения» пусто.
+                    # Эскалация: более высокий скор (напр. торрент=100) пробивает дедуп.
+                    try:
+                        from shared.config_service import config_service
+                        raw_window = config_service.get("violation_dedup_window_hours", 24)
+                        dedup_hours = int(raw_window) if raw_window is not None else 24
+                    except Exception:
+                        dedup_hours = 24
+
+                    existing = await conn.fetchrow(
                         select_sql(
                             VIOLATIONS_TABLE,
-                            "id",
-                            "WHERE user_uuid = $1 AND action_taken IS NULL ORDER BY detected_at DESC LIMIT 1",
+                            "id, score",
+                            "WHERE user_uuid = $1 AND action_taken IS NULL "
+                            "AND detected_at > NOW() - ($2 * INTERVAL '1 hour') "
+                            "ORDER BY detected_at DESC LIMIT 1",
                         ),
-                        user_uuid,
+                        user_uuid, dedup_hours,
                     )
-                    if existing:
-                        logger.debug("Skipping duplicate violation for user %s (pending id=%d)", user_uuid, existing)
-                        return existing
+                    if existing and float(existing["score"] or 0) >= score:
+                        logger.debug(
+                            "Skipping duplicate violation for user %s (pending id=%d, score %.1f >= %.1f)",
+                            user_uuid, existing["id"], float(existing["score"] or 0), score,
+                        )
+                        return existing["id"], False
 
                     result = await conn.fetchval(
                         insert_sql(
@@ -115,11 +132,11 @@ class ViolationsMixin:
                         VIOLATIONS_DETECTED.labels(
                             action=(recommended_action or "unknown").lower()
                         ).inc()
-                    return result
+                    return result, result is not None
 
         except Exception as e:
             logger.error("Error saving violation for user %s: %s", user_uuid, e, exc_info=True)
-            return None
+            return None, False
 
     async def get_violations_for_period(
         self,
@@ -138,6 +155,7 @@ class ViolationsMixin:
         recommended_action: Optional[str] = None,
         username: Optional[str] = None,
         user_uuid_whitelist: Optional[List[str]] = None,
+        include_annulled: bool = False,
     ) -> List[Dict[str, Any]]:
         """
         Получить нарушения за указанный период с фильтрацией на стороне БД.
@@ -175,12 +193,12 @@ class ViolationsMixin:
                 idx = 4
 
                 if user_uuid_whitelist is not None:
-                    conditions.append(f"user_uuid::text = ANY(${idx})")
+                    conditions.append(f"user_uuid = ANY(${idx}::uuid[])")
                     params.append(user_uuid_whitelist)
                     idx += 1
 
                 if user_uuid:
-                    conditions.append(f"user_uuid::text = ${idx}")
+                    conditions.append(f"user_uuid = ${idx}::uuid")
                     params.append(user_uuid)
                     idx += 1
 
@@ -200,6 +218,12 @@ class ViolationsMixin:
                         conditions.append("action_taken IS NOT NULL")
                     else:
                         conditions.append("action_taken IS NULL")
+
+                # Аннулированные — ложные срабатывания (score обнулён). По умолчанию
+                # скрыты, чтобы список совпадал со статистикой (та всегда исключает
+                # 'annulled'); показываются только по явному запросу include_annulled.
+                if not include_annulled:
+                    conditions.append("action_taken IS DISTINCT FROM 'annulled'")
 
                 if ip:
                     conditions.append(f"${idx} = ANY(ip_addresses)")
@@ -269,6 +293,7 @@ class ViolationsMixin:
         recommended_action: Optional[str] = None,
         username: Optional[str] = None,
         user_uuid_whitelist: Optional[List[str]] = None,
+        include_annulled: bool = False,
     ) -> int:
         """Подсчитать количество нарушений за период с фильтрами (для пагинации)."""
         if not self.is_connected:
@@ -289,12 +314,12 @@ class ViolationsMixin:
                 idx = 4
 
                 if user_uuid_whitelist is not None:
-                    conditions.append(f"user_uuid::text = ANY(${idx})")
+                    conditions.append(f"user_uuid = ANY(${idx}::uuid[])")
                     params.append(user_uuid_whitelist)
                     idx += 1
 
                 if user_uuid:
-                    conditions.append(f"user_uuid::text = ${idx}")
+                    conditions.append(f"user_uuid = ${idx}::uuid")
                     params.append(user_uuid)
                     idx += 1
 
@@ -314,6 +339,11 @@ class ViolationsMixin:
                         conditions.append("action_taken IS NOT NULL")
                     else:
                         conditions.append("action_taken IS NULL")
+
+                # См. get_violations_for_period: аннулированные скрыты по умолчанию,
+                # иначе count списка расходится со статистикой.
+                if not include_annulled:
+                    conditions.append("action_taken IS DISTINCT FROM 'annulled'")
 
                 if ip:
                     conditions.append(f"${idx} = ANY(ip_addresses)")
@@ -409,8 +439,8 @@ class ViolationsMixin:
                 return dict(row) if row else {
                     'total': 0,
                     'critical': 0,
-                    'warning': 0,
-                    'monitor': 0,
+                    'high': 0,
+                    'medium': 0,
                     'unique_users': 0,
                     'avg_score': 0.0,
                     'max_score': 0.0
@@ -495,7 +525,7 @@ class ViolationsMixin:
                     FROM (
                         SELECT user_uuid, unnest(reasons) as reason
                         FROM {VIOLATIONS_TABLE}
-                        WHERE user_uuid::text = ANY($1)
+                        WHERE user_uuid = ANY($1::uuid[])
                         AND detected_at >= $2
                         AND detected_at < $3
                         AND score >= $4
@@ -734,7 +764,8 @@ class ViolationsMixin:
                             VIOLATIONS_TABLE,
                             "action_taken = $1, action_taken_at = NOW(), action_taken_by = $2, "
                             "admin_comment = $3, score = 0, temporal_score = 0, geo_score = 0, "
-                            "asn_score = 0, profile_score = 0, device_score = 0, hwid_score = 0",
+                            "asn_score = 0, profile_score = 0, device_score = 0, hwid_score = 0, "
+                            "user_agent_score = 0",
                             "id = $4",
                         ),
                         action_taken, admin_telegram_id, admin_comment, violation_id
@@ -777,7 +808,8 @@ class ViolationsMixin:
                         VIOLATIONS_TABLE,
                         "action_taken = 'annulled', action_taken_at = NOW(), action_taken_by = $1, "
                         "admin_comment = $2, score = 0, temporal_score = 0, geo_score = 0, "
-                        "asn_score = 0, profile_score = 0, device_score = 0, hwid_score = 0",
+                        "asn_score = 0, profile_score = 0, device_score = 0, hwid_score = 0, "
+                        "user_agent_score = 0",
                         "user_uuid = $3 AND action_taken IS NULL",
                     ),
                     admin_telegram_id, admin_comment, user_uuid,
@@ -811,7 +843,8 @@ class ViolationsMixin:
                         VIOLATIONS_TABLE,
                         "action_taken = 'annulled', action_taken_at = NOW(), action_taken_by = $1, "
                         "admin_comment = $2, score = 0, temporal_score = 0, geo_score = 0, "
-                        "asn_score = 0, profile_score = 0, device_score = 0, hwid_score = 0",
+                        "asn_score = 0, profile_score = 0, device_score = 0, hwid_score = 0, "
+                        "user_agent_score = 0",
                         "action_taken IS NULL",
                     ),
                     admin_telegram_id, admin_comment,

@@ -53,6 +53,14 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Label } from '@/components/ui/label'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog'
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+} from '@/components/ui/dropdown-menu'
 import { ConfirmDialog } from '@/components/ConfirmDialog'
 import { cn } from '@/lib/utils'
 import { QRCodeSVG } from 'qrcode.react'
@@ -1213,6 +1221,56 @@ function RemainingTrafficIndicator() {
     <p className="text-xs text-dark-300 mb-1">
       {t('admins.remainingTraffic', { remaining: remaining.toFixed(1), total: maxGb })}
     </p>
+  )
+}
+
+interface DeeplinkItem {
+  id: string
+  label: string
+  link: string
+}
+
+function ImportClientDropdown({ userUuid }: { userUuid: string }) {
+  const { t } = useTranslation()
+  const [open, setOpen] = useState(false)
+  const { data, isLoading } = useQuery<{ links: DeeplinkItem[] }>({
+    queryKey: ['user-deeplinks', userUuid],
+    queryFn: async () => {
+      const { data } = await client.get(`/users/${userUuid}/deeplinks`)
+      return data
+    },
+    enabled: open,
+    staleTime: 5 * 60 * 1000,
+  })
+
+  const copyLink = (item: DeeplinkItem) => {
+    navigator.clipboard.writeText(item.link)
+    toast.success(t('userDetail.subscription.importCopied', { client: item.label }))
+  }
+
+  return (
+    <DropdownMenu open={open} onOpenChange={setOpen}>
+      <DropdownMenuTrigger asChild>
+        <Button variant="outline" size="sm" className="h-7 px-2.5 text-xs gap-1">
+          <Smartphone className="h-3.5 w-3.5" />
+          {t('userDetail.subscription.importToClient')}
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="w-52">
+        <DropdownMenuLabel>{t('userDetail.subscription.importPickClient')}</DropdownMenuLabel>
+        <DropdownMenuSeparator />
+        {isLoading ? (
+          <DropdownMenuItem disabled>{t('common.loading')}</DropdownMenuItem>
+        ) : (
+          (data?.links ?? []).map((item) => (
+            <DropdownMenuItem key={item.id} onClick={() => copyLink(item)}>
+              <Copy className="h-3.5 w-3.5 mr-2 text-dark-300" />
+              {item.label}
+            </DropdownMenuItem>
+          ))
+        )}
+      </DropdownMenuContent>
+    </DropdownMenu>
   )
 }
 
@@ -2540,6 +2598,7 @@ export default function UserDetail() {
                         <Network className="h-3.5 w-3.5" />
                         IPs
                       </Button>
+                      <ImportClientDropdown userUuid={user.uuid} />
                     </div>
                   </div>
                 ) : user.subscription_uuid ? (

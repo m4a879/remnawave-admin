@@ -28,9 +28,10 @@ def user_actions_keyboard(user_uuid: str, status: str, back_to: str = NavTarget.
     ] if b is not None]
     if row3:
         rows.append(row3)
-    row4 = [
+    row4 = [b for b in [
         InlineKeyboardButton(text=_("user.stats"), callback_data=f"user_stats:{user_uuid}"),
-    ]
+        perm_btn(admin, "users", "view", _("user.import_button"), f"uimport:{user_uuid}"),
+    ] if b is not None]
     rows.append(row4)
     rows.append(nav_row(back_to))
     return InlineKeyboardMarkup(inline_keyboard=rows)

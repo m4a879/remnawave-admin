@@ -651,7 +651,7 @@ async def _create_user(target: Message | CallbackQuery, data: dict, admin: BotAd
     logger.info("👤 Sending success message: status=%s uuid=%s", status, info.get("uuid", ""))
     reply_markup = user_actions_keyboard(info.get("uuid", ""), status, admin=admin)
     detail = build_user_summary(user, _)
-    await _respond(detail, reply_markup)
+    await _send_clean_message(target, detail, reply_markup=reply_markup, parse_mode="HTML")
     logger.info("👤 Success message sent")
     
     # Persist to local DB (same as panel does)
@@ -1055,7 +1055,7 @@ async def _handle_user_edit_input(message: Message, ctx: dict, admin: BotAdmin |
     await _apply_user_update(message, user_uuid, payload, back_to=back_to, admin=admin)
 
 
-async def _handle_user_create_input(message: Message, ctx: dict) -> None:
+async def _handle_user_create_input(message: Message, ctx: dict, admin: BotAdmin | None = None) -> None:
     """Обрабатывает пошаговый ввод для создания пользователя."""
     user_id = message.from_user.id
     data = ctx.setdefault("data", {})
@@ -1159,7 +1159,7 @@ async def _handle_user_create_input(message: Message, ctx: dict) -> None:
         return
 
     if stage == "traffic_strategy":
-        if text not in ("NO_RESET", "MONTHLY", "WEEKLY", "DAILY"):
+        if text not in ("NO_RESET", "MONTH", "MONTH_ROLLING", "WEEK", "DAY"):
             PENDING_INPUT[user_id] = ctx
             await _send_user_create_prompt(
                 message, _("user.invalid_traffic_strategy"), user_create_traffic_strategy_keyboard(), ctx=ctx
@@ -1403,7 +1403,7 @@ async def _handle_user_create_callback(callback: CallbackQuery, admin: BotAdmin 
 
     if action == "traffic_strategy" and len(parts) >= 3:
         value = parts[2]
-        if value in ("NO_RESET", "MONTHLY", "WEEKLY", "DAILY"):
+        if value in ("NO_RESET", "MONTH", "MONTH_ROLLING", "WEEK", "DAY"):
             data["traffic_limit_strategy"] = value
         ctx["stage"] = "hwid"
         PENDING_INPUT[user_id] = ctx
@@ -2826,6 +2826,61 @@ async def cb_user_happ_link(callback: CallbackQuery) -> None:
         await callback.message.edit_text(_("errors.generic"), reply_markup=nav_keyboard(back_to))
 
 
+@router.callback_query(F.data.startswith("uimport:"))
+async def cb_user_import_links(callback: CallbackQuery, admin: BotAdmin) -> None:
+    """Показывает deep-links импорта подписки в клиентские приложения.
+
+    Схемы happ://, incy:// и т.п. в Telegram некликабельны, поэтому выводим
+    их в <code> — тап копирует ссылку.
+    """
+    if await _not_admin(callback):
+        return
+    if not await require_permission(callback, admin, "users", "view"):
+        return
+    await callback.answer()
+
+    user_uuid = callback.data.split(":", 1)[1]
+    back_to = _get_user_detail_back_target(callback.from_user.id)
+
+    try:
+        user = await data_access.get_user_by_uuid_wrapped(user_uuid)
+        user_info = user.get("response", user)
+        subscription_url = user_info.get("subscriptionUrl")
+        status = user_info.get("status", "UNKNOWN")
+
+        if not subscription_url:
+            await callback.message.edit_text(
+                _("user.no_subscription_url"),
+                reply_markup=user_actions_keyboard(user_uuid, status, back_to=back_to, admin=admin),
+            )
+            return
+
+        from shared.deeplinks import build_deeplinks
+        name = user_info.get("username") or ""
+        links = build_deeplinks(subscription_url, name or None)
+
+        lines = [_("user.import_title"), "", _("user.import_hint"), ""]
+        for item in links:
+            lines.append(f"<b>{_esc(item['label'])}</b>")
+            lines.append(f"<code>{_esc(item['link'])}</code>")
+        text = "\n".join(lines)
+
+        keyboard = InlineKeyboardMarkup(
+            inline_keyboard=[
+                [InlineKeyboardButton(text=_("actions.back"), callback_data=f"user:{user_uuid}")],
+                nav_row(back_to),
+            ]
+        )
+        await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
+    except UnauthorizedError:
+        await callback.message.edit_text(_("errors.unauthorized"), reply_markup=nav_keyboard(back_to))
+    except NotFoundError:
+        await callback.message.edit_text(_("user.not_found"), reply_markup=nav_keyboard(back_to))
+    except ApiClientError:
+        logger.exception("Failed to build import links for user_uuid=%s actor_id=%s", user_uuid, callback.from_user.id)
+        await callback.message.edit_text(_("errors.generic"), reply_markup=nav_keyboard(back_to))
+
+
 @router.callback_query(F.data.startswith("uqr:"))
 async def cb_user_qr(callback: CallbackQuery, admin: BotAdmin) -> None:
     """Обработчик показа QR-кода подписной ссылки пользователя."""
@@ -3685,7 +3740,7 @@ async def cb_user_hwid_devices(callback: CallbackQuery) -> None:
             # Используем форматтер для красивого отображения устройств
             device_lines = format_hwid_devices_list(devices, max_devices=10)
             for line in device_lines:
-                lines.append(f"   {_esc(line)}")
+                lines.append(f"   {line}")
         
         text = "\n".join(lines)
         await callback.message.edit_text(
@@ -3770,7 +3825,7 @@ async def cb_hwid_delete(callback: CallbackQuery, admin: BotAdmin) -> None:
             # Используем форматтер для красивого отображения устройств
             device_lines = format_hwid_devices_list(devices, max_devices=10)
             for line in device_lines:
-                lines.append(f"   {_esc(line)}")
+                lines.append(f"   {line}")
 
         text = "\n".join(lines)
         await callback.message.edit_text(
@@ -3836,7 +3891,7 @@ async def cb_hwid_delete_all(callback: CallbackQuery, admin: BotAdmin) -> None:
             # Используем форматтер для красивого отображения устройств
             device_lines = format_hwid_devices_list(devices, max_devices=10)
             for line in device_lines:
-                lines.append(f"   {_esc(line)}")
+                lines.append(f"   {line}")
 
         text = "\n".join(lines)
         await callback.message.edit_text(

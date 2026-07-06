@@ -6,7 +6,7 @@ from aiogram.types import Message
 from aiogram.utils.i18n import gettext as _
 
 from src.handlers.common import _not_admin, _send_clean_message
-from src.handlers.state import PENDING_INPUT
+from src.handlers.state import LAST_BOT_MESSAGES, LAST_BOT_MESSAGES_LOCK, PENDING_INPUT
 from src.keyboards.billing_menu import billing_menu_keyboard
 from src.keyboards.billing_nodes_menu import billing_nodes_menu_keyboard
 from src.keyboards.hosts_menu import hosts_menu_keyboard
@@ -57,6 +57,12 @@ async def cmd_start(message: Message, admin: BotAdmin) -> None:
     """Обработчик команды /start."""
     if await _not_admin(message):
         return
+
+    # /start — всегда свежее сообщение. Если юзер очистил диалог у себя,
+    # редактирование прошлого сообщения бота проходит успешно, но юзер его
+    # не видит — для него бот «молчит». Сбрасываем кэш последнего сообщения.
+    async with LAST_BOT_MESSAGES_LOCK:
+        LAST_BOT_MESSAGES.pop(message.chat.id, None)
 
     await _send_clean_message(message, _("bot.welcome").format(brand=brand_name()))
     menu_text = await _fetch_main_menu_text()
@@ -117,7 +123,7 @@ async def handle_pending(message: Message, state: FSMContext, admin: BotAdmin) -
     elif action.startswith("billing_nodes_"):
         await _handle_billing_nodes_input(message, ctx)
     elif action == "user_create":
-        await _handle_user_create_input(message, ctx)
+        await _handle_user_create_input(message, ctx, admin=admin)
     elif action == "user_edit":
         await _handle_user_edit_input(message, ctx, admin=admin)
     elif action.startswith("bulk_users_"):

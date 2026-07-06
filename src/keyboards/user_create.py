@@ -74,11 +74,14 @@ def user_create_traffic_strategy_keyboard() -> InlineKeyboardMarkup:
         inline_keyboard=[
             [
                 InlineKeyboardButton(text=_("user.strategy_no_reset"), callback_data="user_create:traffic_strategy:NO_RESET"),
-                InlineKeyboardButton(text=_("user.strategy_monthly"), callback_data="user_create:traffic_strategy:MONTHLY"),
+                InlineKeyboardButton(text=_("user.strategy_monthly"), callback_data="user_create:traffic_strategy:MONTH"),
             ],
             [
-                InlineKeyboardButton(text=_("user.strategy_weekly"), callback_data="user_create:traffic_strategy:WEEKLY"),
-                InlineKeyboardButton(text=_("user.strategy_daily"), callback_data="user_create:traffic_strategy:DAILY"),
+                InlineKeyboardButton(text=_("user.strategy_weekly"), callback_data="user_create:traffic_strategy:WEEK"),
+                InlineKeyboardButton(text=_("user.strategy_daily"), callback_data="user_create:traffic_strategy:DAY"),
+            ],
+            [
+                InlineKeyboardButton(text=_("user.strategy_monthly_rolling"), callback_data="user_create:traffic_strategy:MONTH_ROLLING"),
             ],
         ]
     )

@@ -328,8 +328,12 @@ class BaseInternalApiClient(BaseHttpClient):
     async def create_infra_billing_record(self, provider_uuid: str, amount: float, billed_at: str) -> dict:
         return await self._post("/infra-billing/history", json={"providerUuid": provider_uuid, "amount": amount, "billedAt": billed_at})
 
-    async def create_infra_billing_node(self, provider_uuid: str, node_uuid: str, next_billing_at: str | None = None) -> dict:
-        payload: dict = {"providerUuid": provider_uuid, "nodeUuid": node_uuid}
+    async def create_infra_billing_node(
+        self, provider_uuid: str, node_uuid: str | None = None, next_billing_at: str | None = None, name: str | None = None
+    ) -> dict:
+        # 2.8.0: nodeUuid и name — обязательные nullable-ключи (задаётся ровно одно),
+        # nextBillingAt обязателен
+        payload: dict = {"providerUuid": provider_uuid, "nodeUuid": node_uuid, "name": name}
         if next_billing_at:
             payload["nextBillingAt"] = next_billing_at
         return await self._post("/infra-billing/nodes", json=payload)

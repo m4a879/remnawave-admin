@@ -3,3 +3,4 @@
 *.yaml      text eol=lf
 *.tmpl      text eol=lf
 Dockerfile* text eol=lf
+*.bin       binary
