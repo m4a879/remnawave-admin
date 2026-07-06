@@ -10,7 +10,12 @@ Create Date: 2026-07-05
 доля таблицы), поэтому компактен и ускоряет и COUNT(*), и
 GROUP BY recommended_action по нерассмотренным нарушениям.
 
-CONCURRENTLY — чтобы не блокировать запись в violations на проде.
+Без CONCURRENTLY (как и 0043): main.py запускает upgrade на соединении,
+где уже были statements (детач плагин-ревизий) — SQLAlchemy автобегином
+открывает транзакцию, alembic считает её внешней, и autocommit_block()
+падает на assert. Обычный CREATE INDEX держит SHARE-блокировку только на
+время построения частичного индекса; миграция идёт на старте, когда
+коллектор — единственный писатель violations — ещё не поднят.
 """
 from typing import Sequence, Union
 
@@ -23,14 +28,11 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    # CONCURRENTLY нельзя внутри транзакции — выходим в autocommit
-    with op.get_context().autocommit_block():
-        op.execute(
-            "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_violations_pending "
-            "ON violations (detected_at DESC) WHERE action_taken IS NULL"
-        )
+    op.execute(
+        "CREATE INDEX IF NOT EXISTS idx_violations_pending "
+        "ON violations (detected_at DESC) WHERE action_taken IS NULL"
+    )
 
 
 def downgrade() -> None:
-    with op.get_context().autocommit_block():
-        op.execute("DROP INDEX CONCURRENTLY IF EXISTS idx_violations_pending")
+    op.execute("DROP INDEX IF EXISTS idx_violations_pending")
