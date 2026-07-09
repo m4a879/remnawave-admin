@@ -355,6 +355,15 @@ DEFAULT_CONFIG_DEFINITIONS: List[Dict[str, Any]] = [
         "sort_order": 7,
     },
     {
+        "key": "backup_deadman_hours",
+        "value_type": "int",
+        "category": "backup",
+        "display_name": "Алерт: нет бэкапа N часов",
+        "description": "Прислать алерт, если успешного бэкапа не было дольше N часов (0 = выкл)",
+        "default_value": "0",
+        "sort_order": 8,
+    },
+    {
         "key": "reports_weekly_enabled",
         "value_type": "bool",
         "category": "reports",

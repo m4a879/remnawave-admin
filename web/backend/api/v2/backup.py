@@ -224,6 +224,51 @@ async def download_backup(
     )
 
 
+# ── Preview backup / status ─────────────────────────────────────
+
+@router.get("/preview/{filename}")
+async def preview_backup(
+    filename: str,
+    admin: AdminUser = Depends(require_permission("backups", "view")),
+):
+    """Return metadata about a backup file (shown before restore)."""
+    from web.backend.core.backup_service import preview_backup_file
+    try:
+        return preview_backup_file(filename)
+    except FileNotFoundError:
+        raise api_error(404, E.BACKUP_NOT_FOUND)
+
+
+@router.get("/status")
+async def backup_status(
+    admin: AdminUser = Depends(require_permission("backups", "view")),
+):
+    """Disk usage + last successful backup (for the dashboard widget)."""
+    from web.backend.core.backup_service import get_disk_usage
+    usage = get_disk_usage()
+    last = None
+    try:
+        from shared.database import db_service
+        if db_service.is_connected:
+            async with db_service.acquire() as conn:
+                row = await conn.fetchrow(
+                    "SELECT filename, backup_type, size_bytes, status, created_at FROM backup_log "
+                    "WHERE backup_type IN ('database','config') AND status IN ('completed','success') "
+                    "ORDER BY created_at DESC LIMIT 1"
+                )
+            if row:
+                last = {
+                    "filename": row["filename"],
+                    "backup_type": row["backup_type"],
+                    "size_bytes": row["size_bytes"],
+                    "status": row["status"],
+                    "created_at": row["created_at"].isoformat() if row["created_at"] else None,
+                }
+    except Exception as e:
+        logger.debug("backup status: last read failed: %s", e)
+    return {**usage, "last_backup": last}
+
+
 # ── Delete backup file ──────────────────────────────────────────
 
 @router.delete("/{filename}", status_code=204)
@@ -250,6 +295,22 @@ async def restore_db_backup(
         raise api_error(500, E.DB_UNAVAILABLE, "DATABASE_URL not configured")
 
     try:
+        # Safety snapshot before the destructive restore (best-effort — a failed
+        # snapshot must not block an intentional restore).
+        try:
+            from web.backend.core.backup_service import create_database_backup
+            snap = await create_database_backup(database_url)
+            await _log_backup(
+                filename=snap["filename"],
+                backup_type="pre_restore",
+                size_bytes=snap["size_bytes"],
+                admin=admin,
+                notes="Автоснимок перед восстановлением",
+            )
+            logger.info("Pre-restore snapshot created: %s", snap["filename"])
+        except Exception as snap_err:
+            logger.warning("Pre-restore snapshot failed (continuing): %s", snap_err)
+
         from web.backend.core.backup_service import restore_database_backup
         await restore_database_backup(database_url, body.filename)
 

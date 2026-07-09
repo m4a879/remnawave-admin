@@ -20,8 +20,10 @@ def _now_hhmm():
 @pytest.fixture(autouse=True)
 def _reset_state():
     bs._last_auto_backup_ts = None
+    bs._last_deadman_alert_date = None
     yield
     bs._last_auto_backup_ts = None
+    bs._last_deadman_alert_date = None
 
 
 class TestAutoBackupDue:
@@ -126,3 +128,49 @@ class TestAutoBackupDue:
                 patch.object(bs, "create_database_backup", new_callable=AsyncMock) as mk:
             await bs._run_auto_backup_if_due()
             mk.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_db_failure_triggers_alert(self):
+        cfg = _fake_config({
+            "backup_auto_enabled": True, "backup_auto_time": _now_hhmm(),
+            "backup_auto_interval_hours": 0, "backup_auto_config": True,
+        })
+        with patch("shared.config_service.config_service", cfg), \
+                patch.dict("os.environ", {"DATABASE_URL": "postgres://x"}), \
+                patch.object(bs, "create_database_backup", new_callable=AsyncMock,
+                             side_effect=RuntimeError("pg_dump boom")), \
+                patch.object(bs, "export_config", new_callable=AsyncMock) as mk_cfg, \
+                patch.object(bs, "_notify_backup_failed", new_callable=AsyncMock) as mk_alert:
+            await bs._run_auto_backup_if_due()
+            mk_alert.assert_awaited_once()   # alert on failure
+            mk_cfg.assert_not_called()       # returned early — no config backup
+
+
+class TestDeadman:
+    @pytest.mark.asyncio
+    async def test_deadman_alerts_when_stale(self):
+        cfg = _fake_config({"backup_deadman_hours": 1})
+        with patch("shared.config_service.config_service", cfg), \
+                patch.object(bs, "_get_last_successful_backup_ts", new_callable=AsyncMock,
+                             return_value=datetime.now(timezone.utc) - timedelta(hours=5)), \
+                patch.object(bs, "_notify_backup_failed", new_callable=AsyncMock) as mk_alert:
+            await bs._check_deadman()
+            mk_alert.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_deadman_silent_when_fresh(self):
+        cfg = _fake_config({"backup_deadman_hours": 24})
+        with patch("shared.config_service.config_service", cfg), \
+                patch.object(bs, "_get_last_successful_backup_ts", new_callable=AsyncMock,
+                             return_value=datetime.now(timezone.utc) - timedelta(hours=1)), \
+                patch.object(bs, "_notify_backup_failed", new_callable=AsyncMock) as mk_alert:
+            await bs._check_deadman()
+            mk_alert.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_deadman_disabled(self):
+        cfg = _fake_config({"backup_deadman_hours": 0})
+        with patch("shared.config_service.config_service", cfg), \
+                patch.object(bs, "_notify_backup_failed", new_callable=AsyncMock) as mk_alert:
+            await bs._check_deadman()
+            mk_alert.assert_not_called()

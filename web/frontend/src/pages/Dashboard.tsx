@@ -41,6 +41,7 @@ import {
 } from '@dnd-kit/sortable'
 import { SortableSection } from '@/components/SortableSection'
 import { useOrderPreference } from '@/lib/useOrderPreference'
+import { backupApi } from '@/api/backup'
 import {
   BarChart,
   Bar,
@@ -1886,6 +1887,14 @@ export default function Dashboard() {
   const { formatBytes: formatBytesUtil } = useFormatters()
   const formatBytes = (bytes: number | null | undefined) => (!bytes || bytes <= 0) ? `0 ${t('common.bytes.b')}` : formatBytesUtil(bytes)
   const formatBytesShort = createFormatBytesShort(t)
+  const backupAgo = (iso?: string | null): string => {
+    if (!iso) return '—'
+    const diff = Math.floor((Date.now() - new Date(iso).getTime()) / 1000)
+    if (diff < 60) return `${diff}${t('dashboard.backupUnitS', 's')}`
+    if (diff < 3600) return `${Math.floor(diff / 60)}${t('dashboard.backupUnitM', 'm')}`
+    if (diff < 86400) return `${Math.floor(diff / 3600)}${t('dashboard.backupUnitH', 'h')}`
+    return `${Math.floor(diff / 86400)}${t('dashboard.backupUnitD', 'd')}`
+  }
 
   const canViewUsers = hasPermission('users', 'view')
   const canViewNodes = hasPermission('nodes', 'view')
@@ -1894,6 +1903,7 @@ export default function Dashboard() {
   const canViewBilling = hasPermission('billing', 'view')
   const canViewAudit = hasPermission('audit', 'view')
   const canViewFleet = hasPermission('fleet', 'view')
+  const canViewBackups = hasPermission('backups', 'view')
 
   // Widget ordering (DnD reorder, persists to localStorage)
   const DASHBOARD_WIDGETS = ['stats', 'traffic', 'connections', 'load', 'activity', 'system'] as const
@@ -1931,6 +1941,13 @@ export default function Dashboard() {
     refetchInterval: 60_000,
     staleTime: 30_000,
     enabled: canViewAnalytics,
+  })
+
+  const { data: backupStatus } = useQuery({
+    queryKey: ['backup-status-widget'],
+    queryFn: backupApi.getStatus,
+    refetchInterval: 120_000,
+    enabled: canViewBackups,
   })
 
   const { data: violationStats, isLoading: violationsLoading, isError: violationsError } = useQuery({
@@ -2165,8 +2182,8 @@ export default function Dashboard() {
                 case 'stats':
                   return (
                     <SortableSection key="stats" id="stats">
-                      {/* ── Stats grid (5 compact cards) ────────────────────────── */}
-                      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
+                      {/* ── Stats grid (compact cards) ──────────────────────────── */}
+                      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
         {canViewUsers && (
           <StatCard
             title={t('dashboard.totalUsers')}
@@ -2223,6 +2240,19 @@ export default function Dashboard() {
             subtitle={trafficStats ? `${t('dashboard.trafficDay')}: ${formatBytes(trafficStats.today_bytes)} | ${t('dashboard.trafficWeek')}: ${formatBytes(trafficStats.week_bytes)} | ${t('dashboard.trafficMonth')}: ${formatBytes(trafficStats.month_bytes)}` : undefined}
             loading={overviewLoading && trafficLoading}
             index={4}
+          />
+        )}
+        {canViewBackups && (
+          <StatCard
+            title={t('dashboard.lastBackup')}
+            value={backupStatus?.last_backup ? backupAgo(backupStatus.last_backup.created_at) : '—'}
+            icon={Database}
+            color={backupStatus?.last_backup ? 'cyan' : 'yellow'}
+            subtitle={backupStatus?.last_backup
+              ? `${backupStatus.last_backup.backup_type} · ${formatBytes(backupStatus.last_backup.size_bytes)}`
+              : t('dashboard.noBackup')}
+            onClick={() => navigate('/backup')}
+            index={5}
           />
         )}
                       </div>

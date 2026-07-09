@@ -226,6 +226,12 @@ function BackupsTab() {
     refetchInterval: 60_000,
   })
 
+  const { data: restorePreview } = useQuery({
+    queryKey: ['backup-preview', confirmRestore],
+    queryFn: () => backupApi.previewBackup(confirmRestore!),
+    enabled: !!confirmRestore,
+  })
+
   const uploadMutation = useMutation({
     mutationFn: (file: File) => backupApi.uploadFile(file),
     onSuccess: (data) => {
@@ -544,17 +550,37 @@ function BackupsTab() {
         }}
       />
 
-      <ConfirmDialog
-        open={!!confirmRestore}
-        onOpenChange={(open) => !open && setConfirmRestore(null)}
-        title={t('backup.confirmRestore')}
-        description={t('backup.confirmRestoreDesc', { filename: confirmRestore })}
-        confirmLabel={t('backup.restore')}
-        variant="destructive"
-        onConfirm={() => {
-          if (confirmRestore) restoreDb.mutate(confirmRestore, { onSuccess: () => setConfirmRestore(null) })
-        }}
-      />
+      <Dialog open={!!confirmRestore} onOpenChange={(open) => !open && setConfirmRestore(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{t('backup.confirmRestore')}</DialogTitle>
+            <DialogDescription className="text-dark-300 text-xs font-mono truncate">{confirmRestore}</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            {restorePreview && (
+              <div className="text-xs space-y-1.5 rounded-md border border-[var(--glass-border)] p-3 bg-[var(--glass-bg)]">
+                <div className="flex justify-between"><span className="text-dark-400">{t('backup.preview.type')}</span><span className="text-white">{restorePreview.type}</span></div>
+                <div className="flex justify-between"><span className="text-dark-400">{t('backup.preview.size')}</span><span className="text-white">{formatBytes(restorePreview.size_bytes)}</span></div>
+                {restorePreview.pg_version && <div className="flex justify-between"><span className="text-dark-400">PostgreSQL</span><span className="text-white">{restorePreview.pg_version}</span></div>}
+                {restorePreview.settings_count != null && <div className="flex justify-between"><span className="text-dark-400">{t('backup.preview.settings')}</span><span className="text-white">{restorePreview.settings_count}</span></div>}
+                <div className="flex justify-between"><span className="text-dark-400">{t('backup.preview.created')}</span><span className="text-white">{formatDate(restorePreview.created_at)}</span></div>
+              </div>
+            )}
+            <p className="text-[11px] text-emerald-400/80">{t('backup.restoreSnapshotNote')}</p>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setConfirmRestore(null)}>{t('common.cancel')}</Button>
+            <Button
+              onClick={() => { if (confirmRestore) restoreDb.mutate(confirmRestore, { onSuccess: () => setConfirmRestore(null) }) }}
+              disabled={restoreDb.isPending}
+              className="bg-red-600 text-white hover:bg-red-700"
+            >
+              {restoreDb.isPending && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
+              {t('backup.restore')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Telegram send dialog */}
       <Dialog open={!!telegramDialog} onOpenChange={(open) => !open && setTelegramDialog(null)}>
