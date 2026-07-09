@@ -327,6 +327,70 @@ class TestExecScript:
         assert resp.status_code == 400
 
 
+class TestExecScriptBulk:
+    """POST /api/v2/fleet/exec-script-bulk."""
+
+    @pytest.mark.asyncio
+    @patch("web.backend.api.v2.scripts.sign_command_with_ts", return_value=({"type": "exec_script"}, "sig"))
+    @patch("web.backend.api.v2.scripts.agent_manager")
+    @patch("shared.database.db_service")
+    async def test_bulk_single_node_success(self, mock_db_svc, mock_agent_mgr, mock_sign, client):
+        mock_svc, mock_conn = _mock_db_service()
+        mock_db_svc.is_connected = mock_svc.is_connected
+        mock_db_svc.acquire = mock_svc.acquire
+        # fetch script once, then per node: agent_token, insert command log
+        mock_conn.fetchrow = AsyncMock(side_effect=[
+            MOCK_SCRIPT_ROW,
+            {"agent_token": "token-123"},
+            {"id": 20},
+        ])
+        mock_agent_mgr.is_connected = MagicMock(return_value=True)
+        mock_agent_mgr.send_command = AsyncMock(return_value=True)
+
+        resp = await client.post("/api/v2/fleet/exec-script-bulk", json={
+            "script_id": 1,
+            "node_uuids": ["node-111"],
+        })
+        assert resp.status_code == 200
+        data = resp.json()
+        assert len(data["results"]) == 1
+        assert data["results"][0]["exec_id"] == 20
+        assert data["results"][0]["status"] == "running"
+        assert data["results"][0].get("error") is None
+
+    @pytest.mark.asyncio
+    @patch("web.backend.api.v2.scripts.agent_manager")
+    @patch("shared.database.db_service")
+    async def test_bulk_node_not_connected_reported(self, mock_db_svc, mock_agent_mgr, client):
+        mock_svc, mock_conn = _mock_db_service()
+        mock_db_svc.is_connected = mock_svc.is_connected
+        mock_db_svc.acquire = mock_svc.acquire
+        mock_conn.fetchrow = AsyncMock(side_effect=[MOCK_SCRIPT_ROW])  # only script fetch
+        mock_agent_mgr.is_connected = MagicMock(return_value=False)
+
+        resp = await client.post("/api/v2/fleet/exec-script-bulk", json={
+            "script_id": 1,
+            "node_uuids": ["node-off"],
+        })
+        assert resp.status_code == 200
+        data = resp.json()
+        assert len(data["results"]) == 1
+        assert data["results"][0]["status"] == "error"
+        assert data["results"][0]["error"] == "AGENT_NOT_CONNECTED"
+
+    @pytest.mark.asyncio
+    @patch("shared.database.db_service")
+    async def test_bulk_empty_nodes_rejected(self, mock_db_svc, client):
+        mock_svc, _ = _mock_db_service()
+        mock_db_svc.is_connected = mock_svc.is_connected
+        mock_db_svc.acquire = mock_svc.acquire
+        resp = await client.post("/api/v2/fleet/exec-script-bulk", json={
+            "script_id": 1,
+            "node_uuids": [],
+        })
+        assert resp.status_code == 400
+
+
 class TestExecStatus:
     """GET /api/v2/fleet/exec/{id}."""
 

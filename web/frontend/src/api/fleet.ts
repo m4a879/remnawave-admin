@@ -196,6 +196,26 @@ export async function getExecStatus(execId: number): Promise<ExecStatusResponse>
   return data
 }
 
+export interface ExecBulkItem {
+  node_uuid: string
+  exec_id?: number
+  status: string
+  error?: string
+}
+
+export async function execScriptBulk(
+  scriptId: number,
+  nodeUuids: string[],
+  envVars?: Record<string, string>,
+): Promise<{ results: ExecBulkItem[] }> {
+  const { data } = await client.post('/fleet/exec-script-bulk', {
+    script_id: scriptId,
+    node_uuids: nodeUuids,
+    ...(envVars && Object.keys(envVars).length > 0 ? { env_vars: envVars } : {}),
+  })
+  return data
+}
+
 // ── Import API Functions ────────────────────────────────────────
 
 export async function importScriptFromUrl(body: ImportUrlRequest): Promise<ScriptDetail> {

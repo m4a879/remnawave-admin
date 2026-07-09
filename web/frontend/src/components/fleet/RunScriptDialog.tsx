@@ -1,6 +1,7 @@
 /**
- * RunScriptDialog — Select a target node, preview script, execute, view live output.
- * Automatically detects configurable parameters (${VAR:-default}) and shows input fields.
+ * RunScriptDialog — Select one or many target nodes, preview script, execute,
+ * and view live per-node output. Automatically detects configurable
+ * parameters (${VAR:-default}) and shows input fields shared across nodes.
  */
 import { useState, useMemo, useEffect } from 'react'
 import { useQuery, useMutation } from '@tanstack/react-query'
@@ -10,17 +11,11 @@ import { Play, RefreshCw, CheckCircle, XCircle, Clock, Server, Settings2 } from 
 import client from '@/api/client'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
 import { Badge } from '@/components/ui/badge'
 import { Separator } from '@/components/ui/separator'
 import { Input } from '@/components/ui/input'
-import { getFleetAgents } from '@/api/fleet'
+import { Checkbox } from '@/components/ui/checkbox'
+import { getFleetAgents, execScriptBulk } from '@/api/fleet'
 import type { Script } from './ScriptCatalog'
 
 interface RunScriptDialogProps {
@@ -32,6 +27,13 @@ interface RunScriptDialogProps {
 interface ScriptParam {
   name: string
   defaultValue: string
+}
+
+interface ExecResultRow {
+  node_uuid: string
+  node_name: string
+  exec_id?: number
+  error?: string
 }
 
 /** Parse ${VAR:-default} patterns from script content. */
@@ -50,10 +52,73 @@ function parseScriptParams(content: string): ScriptParam[] {
   return params
 }
 
+/** Single node's execution output — polls its own exec_id independently. */
+function ExecResult({ execId, nodeName, error }: { execId?: number; nodeName: string; error?: string }) {
+  const { t } = useTranslation()
+
+  const { data: execStatus } = useQuery({
+    queryKey: ['fleet-exec', execId],
+    queryFn: async () => {
+      if (!execId) return null
+      const { data } = await client.get(`/fleet/exec/${execId}`)
+      return data
+    },
+    enabled: !!execId,
+    refetchInterval: (query) => {
+      const status = query.state.data?.status
+      if (status === 'completed' || status === 'error' || status === 'blocked') return false
+      return 2000
+    },
+  })
+
+  const running = !error && (execStatus?.status === 'running' || !execStatus)
+
+  return (
+    <div className="border border-[var(--glass-border)] rounded-md p-3">
+      <div className="flex items-center gap-2 mb-2">
+        <Server className="w-3 h-3 text-green-400 shrink-0" />
+        <span className="text-xs font-medium text-white truncate">{nodeName}</span>
+        {error ? (
+          <Badge variant="destructive" className="text-[10px] gap-1">
+            <XCircle className="w-2.5 h-2.5" />
+            {error}
+          </Badge>
+        ) : running ? (
+          <Badge variant="secondary" className="text-[10px] gap-1">
+            <RefreshCw className="w-2.5 h-2.5 animate-spin" />
+            {t('fleet.scripts.running')}
+          </Badge>
+        ) : execStatus?.status === 'completed' ? (
+          <Badge variant="success" className="text-[10px] gap-1">
+            <CheckCircle className="w-2.5 h-2.5" />
+            {t('fleet.scripts.exitCode')}: {execStatus.exit_code}
+          </Badge>
+        ) : (
+          <Badge variant="destructive" className="text-[10px] gap-1">
+            <XCircle className="w-2.5 h-2.5" />
+            {execStatus?.status}
+          </Badge>
+        )}
+        {execStatus?.duration_ms != null && (
+          <span className="text-[10px] text-dark-400 ml-auto flex items-center gap-1 shrink-0">
+            <Clock className="w-2.5 h-2.5" />
+            {(execStatus.duration_ms / 1000).toFixed(1)}s
+          </span>
+        )}
+      </div>
+      {!error && (
+        <pre className="bg-[var(--glass-bg)] border border-[var(--glass-border)] rounded-md p-2 text-xs font-mono text-dark-100 max-h-[200px] overflow-auto whitespace-pre-wrap">
+          {execStatus?.output || (running ? t('fleet.scripts.waitingOutput') : '')}
+        </pre>
+      )}
+    </div>
+  )
+}
+
 export default function RunScriptDialog({ open, onOpenChange, script }: RunScriptDialogProps) {
   const { t } = useTranslation()
-  const [selectedNode, setSelectedNode] = useState<string>('')
-  const [execId, setExecId] = useState<number | null>(null)
+  const [selectedNodes, setSelectedNodes] = useState<string[]>([])
+  const [execResults, setExecResults] = useState<ExecResultRow[] | null>(null)
   const [envVars, setEnvVars] = useState<Record<string, string>>({})
 
   // Fetch connected agents
@@ -80,26 +145,25 @@ export default function RunScriptDialog({ open, onOpenChange, script }: RunScrip
     return parseScriptParams(scriptDetail.script_content)
   }, [scriptDetail?.script_content])
 
-  // Poll execution status
-  const { data: execStatus } = useQuery({
-    queryKey: ['fleet-exec', execId],
-    queryFn: async () => {
-      if (!execId) return null
-      const { data } = await client.get(`/fleet/exec/${execId}`)
-      return data
-    },
-    enabled: !!execId,
-    refetchInterval: (query) => {
-      const status = query.state.data?.status
-      if (status === 'completed' || status === 'error' || status === 'blocked') return false
-      return 2000
-    },
-  })
+  const connectedNodes = agents?.nodes?.filter((n) => n.agent_v2_connected) || []
+  const allSelected = connectedNodes.length > 0 && selectedNodes.length === connectedNodes.length
 
-  // Execute script
+  const toggleNode = (uuid: string) => {
+    setSelectedNodes((prev) =>
+      prev.includes(uuid) ? prev.filter((u) => u !== uuid) : [...prev, uuid],
+    )
+    setExecResults(null)
+  }
+
+  const toggleAll = () => {
+    setSelectedNodes(allSelected ? [] : connectedNodes.map((n) => n.uuid))
+    setExecResults(null)
+  }
+
+  // Execute script on all selected nodes
   const execMutation = useMutation({
     mutationFn: async () => {
-      if (!script || !selectedNode) return
+      if (!script || selectedNodes.length === 0) return
       // Only send env_vars that differ from defaults
       const overrides: Record<string, string> = {}
       for (const param of scriptParams) {
@@ -108,42 +172,42 @@ export default function RunScriptDialog({ open, onOpenChange, script }: RunScrip
           overrides[param.name] = val
         }
       }
-      const { data } = await client.post('/fleet/exec-script', {
-        script_id: script.id,
-        node_uuid: selectedNode,
-        ...(Object.keys(overrides).length > 0 ? { env_vars: overrides } : {}),
-      })
-      return data
+      return execScriptBulk(script.id, selectedNodes, overrides)
     },
     onSuccess: (data) => {
-      if (data?.exec_id) {
-        setExecId(data.exec_id)
-        toast.success(t('fleet.scripts.executing'))
-      }
+      if (!data?.results) return
+      const nameByUuid = new Map(connectedNodes.map((n) => [n.uuid, n.name]))
+      setExecResults(
+        data.results.map((r) => ({
+          node_uuid: r.node_uuid,
+          node_name: nameByUuid.get(r.node_uuid) || r.node_uuid,
+          exec_id: r.exec_id,
+          error: r.error,
+        })),
+      )
+      toast.success(t('fleet.scripts.executing'))
     },
     onError: (err: Error & { response?: { data?: { detail?: string } } }) => {
       toast.error(err.response?.data?.detail || err.message)
     },
   })
 
-  const connectedNodes = agents?.nodes?.filter((n) => n.agent_v2_connected) || []
-
   const handleClose = () => {
-    setSelectedNode('')
-    setExecId(null)
+    setSelectedNodes([])
+    setExecResults(null)
     setEnvVars({})
     onOpenChange(false)
   }
 
   useEffect(() => {
     if (open) {
-      setSelectedNode('')
-      setExecId(null)
+      setSelectedNodes([])
+      setExecResults(null)
       setEnvVars({})
     }
   }, [script?.id, open])
 
-  const isRunning = execStatus?.status === 'running' || execMutation.isPending
+  const isRunning = execMutation.isPending
 
   return (
     <Dialog open={open} onOpenChange={handleClose}>
@@ -157,42 +221,49 @@ export default function RunScriptDialog({ open, onOpenChange, script }: RunScrip
         <div className="space-y-4">
           {/* Node selection */}
           <div>
-            <label className="text-xs text-dark-200 mb-1.5 block">
-              {t('fleet.scripts.selectNode')}
-            </label>
-            <Select
-              value={selectedNode}
-              onValueChange={(val) => {
-                setSelectedNode(val)
-                setExecId(null)
-                setEnvVars({})
-              }}
-              disabled={isRunning}
-            >
-              <SelectTrigger>
-                <SelectValue placeholder={t('fleet.scripts.selectNode')} />
-              </SelectTrigger>
-              <SelectContent>
-                {connectedNodes.length === 0 ? (
-                  <SelectItem value="_none" disabled>
-                    {t('fleet.terminal.agentNotConnected')}
-                  </SelectItem>
-                ) : (
-                  connectedNodes.map((node) => (
-                    <SelectItem key={node.uuid} value={node.uuid}>
-                      <div className="flex items-center gap-2">
-                        <Server className="w-3 h-3 text-green-400" />
-                        {node.name} ({node.address})
-                      </div>
-                    </SelectItem>
-                  ))
+            <div className="flex items-center justify-between mb-1.5">
+              <label className="text-xs text-dark-200">
+                {t('fleet.scripts.selectNodes')}
+                {selectedNodes.length > 0 && (
+                  <span className="text-dark-400"> ({selectedNodes.length})</span>
                 )}
-              </SelectContent>
-            </Select>
+              </label>
+              {connectedNodes.length > 0 && (
+                <button
+                  type="button"
+                  onClick={toggleAll}
+                  disabled={isRunning}
+                  className="text-[11px] text-primary-400 hover:text-primary-300 disabled:opacity-50"
+                >
+                  {allSelected ? t('fleet.scripts.deselectAll') : t('fleet.scripts.selectAll')}
+                </button>
+              )}
+            </div>
+            {connectedNodes.length === 0 ? (
+              <p className="text-xs text-dark-400 py-2">{t('fleet.terminal.agentNotConnected')}</p>
+            ) : (
+              <div className="max-h-[180px] overflow-auto rounded-md border border-[var(--glass-border)] divide-y divide-[var(--glass-border)]">
+                {connectedNodes.map((node) => (
+                  <label
+                    key={node.uuid}
+                    className="flex items-center gap-2.5 px-3 py-2 hover:bg-[var(--glass-bg)] cursor-pointer"
+                  >
+                    <Checkbox
+                      checked={selectedNodes.includes(node.uuid)}
+                      onCheckedChange={() => toggleNode(node.uuid)}
+                      disabled={isRunning}
+                    />
+                    <Server className="w-3 h-3 text-green-400 shrink-0" />
+                    <span className="text-xs text-white truncate">{node.name}</span>
+                    <span className="text-[10px] text-dark-400 truncate ml-auto">{node.address}</span>
+                  </label>
+                ))}
+              </div>
+            )}
           </div>
 
           {/* Script parameters */}
-          {scriptParams.length > 0 && !execId && (
+          {scriptParams.length > 0 && !execResults && (
             <div>
               <label className="text-xs text-dark-200 mb-1.5 flex items-center gap-1.5">
                 <Settings2 className="w-3 h-3" />
@@ -241,10 +312,10 @@ export default function RunScriptDialog({ open, onOpenChange, script }: RunScrip
           )}
 
           {/* Execute button */}
-          {!execId && (
+          {!execResults && (
             <Button
               onClick={() => execMutation.mutate()}
-              disabled={!selectedNode || execMutation.isPending}
+              disabled={selectedNodes.length === 0 || execMutation.isPending}
               className="w-full"
             >
               {execMutation.isPending ? (
@@ -252,45 +323,35 @@ export default function RunScriptDialog({ open, onOpenChange, script }: RunScrip
               ) : (
                 <Play className="w-4 h-4 mr-2" />
               )}
-              {t('fleet.scripts.run')}
+              {selectedNodes.length > 1
+                ? t('fleet.scripts.runOnCount', { count: selectedNodes.length })
+                : t('fleet.scripts.run')}
             </Button>
           )}
 
-          {/* Execution output */}
-          {execId && (
+          {/* Execution output — one panel per node */}
+          {execResults && (
             <>
               <Separator />
-              <div>
-                <div className="flex items-center gap-2 mb-2">
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
                   <span className="text-xs text-dark-200">{t('fleet.scripts.output')}</span>
-                  {isRunning && (
-                    <Badge variant="secondary" className="text-[10px] gap-1">
-                      <RefreshCw className="w-2.5 h-2.5 animate-spin" />
-                      {t('fleet.scripts.running')}
-                    </Badge>
-                  )}
-                  {execStatus?.status === 'completed' && (
-                    <Badge variant="success" className="text-[10px] gap-1">
-                      <CheckCircle className="w-2.5 h-2.5" />
-                      {t('fleet.scripts.exitCode')}: {execStatus.exit_code}
-                    </Badge>
-                  )}
-                  {(execStatus?.status === 'error' || execStatus?.status === 'blocked') && (
-                    <Badge variant="destructive" className="text-[10px] gap-1">
-                      <XCircle className="w-2.5 h-2.5" />
-                      {execStatus.status}
-                    </Badge>
-                  )}
-                  {execStatus?.duration_ms != null && (
-                    <span className="text-[10px] text-dark-400 ml-auto flex items-center gap-1">
-                      <Clock className="w-2.5 h-2.5" />
-                      {(execStatus.duration_ms / 1000).toFixed(1)}s
-                    </span>
-                  )}
+                  <button
+                    type="button"
+                    onClick={() => setExecResults(null)}
+                    className="text-[11px] text-primary-400 hover:text-primary-300"
+                  >
+                    {t('fleet.scripts.runAgain', 'Run again')}
+                  </button>
                 </div>
-                <pre className="bg-[var(--glass-bg)] border border-[var(--glass-border)] rounded-md p-3 text-xs font-mono text-dark-100 max-h-[300px] overflow-auto whitespace-pre-wrap">
-                  {execStatus?.output || (isRunning ? t('fleet.scripts.waitingOutput') : '')}
-                </pre>
+                {execResults.map((r) => (
+                  <ExecResult
+                    key={r.node_uuid}
+                    execId={r.exec_id}
+                    nodeName={r.node_name}
+                    error={r.error}
+                  />
+                ))}
               </div>
             </>
           )}
