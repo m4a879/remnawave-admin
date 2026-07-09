@@ -2969,7 +2969,8 @@
       "reports": "📊 Reports",
       "mailserver": "📧 Mail Server",
       "security": "🔒 Security",
-      "performance": "⚡ Performance"
+      "performance": "⚡ Performance",
+      "backup": "💾 Backups"
     },
     "subcategories": {
       "topics": "💬 Notification topics",
@@ -4161,6 +4162,12 @@
   "backup": {
     "title": "Backups",
     "subtitle": "Database backups, config export/import, and user import",
+    "schedule": {
+      "title": "Automatic backup",
+      "description": "Create a DB backup on schedule and optionally send it to Telegram",
+      "time": "Time (UTC)",
+      "sendTelegram": "Send to Telegram"
+    },
     "tabs": {
       "backups": "Backups",
       "import": "Import",

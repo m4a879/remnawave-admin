@@ -29,12 +29,15 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { Skeleton } from '@/components/ui/skeleton'
-import { PermissionGate } from '@/components/PermissionGate'
+import { PermissionGate, useHasPermission } from '@/components/PermissionGate'
 import { ConfirmDialog } from '@/components/ConfirmDialog'
 import { EmptyState } from '@/components/EmptyState'
 import { Input } from '@/components/ui/input'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog'
 import { useFormatters } from '@/lib/useFormatters'
+import client from '../api/client'
+import { Switch } from '@/components/ui/switch'
+import { Label } from '@/components/ui/label'
 
 function formatBytes(bytes: number): string {
   if (bytes === 0) return '0 B'
@@ -56,6 +59,80 @@ function FileIcon({ filename }: { filename: string }) {
   if (filename.endsWith('.sql.gz')) return <Database className="w-5 h-5 text-emerald-400" />
   if (filename.startsWith('config_backup_')) return <Settings2 className="w-5 h-5 text-cyan-400" />
   return <FileJson className="w-5 h-5 text-primary-400" />
+}
+
+
+// ── Auto-backup schedule card ───────────────────────────────────
+
+function AutoBackupScheduleCard() {
+  const { t } = useTranslation()
+  const queryClient = useQueryClient()
+  const canEdit = useHasPermission('settings', 'edit')
+
+  const { data: s } = useQuery({
+    queryKey: ['settings'],
+    queryFn: async () => {
+      const { data } = await client.get('/settings')
+      const result: Record<string, string> = {}
+      const cat = (data?.categories || {})['backup'] || []
+      for (const item of cat) result[item.key] = item.value ?? item.default_value ?? ''
+      return result
+    },
+  })
+
+  const updateMutation = useMutation({
+    mutationFn: async ({ key, value }: { key: string; value: string }) => {
+      await client.put(`/settings/${key}`, { value })
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['settings'] })
+      toast.success(t('common.saved'))
+    },
+    onError: () => toast.error(t('common.error')),
+  })
+
+  const set = (key: string, value: string) => { if (canEdit) updateMutation.mutate({ key, value }) }
+  const toBool = (v?: string) => v === 'true' || v === '1'
+  const enabled = toBool(s?.backup_auto_enabled)
+
+  return (
+    <Card className="border-[var(--glass-border)] bg-[var(--glass-bg)]">
+      <CardContent className="p-4 space-y-4">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Clock className="w-4 h-4 text-cyan-400" />
+            <span className="text-sm font-medium text-white">{t('backup.schedule.title')}</span>
+          </div>
+          <Switch
+            checked={enabled}
+            onCheckedChange={(v) => set('backup_auto_enabled', v ? 'true' : 'false')}
+            disabled={!canEdit}
+          />
+        </div>
+        <p className="text-xs text-dark-300">{t('backup.schedule.description')}</p>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div>
+            <Label className="text-xs text-dark-300">{t('backup.schedule.time')}</Label>
+            <Input
+              type="time"
+              value={s?.backup_auto_time || '03:00'}
+              onChange={(e) => set('backup_auto_time', e.target.value)}
+              disabled={!canEdit || !enabled}
+              className="mt-1"
+            />
+          </div>
+          <div className="flex items-center justify-between sm:items-end sm:pb-2">
+            <Label className="text-xs text-dark-300">{t('backup.schedule.sendTelegram')}</Label>
+            <Switch
+              checked={toBool(s?.backup_auto_telegram)}
+              onCheckedChange={(v) => set('backup_auto_telegram', v ? 'true' : 'false')}
+              disabled={!canEdit || !enabled}
+            />
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  )
 }
 
 
@@ -336,6 +413,8 @@ function BackupsTab() {
           />
         </div>
       </div>
+
+      <AutoBackupScheduleCard />
 
       {/* Files list */}
       <Card>

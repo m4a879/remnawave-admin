@@ -541,6 +541,9 @@ async def lifespan(app: FastAPI):
                     from web.backend.core.task_scheduler import task_scheduler_loop
                     _bg_tasks.append(asyncio.create_task(task_scheduler_loop()))
 
+                    from web.backend.core.backup_service import backup_scheduler_loop
+                    _bg_tasks.append(asyncio.create_task(backup_scheduler_loop()))
+
                 # ── Services for collector and full mode ──
                 if app_mode in ("collector", "full"):
                     async def _baseline_refresh_loop():

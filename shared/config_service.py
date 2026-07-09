@@ -33,6 +33,7 @@ class ConfigCategory(str, Enum):
     MAILSERVER = "mailserver"
     PERFORMANCE = "performance"
     SECURITY = "security"
+    BACKUP = "backup"
 
 
 @dataclass
@@ -289,6 +290,51 @@ DEFAULT_CONFIG_DEFINITIONS: List[Dict[str, Any]] = [
         "description": "Время отправки ежедневного отчёта (HH:MM по UTC)",
         "default_value": "09:00",
         "sort_order": 3,
+    },
+    {
+        "key": "backup_auto_enabled",
+        "value_type": "bool",
+        "category": "backup",
+        "display_name": "Авто-бэкап по расписанию",
+        "description": "Автоматически создавать бэкап БД по расписанию",
+        "default_value": "false",
+        "sort_order": 1,
+    },
+    {
+        "key": "backup_auto_time",
+        "value_type": "string",
+        "category": "backup",
+        "display_name": "Время бэкапа",
+        "description": "Время ежедневного авто-бэкапа (HH:MM по UTC)",
+        "default_value": "03:00",
+        "sort_order": 2,
+    },
+    {
+        "key": "backup_auto_telegram",
+        "value_type": "bool",
+        "category": "backup",
+        "display_name": "Отправлять в Telegram",
+        "description": "Отправлять созданный бэкап в Telegram (chat_id из настроек уведомлений)",
+        "default_value": "false",
+        "sort_order": 3,
+    },
+    {
+        "key": "backup_auto_keep_count",
+        "value_type": "int",
+        "category": "backup",
+        "display_name": "Хранить бэкапов (шт)",
+        "description": "Сколько последних авто-бэкапов хранить",
+        "default_value": "10",
+        "sort_order": 4,
+    },
+    {
+        "key": "backup_auto_keep_days",
+        "value_type": "int",
+        "category": "backup",
+        "display_name": "Хранить бэкапов (дней)",
+        "description": "Максимальный возраст авто-бэкапов в днях",
+        "default_value": "30",
+        "sort_order": 5,
     },
     {
         "key": "reports_weekly_enabled",
