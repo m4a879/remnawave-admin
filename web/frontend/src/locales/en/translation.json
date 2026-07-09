@@ -4171,7 +4171,10 @@
       "title": "Automatic backup",
       "description": "Create a DB backup on schedule and optionally send it to Telegram",
       "time": "Time (UTC)",
-      "sendTelegram": "Send to Telegram"
+      "sendTelegram": "Send to Telegram",
+      "intervalHours": "Interval (hours)",
+      "intervalHint": "0 — once a day at the time above; N>0 — starting there every N hours",
+      "config": "Back up config"
     },
     "tabs": {
       "backups": "Backups",

@@ -5,7 +5,7 @@ import json
 import logging
 import os
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional, List
 
@@ -435,46 +435,11 @@ def save_uploaded_file(filename: str, content: bytes) -> dict:
 
 # ── Scheduled auto-backup ────────────────────────────────────
 
-_last_auto_backup_date: Optional[str] = None
+_last_auto_backup_ts: Optional[datetime] = None
 
 
-async def _run_auto_backup_if_due() -> None:
-    """Create a DB backup if the configured schedule is due right now.
-
-    Reads schedule from config_service; optionally sends to Telegram and
-    rotates old backups. Idempotent within a day via _last_auto_backup_date.
-    """
-    global _last_auto_backup_date
-    from shared.config_service import config_service
-
-    if not config_service.get("backup_auto_enabled", False):
-        return
-
-    now = datetime.now(timezone.utc)
-    current_time = now.strftime("%H:%M")
-    current_date = now.strftime("%Y-%m-%d")
-
-    if _last_auto_backup_date == current_date:
-        return  # already ran today
-
-    schedule_time = str(config_service.get("backup_auto_time", "03:00") or "03:00")
-    if current_time != schedule_time:
-        return
-
-    # Mark date first to avoid a double run within the same minute
-    _last_auto_backup_date = current_date
-
-    database_url = os.environ.get("DATABASE_URL")
-    if not database_url:
-        logger.warning("Scheduled backup skipped: DATABASE_URL not configured")
-        return
-
-    logger.info("Running scheduled database backup...")
-    result = await create_database_backup(database_url)
-    filename = result["filename"]
-    logger.info("Scheduled backup created: %s (%s bytes)", filename, result["size_bytes"])
-
-    # Best-effort history entry
+async def _log_and_maybe_send(filename: str, backup_type: str, size_bytes: int, send_tg: bool) -> None:
+    """Write a history entry and optionally send the backup file to Telegram."""
     try:
         from web.backend.api.v2.backup import _log_backup
 
@@ -485,34 +450,94 @@ async def _run_auto_backup_if_due() -> None:
 
         await _log_backup(
             filename=filename,
-            backup_type="database",
-            size_bytes=result["size_bytes"],
+            backup_type=backup_type,
+            size_bytes=size_bytes,
             admin=_SchedulerAdmin(),
             notes="Автоматический бэкап по расписанию",
         )
     except Exception as exc:
         logger.debug("Scheduled backup log failed: %s", exc)
 
-    # Send to Telegram if enabled
-    if config_service.get("backup_auto_telegram", False):
-        try:
-            from web.backend.core.config import get_web_settings
-            settings = get_web_settings()
-            chat_id = settings.notifications_chat_id
-            if chat_id:
+    if not send_tg:
+        return
+    try:
+        from web.backend.core.config import get_web_settings
+        settings = get_web_settings()
+        chat_id = settings.notifications_chat_id
+        if not chat_id:
+            logger.warning("Scheduled backup: Telegram enabled but notifications_chat_id not set")
+            return
+        topic_id = None
+        topic_raw = settings.get_topic_for("service")
+        if topic_raw:
+            try:
+                topic_id = int(topic_raw)
+            except (TypeError, ValueError):
                 topic_id = None
-                topic_raw = settings.get_topic_for("service")
-                if topic_raw:
-                    try:
-                        topic_id = int(topic_raw)
-                    except (TypeError, ValueError):
-                        topic_id = None
-                await send_backup_to_telegram(filename=filename, chat_id=str(chat_id), topic_id=topic_id)
-                logger.info("Scheduled backup sent to Telegram")
-            else:
-                logger.warning("Scheduled backup: Telegram send enabled but notifications_chat_id not set")
+        await send_backup_to_telegram(filename=filename, chat_id=str(chat_id), topic_id=topic_id)
+        logger.info("Scheduled backup %s sent to Telegram", filename)
+    except Exception as exc:
+        logger.warning("Scheduled backup Telegram send failed: %s", exc)
+
+
+async def _run_auto_backup_if_due() -> None:
+    """Create a DB (and optionally config) backup when the schedule is due.
+
+    Two modes, config-driven:
+    - daily:    once a day at backup_auto_time (HH:MM UTC).
+    - interval: first at backup_auto_time, then every backup_auto_interval_hours.
+    """
+    global _last_auto_backup_ts
+    from shared.config_service import config_service
+
+    if not config_service.get("backup_auto_enabled", False):
+        return
+
+    now = datetime.now(timezone.utc)
+    current_time = now.strftime("%H:%M")
+    schedule_time = str(config_service.get("backup_auto_time", "03:00") or "03:00")
+    interval_hours = int(config_service.get("backup_auto_interval_hours", 0) or 0)
+
+    if interval_hours > 0:
+        # Interval mode: kick off at schedule_time, then every N hours
+        if _last_auto_backup_ts is None:
+            if current_time != schedule_time:
+                return
+        elif (now - _last_auto_backup_ts) < timedelta(hours=interval_hours) - timedelta(seconds=30):
+            return
+    else:
+        # Daily mode: once per day at schedule_time
+        if _last_auto_backup_ts is not None and \
+                _last_auto_backup_ts.strftime("%Y-%m-%d") == now.strftime("%Y-%m-%d"):
+            return
+        if current_time != schedule_time:
+            return
+
+    # Mark timestamp first to avoid a double run within the same minute
+    _last_auto_backup_ts = now
+
+    database_url = os.environ.get("DATABASE_URL")
+    if not database_url:
+        logger.warning("Scheduled backup skipped: DATABASE_URL not configured")
+        return
+
+    send_tg = bool(config_service.get("backup_auto_telegram", False))
+    also_config = bool(config_service.get("backup_auto_config", False))
+
+    # Database backup
+    logger.info("Running scheduled database backup...")
+    result = await create_database_backup(database_url)
+    logger.info("Scheduled DB backup created: %s (%s bytes)", result["filename"], result["size_bytes"])
+    await _log_and_maybe_send(result["filename"], "database", result["size_bytes"], send_tg)
+
+    # Config backup (optional)
+    if also_config:
+        try:
+            cfg = await export_config()
+            logger.info("Scheduled config backup created: %s (%s bytes)", cfg["filename"], cfg["size_bytes"])
+            await _log_and_maybe_send(cfg["filename"], "config", cfg["size_bytes"], send_tg)
         except Exception as exc:
-            logger.warning("Scheduled backup Telegram send failed: %s", exc)
+            logger.warning("Scheduled config backup failed: %s", exc)
 
     # Rotate old backups
     try:

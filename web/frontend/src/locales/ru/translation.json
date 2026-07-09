@@ -4171,7 +4171,10 @@
       "title": "Автоматический бэкап",
       "description": "Создавать бэкап БД по расписанию и (опционально) отправлять в Telegram",
       "time": "Время (UTC)",
-      "sendTelegram": "Отправлять в Telegram"
+      "sendTelegram": "Отправлять в Telegram",
+      "intervalHours": "Интервал (часов)",
+      "intervalHint": "0 — раз в день во время выше; N>0 — начиная с него каждые N часов",
+      "config": "Бэкапить конфиг"
     },
     "tabs": {
       "backups": "Бэкапы",

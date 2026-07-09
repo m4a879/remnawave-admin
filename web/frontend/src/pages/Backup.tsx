@@ -130,6 +130,28 @@ function AutoBackupScheduleCard() {
             />
           </div>
         </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div>
+            <Label className="text-xs text-dark-300">{t('backup.schedule.intervalHours')}</Label>
+            <Input
+              type="number"
+              min={0}
+              value={s?.backup_auto_interval_hours ?? '0'}
+              onChange={(e) => set('backup_auto_interval_hours', e.target.value || '0')}
+              disabled={!canEdit || !enabled}
+              className="mt-1"
+            />
+            <p className="text-[10px] text-dark-400 mt-1">{t('backup.schedule.intervalHint')}</p>
+          </div>
+          <div className="flex items-center justify-between sm:items-end sm:pb-2">
+            <Label className="text-xs text-dark-300">{t('backup.schedule.config')}</Label>
+            <Switch
+              checked={toBool(s?.backup_auto_config)}
+              onCheckedChange={(v) => set('backup_auto_config', v ? 'true' : 'false')}
+              disabled={!canEdit || !enabled}
+            />
+          </div>
+        </div>
       </CardContent>
     </Card>
   )
