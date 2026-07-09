@@ -104,6 +104,8 @@ const fetchUsers = async (params: {
   sort_by: string
   sort_order: string
   admin_id?: string
+  external_squad_uuid?: string
+  tag?: string
 }): Promise<PaginatedResponse> => {
   const { data } = await client.get('/users', { params })
   return data
@@ -874,6 +876,8 @@ export default function Users() {
   const [sortBy, setSortBy] = useUrlParam('sort_by', 'created_at')
   const [sortOrder, setSortOrder] = useUrlParam('sort_order', 'desc')
   const [adminId, setAdminId] = useUrlParam('admin_id', '')
+  const [externalSquad, setExternalSquad] = useUrlParam('external_squad', '')
+  const [userTag, setUserTag] = useUrlParam('tag', '')
   // Lock restricted admins to their own account
   // Unrestricted non-superadmins default to "any admin" (like superadmin)
   useEffect(() => {
@@ -882,12 +886,12 @@ export default function Users() {
     }
   }, [isLockedToOwnAccount, isSuperadmin, unrestrictedUserAccess, accountId, adminId])
   const hasAnyFilterInUrl =
-    !!status || !!trafficType || !!expireFilter || !!onlineFilter || !!trafficUsage || (canChooseAdmin && !!adminId)
+    !!status || !!trafficType || !!expireFilter || !!onlineFilter || !!trafficUsage || (canChooseAdmin && !!adminId) || !!externalSquad || !!userTag
   const [showFilters, setShowFilters] = useState(hasAnyFilterInUrl)
 
   const activeFilterCount = useMemo(
-    () => [status, trafficType, expireFilter, onlineFilter, trafficUsage].filter(Boolean).length,
-    [status, trafficType, expireFilter, onlineFilter, trafficUsage],
+    () => [status, trafficType, expireFilter, onlineFilter, trafficUsage, externalSquad, userTag].filter(Boolean).length,
+    [status, trafficType, expireFilter, onlineFilter, trafficUsage, externalSquad, userTag],
   )
 
   // Export handlers
@@ -925,7 +929,9 @@ export default function Users() {
     ...(onlineFilter && { onlineFilter }),
     ...(trafficUsage && { trafficUsage }),
     ...(adminId && { adminId }),
-  }), [status, trafficType, expireFilter, onlineFilter, trafficUsage, adminId])
+    ...(externalSquad && { externalSquad }),
+    ...(userTag && { userTag }),
+  }), [status, trafficType, expireFilter, onlineFilter, trafficUsage, adminId, externalSquad, userTag])
   const hasActiveFilters = activeFilterCount > 0
   const handleLoadFilter = useCallback((filters: Record<string, unknown>) => {
     setStatus((filters.status as string) || '')
@@ -934,6 +940,8 @@ export default function Users() {
     setOnlineFilter((filters.onlineFilter as string) || '')
     setTrafficUsage((filters.trafficUsage as string) || '')
     setAdminId((filters.adminId as string) || '')
+    setExternalSquad((filters.externalSquad as string) || '')
+    setUserTag((filters.userTag as string) || '')
     setShowFilters(true)
     setPage(1)
   }, [])
@@ -963,7 +971,7 @@ export default function Users() {
 
   // Fetch users
   const { data, isLoading, isFetching, isError, error, refetch } = useQuery({
-    queryKey: ['users', page, perPage, debouncedSearch, status, trafficType, expireFilter, onlineFilter, trafficUsage, sortBy, sortOrder, adminId],
+    queryKey: ['users', page, perPage, debouncedSearch, status, trafficType, expireFilter, onlineFilter, trafficUsage, sortBy, sortOrder, adminId, externalSquad, userTag],
     queryFn: () => {
       const p: Record<string, unknown> = {
         page,
@@ -974,6 +982,8 @@ export default function Users() {
         expire_filter: expireFilter || undefined,
         online_filter: onlineFilter || undefined,
         traffic_usage: trafficUsage || undefined,
+        external_squad_uuid: externalSquad || undefined,
+        tag: userTag || undefined,
         sort_by: sortBy,
         sort_order: sortOrder,
       }
@@ -994,6 +1004,28 @@ export default function Users() {
     enabled: canChooseAdmin,
   })
   const admins: { id: number; username: string }[] = Array.isArray(adminsData?.items) ? adminsData.items : []
+
+  // Fetch external squads for filter dropdown
+  const { data: externalSquadsData } = useQuery<Squad[]>({
+    queryKey: ['external-squads'],
+    queryFn: async () => {
+      const { data } = await client.get('/users/meta/external-squads')
+      return Array.isArray(data) ? data : []
+    },
+    staleTime: 60_000,
+  })
+  const externalSquadsList: Squad[] = Array.isArray(externalSquadsData) ? externalSquadsData : []
+
+  // Fetch distinct user tags for filter dropdown
+  const { data: userTagsData } = useQuery<string[]>({
+    queryKey: ['user-tags'],
+    queryFn: async () => {
+      const { data } = await client.get('/users/meta/tags')
+      return Array.isArray(data) ? data : []
+    },
+    staleTime: 60_000,
+  })
+  const userTagsList: string[] = Array.isArray(userTagsData) ? userTagsData : []
 
   // Mutations
   const enableUser = useMutation({
@@ -1068,6 +1100,8 @@ export default function Users() {
     setExpireFilter('')
     setOnlineFilter('')
     setTrafficUsage('')
+    setExternalSquad('')
+    setUserTag('')
     setPage(1)
   }, [])
 
@@ -1439,6 +1473,38 @@ export default function Users() {
                   </div>
 
                   <div>
+                    <Label className="text-[11px] uppercase tracking-wider text-dark-300">{t('users.filters.externalSquad')}</Label>
+                    <Select value={externalSquad || '_all'} onValueChange={(v) => { setExternalSquad(v === '_all' ? '' : v); setPage(1) }}>
+                      <SelectTrigger className="mt-1">
+                        <SelectValue placeholder={t('users.filters.anyExternalSquad')} />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="_all">{t('users.filters.anyExternalSquad')}</SelectItem>
+                        {externalSquadsList.map((sq: Squad) => (
+                          <SelectItem key={sq.uuid} value={sq.uuid}>
+                            {sq.squadName || sq.name || sq.squadTag || sq.tag || sq.uuid}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div>
+                    <Label className="text-[11px] uppercase tracking-wider text-dark-300">{t('users.filters.tag')}</Label>
+                    <Select value={userTag || '_all'} onValueChange={(v) => { setUserTag(v === '_all' ? '' : v); setPage(1) }}>
+                      <SelectTrigger className="mt-1">
+                        <SelectValue placeholder={t('users.filters.anyTag')} />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="_all">{t('users.filters.anyTag')}</SelectItem>
+                        {userTagsList.map((tg) => (
+                          <SelectItem key={tg} value={tg}>{tg}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div>
                     <Label className="text-[11px] uppercase tracking-wider text-dark-300">{t('users.filters.perPage')}</Label>
                     <Select value={String(perPage)} onValueChange={(v) => { setPerPage(Number(v)); setPage(1) }}>
                       <SelectTrigger className="mt-1">
@@ -1508,6 +1574,18 @@ export default function Users() {
                   <FilterChip
                     label={`${t('users.filters.admin')}: ${admins.find(a => String(a.id) === adminId)?.username || adminId}`}
                     onRemove={() => { setAdminId(''); setPage(1) }}
+                  />
+                )}
+                {externalSquad && (
+                  <FilterChip
+                    label={`${t('users.filters.externalSquad')}: ${externalSquadsList.find(sq => sq.uuid === externalSquad)?.squadName || externalSquadsList.find(sq => sq.uuid === externalSquad)?.name || externalSquad}`}
+                    onRemove={() => { setExternalSquad(''); setPage(1) }}
+                  />
+                )}
+                {userTag && (
+                  <FilterChip
+                    label={`${t('users.filters.tag')}: ${userTag}`}
+                    onRemove={() => { setUserTag(''); setPage(1) }}
                   />
                 )}
                 <button onClick={resetFilters} className="text-[11px] text-dark-300 hover:text-primary-400 ml-1">

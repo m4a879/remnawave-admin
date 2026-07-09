@@ -439,6 +439,8 @@ class UsersMixin:
         sort_order: str = "desc",
         uuid_whitelist: Optional[List[str]] = None,
         admin_id: Optional[int] = None,
+        external_squad_uuid: Optional[str] = None,
+        tag: Optional[str] = None,
     ) -> tuple:
         """
         Get paginated users with server-side filtering and sorting.
@@ -535,6 +537,18 @@ class UsersMixin:
             args.append(admin_id)
             conditions.append(f"created_by_admin_id = ${param_idx}")
 
+        # Filter: external squad (compare as text to tolerate any UUID casing / invalid input)
+        if external_squad_uuid:
+            param_idx += 1
+            args.append(str(external_squad_uuid))
+            conditions.append(f"external_squad_uuid::text = ${param_idx}")
+
+        # Filter: tag (exact match, single tag per user)
+        if tag:
+            param_idx += 1
+            args.append(tag)
+            conditions.append(f"tag = ${param_idx}")
+
         where_clause = " AND ".join(conditions) if conditions else "TRUE"
 
         # Sort
@@ -575,6 +589,17 @@ class UsersMixin:
         total = rows[0]["_total_count"]
         users = [_db_row_to_api_format(row) for row in rows]
         return users, total
+
+    async def get_distinct_user_tags(self) -> List[str]:
+        """Return sorted list of distinct non-empty user tags (for filter dropdown)."""
+        if not self.is_connected:
+            return []
+        async with self.acquire() as conn:
+            rows = await conn.fetch(
+                f"SELECT DISTINCT tag FROM {USERS_TABLE} "
+                f"WHERE tag IS NOT NULL AND tag <> '' ORDER BY tag"
+            )
+        return [r["tag"] for r in rows]
 
     async def get_hwid_device_counts_for_uuids(self, user_uuids: List[str]) -> Dict[str, int]:
         """Get HWID device counts for specific users by UUID list."""

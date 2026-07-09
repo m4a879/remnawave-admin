@@ -29,6 +29,8 @@ MOCK_USERS = [
         "last_traffic_reset_at": None,
         "traffic_limit_strategy": "no_reset",
         "email": "alice@example.com",
+        "tag": "VIP",
+        "external_squad_uuid": "squad-aaa",
     },
     {
         "uuid": "bbb-222",
@@ -52,6 +54,8 @@ MOCK_USERS = [
         "last_traffic_reset_at": None,
         "traffic_limit_strategy": "no_reset",
         "email": None,
+        "tag": None,
+        "external_squad_uuid": None,
     },
 ]
 
@@ -102,6 +106,28 @@ class TestListUsers:
         data = resp.json()
         assert data["total"] == 1
         assert data["items"][0]["status"] == "active"
+
+    @pytest.mark.asyncio
+    @patch("web.backend.api.v2.users._get_users_list", new_callable=AsyncMock, return_value=MOCK_USERS)
+    @patch("shared.database.db_service")
+    async def test_list_users_filter_external_squad(self, mock_db, mock_get, client):
+        mock_db.is_connected = False
+        resp = await client.get("/api/v2/users?external_squad_uuid=squad-aaa")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total"] == 1
+        assert data["items"][0]["username"] == "alice"
+
+    @pytest.mark.asyncio
+    @patch("web.backend.api.v2.users._get_users_list", new_callable=AsyncMock, return_value=MOCK_USERS)
+    @patch("shared.database.db_service")
+    async def test_list_users_filter_tag(self, mock_db, mock_get, client):
+        mock_db.is_connected = False
+        resp = await client.get("/api/v2/users?tag=VIP")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total"] == 1
+        assert data["items"][0]["username"] == "alice"
 
     @pytest.mark.asyncio
     async def test_list_users_as_viewer_allowed(self, app, viewer):

@@ -312,6 +312,7 @@ def _filter_users_in_memory(
     expire_filter=None, online_filter=None, traffic_usage=None,
     sort_by="created_at", sort_order="desc", page=1, per_page=20,
     visible_uuids: Optional[Set[str]] = None,
+    external_squad_uuid=None, tag=None,
 ) -> tuple:
     """In-memory filtering/sorting/pagination fallback for API path."""
     now = datetime.now(timezone.utc)
@@ -395,6 +396,13 @@ def _filter_users_in_memory(
             return pct >= thresholds.get(traffic_usage, 0)
         users = [u for u in users if _traffic_usage_match(u)]
 
+    if external_squad_uuid:
+        esq = str(external_squad_uuid).lower()
+        users = [u for u in users if str(_get(u, 'external_squad_uuid', 'externalSquadUuid')).lower() == esq]
+
+    if tag:
+        users = [u for u in users if _get(u, 'tag') == tag]
+
     reverse = sort_order == "desc"
     if sort_by in ('used_traffic_bytes', 'raw_used_traffic_bytes', 'lifetime_used_traffic_bytes', 'hwid_device_limit'):
         users.sort(key=lambda x: x.get(sort_by, 0) or 0, reverse=reverse)
@@ -429,6 +437,8 @@ async def list_users(
     sort_by: str = Query("created_at", description="Sort field"),
     sort_order: str = Query("desc", regex="^(asc|desc)$"),
     admin_id: Optional[int] = Query(None, description="Filter by creator admin ID (superadmin only)"),
+    external_squad_uuid: Optional[str] = Query(None, description="Filter by external squad UUID"),
+    tag: Optional[str] = Query(None, description="Filter by user tag"),
     admin: AdminUser = Depends(require_permission("users", "view")),
 ):
     """List users with pagination and filtering."""
@@ -458,6 +468,8 @@ async def list_users(
                     sort_by=sort_by, sort_order=sort_order,
                     uuid_whitelist=uuid_whitelist,
                     admin_id=resolved_admin_id,
+                    external_squad_uuid=external_squad_uuid,
+                    tag=tag,
                 )
                 db_available = True
         except Exception as e:
@@ -476,6 +488,8 @@ async def list_users(
                 sort_by=sort_by, sort_order=sort_order,
                 page=page, per_page=per_page,
                 visible_uuids=visible_uuids,
+                external_squad_uuid=external_squad_uuid,
+                tag=tag,
             )
 
         # Normalize to snake_case
@@ -628,6 +642,32 @@ async def get_external_squads(
         squads = [sq for sq in squads if isinstance(sq, dict) and str(sq.get("uuid", "")).lower() in scope]
 
     return [_normalize_squad(sq) for sq in squads if isinstance(sq, dict)]
+
+
+@router.get("/meta/tags")
+async def get_user_tags(
+    admin: AdminUser = Depends(require_permission("users", "view")),
+):
+    """Get distinct user tags for the filter dropdown — reads from DB, falls back to API."""
+    try:
+        from shared.database import db_service
+        if db_service.is_connected:
+            return await db_service.get_distinct_user_tags()
+    except Exception as e:
+        logger.debug("DB distinct tags failed, falling back to API: %s", e)
+
+    # Fallback: Panel API
+    try:
+        from shared.api_client import api_client
+        result = await api_client.get_all_user_tags()
+        payload = result.get("response", result) if isinstance(result, dict) else result
+        if isinstance(payload, dict):
+            return payload.get("tags", [])
+        if isinstance(payload, list):
+            return payload
+    except Exception as e:
+        logger.error("Error fetching user tags: %s", e)
+    return []
 
 
 @router.post("/resolve")
