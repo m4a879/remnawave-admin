@@ -22,6 +22,20 @@ logger = logging.getLogger(__name__)
 _DEFAULT_BASE = "https://invapi.hostkey.ru"
 
 
+def _unwrap_envelope(data: Any):
+    """Hostkey заворачивает payload в `result`.
+
+    Успех: {"result": <dict|list>}. Ошибка: {"result": -N, "error": "..."}.
+    Возвращает (payload, error): payload — развёрнутое тело или None при ошибке.
+    """
+    if isinstance(data, dict) and "result" in data:
+        res = data["result"]
+        if isinstance(res, (dict, list)):
+            return res, None
+        return None, str(data.get("error") or f"result={res}")
+    return data, None
+
+
 @register_adapter
 class HostkeyAdapter(HosterAdapter):
     slug = "hostkey"
@@ -91,33 +105,42 @@ class HostkeyAdapter(HosterAdapter):
                 return t
             return None
 
+        # токен внутри конверта: {"result":{"token":...}}
+        payload, err = _unwrap_envelope(data)
+        if err or payload is None:
+            return None
+
         def _pick(d: Dict[str, Any]) -> Optional[str]:
             return (
-                d.get("token") or d.get("HOSTKEY_TOKEN")
-                or d.get("access_token") or d.get("session")
+                d.get("token") or d.get("access_token")
+                or d.get("session") or d.get("HOSTKEY_TOKEN")
             )
 
-        if isinstance(data, dict):
-            # конверт {"result":-N,"error":...} токена не содержит -> None
-            tok = _pick(data)
-            if not tok and isinstance(data.get("data"), dict):
-                tok = _pick(data["data"])
+        if isinstance(payload, dict):
+            tok = _pick(payload)
+            if not tok and isinstance(payload.get("data"), dict):
+                tok = _pick(payload["data"])
             return tok
-        if isinstance(data, str):
-            return data.strip() or None
+        if isinstance(payload, str):
+            return payload.strip() or None
         return None
 
     async def _call(self, client: httpx.AsyncClient, base: str, action: str, token: str,
                     extra: Optional[Dict[str, str]] = None) -> Any:
+        """Вызов whmcs.php с action+token; разворачивает конверт result/error."""
         payload = {"action": action, "token": token, **(extra or {})}
         try:
             resp = await client.post(f"{base}/whmcs.php", data=payload)
             resp.raise_for_status()
-            return resp.json()
+            data = resp.json()
         except httpx.HTTPError as e:
             raise AdapterError(f"Сеть/HTTP ({action}): {e}")
         except ValueError:
             raise AdapterError(f"Некорректный ответ Invapi на {action}")
+        inner, err = _unwrap_envelope(data)
+        if err:
+            raise AdapterError(f"{action}: {err}")
+        return inner
 
     async def fetch(self, base_url: Optional[str], credentials: Dict[str, str]) -> SyncResult:
         base = self._base(base_url)
@@ -133,11 +156,21 @@ class HostkeyAdapter(HosterAdapter):
 
     async def _fetch_balance(self, client, base, token):
         data = await self._call(client, base, "getcredits", token)
+        logger.info("Hostkey getcredits payload: %s", str(data)[:300])
         currency = None
         total = 0.0
         found = False
-        credits = data.get("credits") if isinstance(data, dict) else None
-        rows = credits.get("credit") if isinstance(credits, dict) else credits
+        # payload уже развёрнут из result: список кредитов, {"credits":[...]},
+        # {"credits":{"credit":[...]}} или прямое {"amount":..,"currencycode":..}
+        if isinstance(data, list):
+            rows = data
+        elif isinstance(data, dict):
+            credits = data.get("credits", data.get("credit"))
+            rows = credits.get("credit") if isinstance(credits, dict) else credits
+            if rows is None and ("amount" in data or "balance" in data):
+                rows = [data]
+        else:
+            rows = None
         if isinstance(rows, dict):
             rows = [rows]
         for c in (rows or []):
@@ -161,8 +194,11 @@ class HostkeyAdapter(HosterAdapter):
         try:
             data = await self._call(client, base, "getclientsproducts", token)
         except AdapterError as e:
-            logger.info("Hostkey getclientsproducts failed (%s), услуги пропущены", e)
+            logger.info("Hostkey getclientsproducts недоступен (%s), услуги пропущены", e)
             return []
+        logger.info("Hostkey getclientsproducts payload: %s", str(data)[:300])
+        if isinstance(data, list):
+            data = {"products": {"product": data}}
         products = data.get("products") if isinstance(data, dict) else None
         rows = products.get("product") if isinstance(products, dict) else products
         if isinstance(rows, dict):

@@ -205,23 +205,25 @@ class TestHostkeyAdapter:
             path = request.url.path
             body = parse_qs(request.content.decode())
             if path.endswith("/auth.php"):
-                # invapi ждёт action=login + key, отвечает access_token
+                # invapi: action=login + key -> токен ВНУТРИ result
                 action = (body.get("action") or [""])[0]
                 if action == "login" and body.get("key"):
-                    return httpx.Response(200, json={"access_token": "TKN", "role": "client"})
+                    return httpx.Response(200, json={"result": {
+                        "token": "TKN", "role": "Customer billing", "servers": [55054],
+                    }})
                 return httpx.Response(200, json={"result": -2, "error": "auth: malformed request #1"})
             if path.endswith("/whmcs.php"):
                 action = (body.get("action") or [""])[0]
                 if action == "getcredits":
-                    return httpx.Response(200, json={"credits": {"credit": [
+                    return httpx.Response(200, json={"result": {"credits": {"credit": [
                         {"amount": "10.50", "currencycode": "USD"},
                         {"amount": "4.50", "currencycode": "USD"},
-                    ]}})
+                    ]}}})
                 if action == "getclientsproducts":
-                    return httpx.Response(200, json={"products": {"product": [
+                    return httpx.Response(200, json={"result": {"products": {"product": [
                         {"id": 1, "name": "VDS-1", "recurringamount": "5.00",
                          "billingcycle": "monthly", "nextduedate": "2026-08-10", "status": "Active"},
-                    ]}})
+                    ]}}})
             return httpx.Response(404)
 
         adapter = HostkeyAdapter()
