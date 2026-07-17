@@ -47,6 +47,44 @@ def _unwrap_envelope(data: Any):
     return data, None
 
 
+def _dig(payload: Any, *keys: str) -> Any:
+    """Спуститься по вложенным dict-ключам (пропуская отсутствующие)."""
+    node = payload
+    for k in keys:
+        if isinstance(node, dict) and k in node:
+            node = node[k]
+    return node
+
+
+def _as_list(node: Any) -> List[Dict[str, Any]]:
+    if isinstance(node, dict):
+        node = [node]
+    return [x for x in node if isinstance(x, dict)] if isinstance(node, list) else []
+
+
+def _credit_rows(payload: Any) -> List[Dict[str, Any]]:
+    """getcredits: message.credits.credit[] (с запасом на более плоские формы)."""
+    node = payload
+    if isinstance(node, dict) and isinstance(node.get("message"), dict):
+        node = node["message"]
+    node = _dig(node, "credits", "credit") if isinstance(node, dict) else node
+    return _as_list(node)
+
+
+def _server_rows(payload: Any) -> List[Dict[str, Any]]:
+    """eq.php list: серверы под message.{servers|list|server} либо плоско."""
+    node = payload
+    if isinstance(node, dict) and isinstance(node.get("message"), dict):
+        node = node["message"]
+    if isinstance(node, dict):
+        for k in ("servers", "list", "server", "data", "items"):
+            if isinstance(node.get(k), list):
+                return _as_list(node[k])
+        vals = [v for v in node.values() if isinstance(v, dict)]
+        return vals if vals else []
+    return _as_list(node)
+
+
 @register_adapter
 class HostkeyAdapter(HosterAdapter):
     slug = "hostkey"
@@ -99,10 +137,21 @@ class HostkeyAdapter(HosterAdapter):
                 continue
             token = self._extract_token(resp)
             if token:
+                self._auth_payload = self._payload_of(resp)
+                # лог без токена — вдруг есть валюта/полезные поля
+                logger.info("Hostkey auth ok, ключи payload=%s", list(self._auth_payload.keys()))
                 return token
             last = f"{mode} ({','.join(fields)}): HTTP {resp.status_code}, тело {resp.text[:200]!r}"
             logger.info("Hostkey auth не дал токен: %s", last)
         raise AdapterError(f"Не удалось получить токен по API-ключу ({last})")
+
+    @staticmethod
+    def _payload_of(resp: httpx.Response) -> Dict[str, Any]:
+        try:
+            inner, _ = _unwrap_envelope(resp.json())
+        except ValueError:
+            return {}
+        return inner if isinstance(inner, dict) else {}
 
     @staticmethod
     def _extract_token(resp: httpx.Response) -> Optional[str]:
@@ -137,18 +186,18 @@ class HostkeyAdapter(HosterAdapter):
         return None
 
     async def _call(self, client: httpx.AsyncClient, base: str, action: str, token: str,
-                    extra: Optional[Dict[str, str]] = None) -> Any:
-        """Вызов whmcs.php с action+token; разворачивает конверт result/error."""
+                    extra: Optional[Dict[str, str]] = None, endpoint: str = "whmcs.php") -> Any:
+        """Вызов invapi endpoint с action+token; разворачивает конверт result/error."""
         payload = {"action": action, "token": token, **(extra or {})}
         try:
-            resp = await client.post(f"{base}/whmcs.php", data=payload)
+            resp = await client.post(f"{base}/{endpoint}", data=payload)
             resp.raise_for_status()
             data = resp.json()
         except httpx.HTTPError as e:
             raise AdapterError(f"Сеть/HTTP ({action}): {e}")
         except ValueError:
             raise AdapterError(f"Некорректный ответ Invapi на {action}")
-        logger.info("Hostkey %s raw: %s", action, str(data)[:400])
+        logger.info("Hostkey %s/%s raw: %s", endpoint, action, str(data)[:400])
         inner, err = _unwrap_envelope(data)
         if err:
             raise AdapterError(f"{action}: {err}")
@@ -159,82 +208,80 @@ class HostkeyAdapter(HosterAdapter):
         api_key = (credentials.get("api_key") or "").strip()
         if not api_key:
             raise AdapterError("Не заполнен API-ключ")
+        self._auth_payload: Dict[str, Any] = {}
 
         async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT, follow_redirects=True) as client:
             token = await self._token(client, base, api_key)
             balance, currency = await self._fetch_balance(client, base, token)
             services = await self._fetch_services(client, base, token)
-        return SyncResult(balance=balance, currency=currency, services=services)
+        return SyncResult(balance=balance, currency=currency or self._currency(base), services=services)
+
+    def _currency(self, base: str) -> Optional[str]:
+        """Валюта из auth-ответа, иначе инференс по домену invapi (.ru -> RUB)."""
+        auth = getattr(self, "_auth_payload", {}) or {}
+        for k in ("currency", "currency_code", "currencycode", "default_currency"):
+            v = auth.get(k)
+            if v:
+                return str(v).upper()
+        b = (base or "").lower()
+        if b.endswith(".ru") or ".ru/" in b or ".ru:" in b:
+            return "RUB"
+        return "USD"
 
     async def _fetch_balance(self, client, base, token):
+        # getcredits: леджер кредитов message.credits.credit[]; сумма amount
+        # (с минусами) = текущий доступный кредит. Валюты в записях обычно нет.
         data = await self._call(client, base, "getcredits", token)
-        currency = None
         total = 0.0
         found = False
-        # payload уже развёрнут из result: список кредитов, {"credits":[...]},
-        # {"credits":{"credit":[...]}} или прямое {"amount":..,"currencycode":..}
-        if isinstance(data, list):
-            rows = data
-        elif isinstance(data, dict):
-            credits = data.get("credits", data.get("credit"))
-            rows = credits.get("credit") if isinstance(credits, dict) else credits
-            if rows is None and ("amount" in data or "balance" in data):
-                rows = [data]
-        else:
-            rows = None
-        if isinstance(rows, dict):
-            rows = [rows]
-        for c in (rows or []):
-            if not isinstance(c, dict):
-                continue
+        currency = None
+        for c in _credit_rows(data):
             try:
                 total += float(c.get("amount") or 0)
                 found = True
             except (TypeError, ValueError):
                 continue
             currency = currency or c.get("currencycode") or c.get("currency")
-        # прямое поле баланса, если есть
-        if isinstance(data, dict) and data.get("balance") is not None:
-            try:
-                return round(float(data["balance"]), 2), (data.get("currency") or currency)
-            except (TypeError, ValueError):
-                pass
         return (round(total, 2) if found else None), currency
 
     async def _fetch_services(self, client, base, token) -> List[Service]:
+        # У Hostkey нет getclientsproducts (invalid command) — услуги/серверы
+        # отдаёт eq.php action=list.
         try:
-            data = await self._call(client, base, "getclientsproducts", token)
+            data = await self._call(client, base, "list", token, endpoint="eq.php")
         except AdapterError as e:
-            logger.info("Hostkey getclientsproducts недоступен (%s), услуги пропущены", e)
+            logger.info("Hostkey eq.php list недоступен (%s), услуги пропущены", e)
             return []
-        if isinstance(data, list):
-            data = {"products": {"product": data}}
-        products = data.get("products") if isinstance(data, dict) else None
-        rows = products.get("product") if isinstance(products, dict) else products
-        if isinstance(rows, dict):
-            rows = [rows]
         services: List[Service] = []
-        for p in (rows or []):
-            if not isinstance(p, dict):
-                continue
-            name = p.get("name") or p.get("productname") or p.get("domain")
+        for s in _server_rows(data):
+            name = (s.get("name") or s.get("hostname") or s.get("server_name")
+                    or s.get("domain") or s.get("ip") or s.get("title"))
             if not name:
                 continue
-            price = None
-            try:
-                price = round(float(p.get("recurringamount")), 2)
-            except (TypeError, ValueError):
-                pass
             services.append(Service(
                 name=str(name),
-                status=str(p.get("status") or "").lower() or None,
-                price=price,
-                currency=p.get("currencycode") or None,
-                period=str(p.get("billingcycle") or "") or None,
-                next_due_at=_iso_date(p.get("nextduedate")),
-                external_id=str(p.get("id")) if p.get("id") is not None else None,
+                status=str(s.get("status") or "").lower() or None,
+                price=_first_num(s, "cost", "price", "monthly", "recurringamount", "amount"),
+                currency=None,
+                period=str(s.get("billingcycle") or s.get("period") or "") or None,
+                next_due_at=_iso_date(
+                    s.get("expiredate") or s.get("nextduedate") or s.get("paiddate")
+                    or s.get("payment_date") or s.get("paid_till") or s.get("expires")
+                ),
+                external_id=str(s.get("id")) if s.get("id") is not None else None,
             ))
         return services
+
+
+def _first_num(d: Dict[str, Any], *keys: str) -> Optional[float]:
+    for k in keys:
+        v = d.get(k)
+        if v not in (None, ""):
+            try:
+                return round(float(v), 2)
+            except (TypeError, ValueError):
+                continue
+    return None
 
 
 def _iso_date(v: Any) -> Optional[str]:

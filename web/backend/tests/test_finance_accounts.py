@@ -230,16 +230,23 @@ class TestHostkeyAdapter:
             if path.endswith("/whmcs.php"):
                 action = (body.get("action") or [""])[0]
                 if action == "getcredits":
-                    # реальный конверт: result="OK", данные в остальных ключах
-                    return httpx.Response(200, json={"result": "OK", "credits": {"credit": [
-                        {"amount": "10.50", "currencycode": "USD"},
-                        {"amount": "4.50", "currencycode": "USD"},
+                    # реальная структура: result="OK", ледж. в message.credits.credit,
+                    # amount со знаком (сумма = текущий кредит), валюты в записях нет
+                    return httpx.Response(200, json={"result": "OK", "message": {
+                        "result": "success", "totalresults": 3, "clientid": 77412,
+                        "credits": {"credit": [
+                            {"id": 1, "amount": "560.00"},
+                            {"id": 2, "amount": "-560.00"},
+                            {"id": 3, "amount": "42.11"},
+                        ]},
+                    }})
+            if path.endswith("/eq.php"):
+                action = (body.get("action") or [""])[0]
+                if action == "list":
+                    return httpx.Response(200, json={"result": "OK", "message": {"servers": [
+                        {"id": 55054, "name": "srv-de-1", "status": "active",
+                         "cost": "5.00", "expiredate": "2026-08-10"},
                     ]}})
-                if action == "getclientsproducts":
-                    return httpx.Response(200, json={"result": {"products": {"product": [
-                        {"id": 1, "name": "VDS-1", "recurringamount": "5.00",
-                         "billingcycle": "monthly", "nextduedate": "2026-08-10", "status": "Active"},
-                    ]}}})
             return httpx.Response(404)
 
         adapter = HostkeyAdapter()
@@ -248,9 +255,11 @@ class TestHostkeyAdapter:
             result = await adapter.fetch("https://hostkey.ru", {"api_key": "KEY"})
 
         assert all(h.startswith("invapi.") for h in hosts_seen)
-        assert result.balance == 15.0
-        assert result.currency == "USD"
+        # 560 - 560 + 42.11 = 42.11 (текущий кредит), валюта по домену .ru -> RUB
+        assert result.balance == 42.11
+        assert result.currency == "RUB"
         assert len(result.services) == 1
+        assert result.services[0].name == "srv-de-1"
         assert result.services[0].next_due_at == "2026-08-10"
         assert result.services[0].price == 5.0
 
