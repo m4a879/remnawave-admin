@@ -3954,6 +3954,8 @@
     "recurringIncome": "Регулярные доходы",
     "recurringNet": "Чистыми",
     "perMonth": "в месяц",
+    "monthIncome": "Доход за месяц",
+    "monthToDate": "пополнения с 1 числа",
     "moShort": "мес",
     "plByMonth": "P&L по месяцам",
     "expense": "Расходы",

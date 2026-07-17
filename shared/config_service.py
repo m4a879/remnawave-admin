@@ -326,6 +326,15 @@ DEFAULT_CONFIG_DEFINITIONS: List[Dict[str, Any]] = [
         "default_value": "true",
         "sort_order": 7,
     },
+    {
+        "key": "finance_bedolaga_deposits_enabled",
+        "value_type": "bool",
+        "category": "finance",
+        "display_name": "Записывать пополнения Bedolaga",
+        "description": "Ежедневно заносить пополнения баланса из Bedolaga в доходы (P&L-график, доход за месяц). ⚠️ Не совмещать с ручным импортом выручки подписок — двойной учёт",
+        "default_value": "true",
+        "sort_order": 8,
+    },
 
     # === SYNC ===
     {

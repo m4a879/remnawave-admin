@@ -3954,6 +3954,8 @@
     "recurringIncome": "Recurring income",
     "recurringNet": "Net",
     "perMonth": "per month",
+    "monthIncome": "Income this month",
+    "monthToDate": "top-ups since the 1st",
     "moShort": "mo",
     "plByMonth": "P&L by month",
     "expense": "Expenses",

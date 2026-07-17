@@ -553,6 +553,9 @@ async def lifespan(app: FastAPI):
                     from web.backend.core.finance.sync import autosync_loop
                     _bg_tasks.append(asyncio.create_task(autosync_loop()))
 
+                    from web.backend.core.finance.bedolaga_income import deposits_loop
+                    _bg_tasks.append(asyncio.create_task(deposits_loop()))
+
                 # ── Services for collector and full mode ──
                 if app_mode in ("collector", "full"):
                     async def _baseline_refresh_loop():

@@ -331,6 +331,47 @@ class TestPanelImport:
         assert ov["total"]["deposit_income"] == 1000.0
         assert ov["total"]["profit"] == 750.0
         assert ov["by_payment_method"]["card"] == 1000.0  # копейки → рубли
+        assert ov["month"]["deposit_income"] == 0.0  # БД не подключена в тесте
+
+    def test_pm_amount_shapes(self):
+        from web.backend.core.finance.bedolaga_income import _pm_amount
+
+        assert _pm_amount({"amount_rubles": 250.5}) == 250.5   # уже рубли
+        assert _pm_amount({"amount_kopeks": 100000}) == 1000.0  # копейки
+        assert _pm_amount({"amount": 100000}) == 1000.0         # эвристика: копейки
+        assert _pm_amount(50000) == 500.0                       # голое число
+        assert _pm_amount({}) == 0.0
+        assert _pm_amount(None) == 0.0
+
+    @pytest.mark.asyncio
+    async def test_record_daily_deposits_groups_by_day_and_upserts(self, mock_db_acquire):
+        from web.backend.core.finance import bedolaga_income as bi
+
+        mock_conn, cm = mock_db_acquire
+        mock_conn.execute = AsyncMock(return_value="UPDATE 0")  # записей ещё нет -> INSERT
+        db = AsyncMock()
+        db.is_connected = True
+        db.acquire = lambda: cm
+
+        client_bd = AsyncMock()
+        client_bd.list_transactions = AsyncMock(side_effect=[
+            {"items": [
+                {"amount_kopeks": -25000, "created_at": "2026-07-10T08:00:00"},
+                {"amount_kopeks": -15000, "created_at": "2026-07-10T20:00:00"},
+                {"amount_kopeks": -40000, "created_at": "2026-07-11T09:00:00"},
+            ]},
+            {"items": []},
+        ])
+        with patch("shared.database.db_service", db), \
+             patch("shared.bedolaga_client.bedolaga_client", client_bd), \
+             patch("web.backend.api.v2.bedolaga.ensure_configured", lambda: None):
+            result = await bi.record_daily_deposits()
+
+        assert result["days"] == 2  # 10-е (250+150=400) и 11-е (400)
+        inserts = [c for c in mock_conn.execute.await_args_list if "INSERT INTO" in c.args[0]]
+        assert len(inserts) == 2
+        amounts = sorted(c.args[3] for c in inserts)
+        assert amounts == [400.0, 400.0]
 
     @pytest.mark.asyncio
     async def test_skips_existing_node_items_and_duplicate_payments(self, mock_db_acquire):

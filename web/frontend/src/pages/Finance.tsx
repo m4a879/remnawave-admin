@@ -172,9 +172,11 @@ function OverviewTab() {
             />
             <KpiCard
               icon={<TrendingUp className="w-5 h-5 text-green-400" />}
-              label={t('finance.recurringIncome')}
-              value={fmtMoney(summary?.recurring.income || 0, base)}
-              hint={t('finance.perMonth')}
+              label={bedolaga ? t('finance.monthIncome') : t('finance.recurringIncome')}
+              value={bedolaga
+                ? fmtMoney(bedolaga.month.deposit_income, 'RUB')
+                : fmtMoney(summary?.recurring.income || 0, base)}
+              hint={bedolaga ? t('finance.monthToDate') : t('finance.perMonth')}
               tone="green"
             />
             <KpiCard

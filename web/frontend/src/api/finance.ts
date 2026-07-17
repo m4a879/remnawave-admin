@@ -265,5 +265,6 @@ export interface BedolagaIncome {
   currency: string
   total: { deposit_income: number; subscription_income: number; profit: number }
   today: { deposit_income: number; transactions_count: number }
+  month: { deposit_income: number }
   by_payment_method: Record<string, number>
 }
