@@ -250,6 +250,54 @@ DEFAULT_CONFIG_DEFINITIONS: List[Dict[str, Any]] = [
         "env_var_name": "NOTIFICATIONS_TOPIC_ERRORS",
         "sort_order": 15,
     },
+    {
+        "key": "notifications_topic_finance",
+        "value_type": "int",
+        "category": "notifications",
+        "subcategory": "topics",
+        "display_name": "Топик: Финансы",
+        "description": "ID топика для напоминаний о списаниях и финансовых алертов",
+        "env_var_name": "NOTIFICATIONS_TOPIC_FINANCE",
+        "sort_order": 16,
+    },
+
+    # === FINANCE ===
+    {
+        "key": "finance_base_currency",
+        "value_type": "string",
+        "category": "finance",
+        "display_name": "Базовая валюта отчётов",
+        "description": "Валюта, в которую конвертируются агрегаты (RUB, USD, EUR...)",
+        "default_value": "RUB",
+        "sort_order": 1,
+    },
+    {
+        "key": "finance_rates_auto_update",
+        "value_type": "bool",
+        "category": "finance",
+        "display_name": "Автообновление курсов валют",
+        "description": "Раз в сутки обновлять курсы (ЦБ РФ, fallback open.er-api.com). Курсы с ручной правкой не трогаются",
+        "default_value": "true",
+        "sort_order": 2,
+    },
+    {
+        "key": "finance_reminders_enabled",
+        "value_type": "bool",
+        "category": "finance",
+        "display_name": "Напоминания о списаниях",
+        "description": "Слать уведомления о предстоящих и просроченных платежах в Telegram/панель",
+        "default_value": "true",
+        "sort_order": 3,
+    },
+    {
+        "key": "finance_reminder_days",
+        "value_type": "string",
+        "category": "finance",
+        "display_name": "За сколько дней напоминать",
+        "description": "Список дней до списания через запятую (например: 7,3,1). Просрочка напоминается всегда",
+        "default_value": "7,3,1",
+        "sort_order": 4,
+    },
 
     # === SYNC ===
     {

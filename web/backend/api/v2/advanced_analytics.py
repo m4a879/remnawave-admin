@@ -1332,14 +1332,11 @@ async def get_ltv_estimate(
         avg_days = float(lifetime_row["avg_lifetime_days"] or 0)
         sample_size = lifetime_row["sample_size"] or 0
 
-        # Get cost per user from billing
+        # Get cost per user from finance module (регулярные расходы/мес в RUB)
         ltv = 0
         try:
-            from shared.api_client import api_client
-            nodes_result = await api_client.get_infra_billing_nodes()
-            nodes_resp = nodes_result.get("response", {})
-            stats = nodes_resp.get("stats", {}) if isinstance(nodes_resp, dict) else {}
-            monthly_cost = float(stats.get("currentMonthPayments", 0) or 0)
+            summary = await db_service.finance_summary(months=1)
+            monthly_cost = float(summary.get("recurring", {}).get("expense_rub", 0) or 0)
 
             active_count = (await db_service.get_users_count_by_status()).get("active", 1) or 1
             cost_per_user_month = monthly_cost / active_count if active_count > 0 else 0

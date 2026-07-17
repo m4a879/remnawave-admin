@@ -1027,9 +1027,17 @@
     "traffic_reset_suffix": "\n\n🔄 <i>Трафик сброшен ({name})</i>",
     "reset_error": "❌ Ошибка сброса: {e}"
   },
+  "fin": {
+    "invalid_format": "Неверный формат кнопки",
+    "unknown_action": "Неизвестное действие: {action}",
+    "error": "Ошибка: {e}",
+    "no_permission": "Нет права finance:edit",
+    "not_found": "Запись не найдена (удалена?)",
+    "paid_ok": "✅ {name}: оплата записана. Следующий платёж: {next_due}",
+    "skip_ok": "⏭ {name}: цикл пропущен. Следующий платёж: {next_due}"
+  },
   "notify": {
     "fallback": "ℹ️ <b>Уведомление:</b> {event}",
-
     "user": {
       "fallback": "✏️ <b>Пользователь изменён</b>",
       "title": {
@@ -1082,7 +1090,6 @@
       "subscription_link": "🔗 Ссылка: <code>{url}</code>",
       "external_squad": "External: {uuid}..."
     },
-
     "node": {
       "fallback": "ℹ️ <b>Событие ноды: {event}</b>",
       "title": {
@@ -1102,7 +1109,6 @@
         "changes": "📋 <b>Изменения</b>"
       }
     },
-
     "service": {
       "fallback": "ℹ️ <b>Событие сервиса: {event}</b>",
       "title": {
@@ -1123,7 +1129,6 @@
         "last_check": "🕒 <b>Последняя проверка:</b> {last_check}"
       }
     },
-
     "hwid": {
       "fallback": "💻 <b>Событие HWID: {event}</b>",
       "title": {
@@ -1153,13 +1158,11 @@
         "fallback": "HWID: {event}"
       }
     },
-
     "error": {
       "title": "⚠️ <b>Ошибка системы</b>",
       "type": "<b>Тип:</b> <code>{event}</code>",
       "message": "<b>Сообщение:</b> <code>{message}</code>"
     },
-
     "crm": {
       "fallback": "💰 <b>Событие CRM: {event}</b>",
       "title": {
@@ -1189,7 +1192,6 @@
         "amount": "Сумма"
       }
     },
-
     "violation": {
       "title": "🚨 <b>НАРУШИТЕЛЬ ЛИМИТА</b>",
       "email": "📧 Email: <code>{email}</code>",
@@ -1227,7 +1229,6 @@
         "unknown": "Unknown"
       }
     },
-
     "push": {
       "node_fallback": "Событие ноды",
       "service_title": "Сервис: {event}",

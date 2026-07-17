@@ -49,7 +49,7 @@ from web.backend.api.v2 import tokens as tokens_api
 from web.backend.api.v2 import templates as templates_api
 from web.backend.api.v2 import snippets as snippets_api
 from web.backend.api.v2 import config_profiles as config_profiles_api
-from web.backend.api.v2 import billing as billing_api
+from web.backend.api.v2 import finance as finance_api
 from web.backend.api.v2 import reports as reports_api
 from web.backend.api.v2 import asn as asn_api
 from web.backend.api.v2 import collector as collector_api
@@ -544,6 +544,12 @@ async def lifespan(app: FastAPI):
                     from web.backend.core.backup_service import backup_scheduler_loop
                     _bg_tasks.append(asyncio.create_task(backup_scheduler_loop()))
 
+                    from web.backend.core.finance.rates import rates_update_loop
+                    _bg_tasks.append(asyncio.create_task(rates_update_loop()))
+
+                    from web.backend.core.finance.reminders import reminders_loop
+                    _bg_tasks.append(asyncio.create_task(reminders_loop()))
+
                 # ── Services for collector and full mode ──
                 if app_mode in ("collector", "full"):
                     async def _baseline_refresh_loop():
@@ -1001,7 +1007,7 @@ def create_app() -> FastAPI:
         app.include_router(templates_api.router, prefix="/api/v2/templates", tags=["templates"])
         app.include_router(snippets_api.router, prefix="/api/v2/snippets", tags=["snippets"])
         app.include_router(config_profiles_api.router, prefix="/api/v2/config-profiles", tags=["config-profiles"])
-        app.include_router(billing_api.router, prefix="/api/v2/billing", tags=["billing"])
+        app.include_router(finance_api.router, prefix="/api/v2/finance", tags=["finance"])
         app.include_router(reports_api.router, prefix="/api/v2/reports", tags=["reports"])
         app.include_router(asn_api.router, prefix="/api/v2/asn", tags=["asn"])
         app.include_router(backup_api.router, prefix="/api/v2/backups", tags=["backups"])
