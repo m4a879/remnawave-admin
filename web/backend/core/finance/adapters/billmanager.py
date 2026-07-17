@@ -26,6 +26,13 @@ _STATUS = {
     "5": "deleted", "6": "processing",
 }
 
+# Функции клиентского раздела BILLmanager со списками услуг. Разные инстансы/
+# версии подключают разные модули, поэтому единый список услуг есть не везде
+# (на некоторых func=item/service отвечает «управляющий модуль не загружен»).
+# Сначала пробуем единый список, при недоступности — фолбэк на списки по типам.
+_UNIFIED_SERVICE_FUNCS = ("service", "item")
+_TYPED_SERVICE_FUNCS = ("vds", "dedic", "vhost", "domain", "soft", "certificate")
+
 
 def _unwrap(v: Any) -> Any:
     """{"$": x} -> x; остальное как есть."""
@@ -154,24 +161,53 @@ class BillmanagerAdapter(HosterAdapter):
         return None, None
 
     async def _fetch_services(self, client, endpoint, credentials) -> List[Service]:
-        try:
-            doc = await self._call(client, endpoint, "item", credentials)
-        except AdapterError as e:
-            logger.info("BILLmanager func=item failed (%s), услуги пропущены", e)
-            return []
+        # 1) единый список услуг клиента, если модуль доступен
+        for func in _UNIFIED_SERVICE_FUNCS:
+            rows = await self._try_list(client, endpoint, func, credentials)
+            if rows:
+                return self._services_from_rows(rows)
+        # 2) фолбэк: списки по типам, склеиваем и дедупим по id
         services: List[Service] = []
-        for rec in _rows(doc):
+        seen: set = set()
+        for func in _TYPED_SERVICE_FUNCS:
+            rows = await self._try_list(client, endpoint, func, credentials)
+            for svc in self._services_from_rows(rows):
+                key = svc.external_id or f"{func}:{svc.name}"
+                if key in seen:
+                    continue
+                seen.add(key)
+                services.append(svc)
+        return services
+
+    async def _try_list(self, client, endpoint, func, credentials) -> List[Dict[str, Any]]:
+        """Вызвать func со списком услуг; вернуть строки, [] если функция недоступна.
+
+        Отсутствие функции («управляющий модуль не загружен») — не ошибка синка,
+        а сигнал, что этот тип услуг у данного инстанса не подключён.
+        """
+        try:
+            doc = await self._call(client, endpoint, func, credentials)
+        except AdapterError as e:
+            logger.info("BILLmanager func=%s недоступна (%s)", func, e)
+            return []
+        return _rows(doc)
+
+    @staticmethod
+    def _services_from_rows(rows: List[Dict[str, Any]]) -> List[Service]:
+        out: List[Service] = []
+        for rec in rows:
             name = _field(rec, "name", "domain", "pricelist")
             if not name:
                 continue
             status_raw = _field(rec, "status")
-            services.append(Service(
+            cost = _field(rec, "cost", "item_cost")
+            out.append(Service(
                 name=name,
                 status=_STATUS.get(status_raw or "", status_raw),
-                price=_num(_field(rec, "cost", "item_cost")),
+                price=_num(cost) if cost is not None else None,
                 currency=None,
                 period=_field(rec, "period"),
                 next_due_at=_normalize_date(_field(rec, "expiredate", "expire")),
                 external_id=_field(rec, "id"),
             ))
-        return services
+        return out

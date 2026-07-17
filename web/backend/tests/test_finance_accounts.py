@@ -65,8 +65,16 @@ class TestBillmanagerAdapter:
         assert a._endpoint("https://bill.1cent.host/billmgr/") == "https://bill.1cent.host/billmgr"
 
     @pytest.mark.asyncio
-    async def test_fetch_parses_balance_and_services(self):
+    async def test_fetch_falls_back_to_typed_when_unified_missing(self):
+        """Реальный кейс h2.nexus: func=item/service нет («модуль не загружен»),
+        услуги берутся из func=vds. Баланс должен подтянуться в любом случае."""
         from web.backend.core.finance.adapters.billmanager import BillmanagerAdapter
+
+        def _not_found(func):
+            return httpx.Response(200, json={"doc": {"error": {
+                "$type": "missed",
+                "msg": {"$": f"Не удалось найти функцию '{func}'. Возможно, управляющий модуль не загружен."},
+            }}})
 
         def handler(request: httpx.Request) -> httpx.Response:
             func = request.url.params.get("func")
@@ -74,12 +82,44 @@ class TestBillmanagerAdapter:
                 return httpx.Response(200, json={"doc": {"elem": [
                     {"balance": {"$": "1234.50"}, "currency": {"$": "usd"}},
                 ]}})
-            if func == "item":
+            if func == "vds":
                 return httpx.Response(200, json={"doc": {"elem": [
-                    {"id": {"$": "801"}, "name": {"$": "vds-de-1"}, "cost": {"$": "890.00"},
+                    {"id": {"$": "801"}, "domain": {"$": "vds-de-1"}, "item_cost": {"$": "890.00"},
                      "expiredate": {"$": "2026-08-01"}, "status": {"$": "3"}},
-                    {"id": {"$": "802"}, "name": {"$": "domain.ru"}, "cost": {"$": "0"},
-                     "expiredate": {"$": "2027-01-15"}, "status": {"$": "2"}},
+                ]}})
+            if func in ("service", "item", "dedic", "vhost", "domain", "soft", "certificate"):
+                return _not_found(func)
+            return httpx.Response(200, json={"doc": {}})
+
+        adapter = BillmanagerAdapter()
+        with patch("httpx.AsyncClient", _patched_client(handler)):
+            result = await adapter.fetch("https://my.h2.nexus/billmgr", {"username": "u", "password": "p"})
+
+        assert result.balance == 1234.5
+        assert result.currency == "USD"
+        assert len(result.services) == 1
+        vds = result.services[0]
+        assert vds.name == "vds-de-1"
+        assert vds.price == 890.0
+        assert vds.next_due_at == "2026-08-01"
+        assert vds.status == "active"
+
+    @pytest.mark.asyncio
+    async def test_fetch_uses_unified_service_list_when_available(self):
+        from web.backend.core.finance.adapters.billmanager import BillmanagerAdapter
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            func = request.url.params.get("func")
+            if func == "subaccount":
+                return httpx.Response(200, json={"doc": {"elem": [
+                    {"balance": {"$": "50.00"}, "currency": {"$": "eur"}},
+                ]}})
+            if func == "service":
+                return httpx.Response(200, json={"doc": {"elem": [
+                    {"id": {"$": "1"}, "name": {"$": "srv-1"}, "cost": {"$": "10"},
+                     "expiredate": {"$": "2026-09-01"}, "status": {"$": "2"}},
+                    {"id": {"$": "2"}, "name": {"$": "dom.ru"}, "expiredate": {"$": "2027-01-01"},
+                     "status": {"$": "3"}},
                 ]}})
             return httpx.Response(200, json={"doc": {}})
 
@@ -87,14 +127,32 @@ class TestBillmanagerAdapter:
         with patch("httpx.AsyncClient", _patched_client(handler)):
             result = await adapter.fetch("https://my.waicore.com", {"username": "u", "password": "p"})
 
-        assert result.balance == 1234.5
-        assert result.currency == "USD"
+        assert result.balance == 50.0
         assert len(result.services) == 2
-        vds = result.services[0]
-        assert vds.name == "vds-de-1"
-        assert vds.price == 890.0
-        assert vds.next_due_at == "2026-08-01"
-        assert vds.status == "active"
+        # цена отсутствует у домена -> None, а не 0
+        assert result.services[1].price is None
+
+    @pytest.mark.asyncio
+    async def test_fetch_balance_survives_all_services_missing(self):
+        """Если ни одной функции услуг нет — баланс всё равно возвращается, services=[]"""
+        from web.backend.core.finance.adapters.billmanager import BillmanagerAdapter
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            func = request.url.params.get("func")
+            if func == "subaccount":
+                return httpx.Response(200, json={"doc": {"elem": [
+                    {"balance": {"$": "7.00"}, "currency": {"$": "usd"}},
+                ]}})
+            return httpx.Response(200, json={"doc": {"error": {
+                "$type": "missed", "msg": {"$": f"Не удалось найти функцию '{func}'."},
+            }}})
+
+        adapter = BillmanagerAdapter()
+        with patch("httpx.AsyncClient", _patched_client(handler)):
+            result = await adapter.fetch("https://my.h2.nexus", {"username": "u", "password": "p"})
+
+        assert result.balance == 7.0
+        assert result.services == []
 
     @pytest.mark.asyncio
     async def test_auth_error_raises_adaptererror(self):

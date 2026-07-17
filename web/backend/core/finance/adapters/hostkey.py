@@ -36,25 +36,39 @@ class HostkeyAdapter(HosterAdapter):
     def _base(self, base_url: Optional[str]) -> str:
         return (base_url or "").strip().rstrip("/") or _DEFAULT_BASE
 
+    # Разные версии Invapi отдают токен на разных путях — пробуем оба.
+    _AUTH_PATHS = ("auth.php", "auth/login")
+
     async def _token(self, client: httpx.AsyncClient, base: str, api_key: str) -> str:
-        try:
-            resp = await client.post(f"{base}/auth.php", data={"api_key": api_key})
-            resp.raise_for_status()
-        except httpx.HTTPError as e:
-            raise AdapterError(f"Сеть/HTTP при авторизации: {e}")
-        text = resp.text.strip()
-        token = None
+        last = "нет ответа"
+        for path in self._AUTH_PATHS:
+            try:
+                resp = await client.post(f"{base}/{path}", data={"api_key": api_key})
+            except httpx.HTTPError as e:
+                last = f"{path}: сеть/HTTP {e}"
+                logger.info("Hostkey auth %s: %s", path, last)
+                continue
+            token = self._extract_token(resp)
+            if token:
+                return token
+            last = f"{path}: HTTP {resp.status_code}, тело {resp.text[:200]!r}"
+            logger.info("Hostkey auth %s не дал токен: %s", path, last)
+        raise AdapterError(f"Не удалось получить токен по API-ключу ({last})")
+
+    @staticmethod
+    def _extract_token(resp: httpx.Response) -> Optional[str]:
         try:
             data = resp.json()
-            if isinstance(data, dict):
-                token = data.get("token") or data.get("HOSTKEY_TOKEN") or data.get("access_token")
-            elif isinstance(data, str):
-                token = data
         except ValueError:
-            token = text.strip().strip('"')
-        if not token:
-            raise AdapterError("Не удалось получить токен по API-ключу (проверьте ключ)")
-        return token
+            return resp.text.strip().strip('"') or None
+        if isinstance(data, dict):
+            return (
+                data.get("token") or data.get("HOSTKEY_TOKEN")
+                or data.get("access_token") or data.get("session")
+            )
+        if isinstance(data, str):
+            return data.strip() or None
+        return None
 
     async def _call(self, client: httpx.AsyncClient, base: str, action: str, token: str,
                     extra: Optional[Dict[str, str]] = None) -> Any:
