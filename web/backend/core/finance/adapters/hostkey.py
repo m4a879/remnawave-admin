@@ -42,23 +42,39 @@ class HostkeyAdapter(HosterAdapter):
             return _DEFAULT_BASE
         return b
 
-    # Разные версии Invapi отдают токен на разных путях — пробуем оба.
-    _AUTH_PATHS = ("auth.php", "auth/login")
-
     async def _token(self, client: httpx.AsyncClient, base: str, api_key: str) -> str:
+        """Обменять API-ключ на сессионный токен.
+
+        invapi/auth.php ждёт ключ в параметре `key` (как в ссылке на панель
+        ?key=...) и отвечает конвертом {"result":0,"token":...} либо
+        {"result":-N,"error":...}. Формат запроса перебираем на случай
+        вариаций инстанса (form/json/GET).
+        """
+        attempts = (
+            ("post_form", {"key": api_key}),
+            ("post_json", {"key": api_key}),
+            ("get", {"key": api_key}),
+            ("post_form", {"api_key": api_key}),
+        )
+        url = f"{base}/auth.php"
         last = "нет ответа"
-        for path in self._AUTH_PATHS:
+        for mode, fields in attempts:
             try:
-                resp = await client.post(f"{base}/{path}", data={"api_key": api_key})
+                if mode == "post_json":
+                    resp = await client.post(url, json=fields)
+                elif mode == "get":
+                    resp = await client.get(url, params=fields)
+                else:
+                    resp = await client.post(url, data=fields)
             except httpx.HTTPError as e:
-                last = f"{path}: сеть/HTTP {e}"
-                logger.info("Hostkey auth %s: %s", path, last)
+                last = f"{mode}: сеть/HTTP {e}"
+                logger.info("Hostkey auth %s", last)
                 continue
             token = self._extract_token(resp)
             if token:
                 return token
-            last = f"{path}: HTTP {resp.status_code}, тело {resp.text[:200]!r}"
-            logger.info("Hostkey auth %s не дал токен: %s", path, last)
+            last = f"{mode} ({','.join(fields)}): HTTP {resp.status_code}, тело {resp.text[:200]!r}"
+            logger.info("Hostkey auth не дал токен: %s", last)
         raise AdapterError(f"Не удалось получить токен по API-ключу ({last})")
 
     @staticmethod
@@ -72,11 +88,19 @@ class HostkeyAdapter(HosterAdapter):
             if t and "<" not in t and len(t) <= 256:
                 return t
             return None
-        if isinstance(data, dict):
+
+        def _pick(d: Dict[str, Any]) -> Optional[str]:
             return (
-                data.get("token") or data.get("HOSTKEY_TOKEN")
-                or data.get("access_token") or data.get("session")
+                d.get("token") or d.get("HOSTKEY_TOKEN")
+                or d.get("access_token") or d.get("session")
             )
+
+        if isinstance(data, dict):
+            # конверт {"result":-N,"error":...} токена не содержит -> None
+            tok = _pick(data)
+            if not tok and isinstance(data.get("data"), dict):
+                tok = _pick(data["data"])
+            return tok
         if isinstance(data, str):
             return data.strip() or None
         return None
