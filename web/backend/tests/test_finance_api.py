@@ -339,6 +339,8 @@ class TestPanelImport:
         assert len(inserts) == 2
         amounts = sorted(c.args[3] for c in inserts)
         assert amounts == [400.0, 400.0]
+        # paid_at обязан быть datetime.date (asyncpg отвергает str для date-параметра)
+        assert all(isinstance(c.args[2], date) for c in inserts)
 
     @pytest.mark.asyncio
     async def test_skips_existing_node_items_and_duplicate_payments(self, mock_db_acquire):

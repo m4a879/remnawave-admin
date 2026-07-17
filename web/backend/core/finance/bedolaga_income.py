@@ -137,18 +137,20 @@ async def record_daily_deposits(lookback_days: int = 40) -> Dict[str, Any]:
     saved = 0
     async with db_service.acquire() as conn:
         for d, kopeks in by_day.items():
+            # asyncpg для date-параметра требует datetime.date, не строку
+            day = date.fromisoformat(d)
             amount = round(kopeks / 100, 2)
             updated = await conn.execute(
                 f"""UPDATE {FINANCE_PAYMENTS_TABLE}
-                    SET amount = $1 WHERE source = $2 AND paid_at = $3::date""",
-                amount, DEPOSIT_SOURCE, d,
+                    SET amount = $1 WHERE source = $2 AND paid_at = $3""",
+                amount, DEPOSIT_SOURCE, day,
             )
             if "UPDATE 0" in updated:
                 await conn.execute(
                     f"""INSERT INTO {FINANCE_PAYMENTS_TABLE}
                         (item_id, item_name, kind, paid_at, amount, currency, rate_rub, comment, source)
-                        VALUES (NULL, $1, 'income', $2::date, $3, 'RUB', 1, 'Пополнения Bedolaga за день', $4)""",
-                    DEPOSIT_ITEM_NAME, d, amount, DEPOSIT_SOURCE,
+                        VALUES (NULL, $1, 'income', $2, $3, 'RUB', 1, 'Пополнения Bedolaga за день', $4)""",
+                    DEPOSIT_ITEM_NAME, day, amount, DEPOSIT_SOURCE,
                 )
             saved += 1
 
