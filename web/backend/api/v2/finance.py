@@ -351,6 +351,15 @@ async def create_item(
     item = await db_service.create_finance_item(**data.model_dump())
     if not item:
         raise HTTPException(status_code=500, detail="Failed to create item")
+    # Разовые записи не висят в списке регулярных: сразу проводим платёж
+    # (попадает в P&L/платежи) и архивируем — иначе список превращается в
+    # портянку из одноразовых расходов/доходов.
+    if item.get("billing_cycle") == "once":
+        if (item.get("amount") or 0) > 0:
+            await db_service.mark_finance_item_paid(item["id"], paid_at=item.get("next_due_at"))
+        else:
+            await db_service.update_finance_item(item["id"], status="archived")
+        item = await db_service.get_finance_item(item["id"])
     return item
 
 

@@ -135,12 +135,13 @@ function OverviewTab() {
     [summary],
   )
 
-  // Доход за текущий месяц — все источники (пополнения Bedolaga, халтурки,
-  // ручные доходы), берём из P&L-агрегата по ключу YYYY-MM.
-  const monthIncome = useMemo(() => {
+  // Факт текущего месяца из P&L (все источники: пополнения Bedolaga, халтурки,
+  // ручные доходы/расходы, проведённые разовые записи).
+  const thisMonth = useMemo(() => {
     const now = new Date()
     const key = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
-    return (summary?.monthly || []).find((m) => m.month === key)?.income ?? 0
+    const b = (summary?.monthly || []).find((m) => m.month === key)
+    return { income: b?.income ?? 0, expense: b?.expense ?? 0, net: b?.net ?? 0 }
   }, [summary])
 
   if (isError) return <QueryError onRetry={refetch} />
@@ -155,24 +156,24 @@ function OverviewTab() {
           <>
             <KpiCard
               icon={<TrendingDown className="w-5 h-5 text-red-400" />}
-              label={t('finance.recurringExpense')}
-              value={fmtMoney(summary?.recurring.expense || 0, base)}
-              hint={t('finance.perMonth')}
+              label={t('finance.monthExpense')}
+              value={fmtMoney(thisMonth.expense, base)}
+              hint={t('finance.thisMonth')}
               tone="red"
             />
             <KpiCard
               icon={<TrendingUp className="w-5 h-5 text-green-400" />}
               label={t('finance.monthIncome')}
-              value={fmtMoney(monthIncome, base)}
-              hint={t('finance.monthToDate')}
+              value={fmtMoney(thisMonth.income, base)}
+              hint={t('finance.thisMonth')}
               tone="green"
             />
             <KpiCard
               icon={<Wallet className="w-5 h-5 text-primary-400" />}
-              label={t('finance.recurringNet')}
-              value={fmtMoney(summary?.recurring.net || 0, base)}
-              hint={t('finance.perMonth')}
-              tone={(summary?.recurring.net || 0) >= 0 ? 'green' : 'red'}
+              label={t('finance.monthProfit')}
+              value={fmtMoney(thisMonth.net, base)}
+              hint={t('finance.thisMonth')}
+              tone={thisMonth.net >= 0 ? 'green' : 'red'}
             />
           </>
         )}
@@ -631,13 +632,11 @@ function ItemsTab({ canCreate, canEdit, canDelete }: { canCreate: boolean; canEd
                 </SelectContent>
               </Select>
             </div>
-            {form.billing_cycle !== 'once' && (
-              <div>
-                <Label>{t('finance.field.nextDue')}</Label>
-                <Input type="date" value={form.next_due_at || ''}
-                  onChange={(e) => setForm({ ...form, next_due_at: e.target.value || null })} />
-              </div>
-            )}
+            <div>
+              <Label>{form.billing_cycle === 'once' ? t('finance.field.paymentDate') : t('finance.field.nextDue')}</Label>
+              <Input type="date" value={form.next_due_at || ''}
+                onChange={(e) => setForm({ ...form, next_due_at: e.target.value || null })} />
+            </div>
             <div className="col-span-2">
               <Label>{t('finance.field.url')}</Label>
               <Input value={form.url || ''} placeholder="https://" onChange={(e) => setForm({ ...form, url: e.target.value || null })} />

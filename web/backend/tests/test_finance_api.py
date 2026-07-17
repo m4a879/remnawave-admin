@@ -95,6 +95,25 @@ class TestFinanceApi:
         assert resp.status_code == 422
 
     @pytest.mark.asyncio
+    async def test_create_once_item_records_payment_and_archives(self, client):
+        created = {"id": 7, "billing_cycle": "once", "amount": 500.0, "next_due_at": "2026-07-18"}
+        archived = {"id": 7, "billing_cycle": "once", "status": "archived", "amount": 500.0}
+        db = AsyncMock()
+        db.create_finance_item = AsyncMock(return_value=created)
+        db.mark_finance_item_paid = AsyncMock()
+        db.get_finance_item = AsyncMock(return_value=archived)
+        with patch("web.backend.api.v2.finance.db_service", db):
+            resp = await client.post("/api/v2/finance/items", json={
+                "name": "Халтурка", "kind": "income", "billing_cycle": "once",
+                "amount": 500, "next_due_at": "2026-07-18",
+            })
+        assert resp.status_code == 200
+        # разовая запись сразу проведена платежом (на дату next_due_at) и архивирована
+        db.mark_finance_item_paid.assert_awaited_once()
+        assert db.mark_finance_item_paid.await_args.kwargs.get("paid_at") == "2026-07-18"
+        assert resp.json()["status"] == "archived"
+
+    @pytest.mark.asyncio
     async def test_mark_paid_404_on_missing(self, client):
         db = AsyncMock()
         db.mark_finance_item_paid = AsyncMock(return_value=None)
