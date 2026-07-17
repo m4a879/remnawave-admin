@@ -150,6 +150,44 @@ async def test_hwid_cross_account_creates_violation():
 
 
 @pytest.mark.asyncio
+async def test_hwid_mass_cross_account_hard_blocks():
+    """7 разных аккаунтов на одном HWID >= порога violations_hard_block_hwid_accounts (5)
+    -> extreme abuse, score=100, hard_block (раньше потолком был floor 80 = temp_block,
+    и автоблок не срабатывал никогда)."""
+    geo_map = {"1.1.1.1": meta("1.1.1.1", country_code="RU", asn=1, asn_org="ISP",
+                               connection_type="residential")}
+    shared = [{
+        "hwid": "HW1", "self_telegram_id": 100,
+        "other_users": [{"uuid": f"U{i}", "telegram_id": 200 + i, "username": f"tg{i}", "status": "DISABLED"}
+                        for i in range(1, 7)],
+    }]
+    det = make_detector(geo_map, recent_violations=0)
+    res = await run_check(det, [conn("1.1.1.1", 60)], shared=shared)
+    assert res.breakdown["hwid"].max_accounts_per_hwid == 7
+    assert res.total == 100.0
+    assert res.recommended_action.value == "hard_block"
+    assert any("аккаунтов на одном HWID" in r for r in res.reasons)
+
+
+@pytest.mark.asyncio
+async def test_hwid_below_hard_block_accounts_stays_temp_block():
+    """4 аккаунта на HWID — выше порога анализатора (нарушение есть), но ниже порога
+    жёсткой блокировки (5): floor 80, temp_block, автоблока нет."""
+    geo_map = {"1.1.1.1": meta("1.1.1.1", country_code="RU", asn=1, asn_org="ISP",
+                               connection_type="residential")}
+    shared = [{
+        "hwid": "HW1", "self_telegram_id": 100,
+        "other_users": [{"uuid": f"U{i}", "telegram_id": 200 + i, "username": f"tg{i}", "status": "ACTIVE"}
+                        for i in range(1, 4)],
+    }]
+    det = make_detector(geo_map, recent_violations=0)
+    res = await run_check(det, [conn("1.1.1.1", 60)], shared=shared)
+    assert res.breakdown["hwid"].max_accounts_per_hwid == 4
+    assert 80.0 <= res.total < 95.0
+    assert res.recommended_action.value != "hard_block"
+
+
+@pytest.mark.asyncio
 async def test_hwid_multitariff_creates_violation():
     """C2: один telegram_id с 11 подписками на 1 HWID -> per_account_abuse, нарушение.
     other_accounts_count=0, поэтому раньше floor не срабатывал и нарушения не было."""

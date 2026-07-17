@@ -3367,6 +3367,10 @@
         "label": "🚫 Hard block: max devices",
         "description": "Number of unique device fingerprints to trigger a hard block"
       },
+      "violations_hard_block_hwid_accounts": {
+        "label": "🚫 Hard block: accounts on one HWID",
+        "description": "How many distinct accounts on a single device (HWID) counts as mass trial abuse and triggers a hard block. Subscriptions of the same telegram_id count as one account. 0 = disabled"
+      },
       "violations_hard_block_hwid_matches": {
         "label": "🚫 Hard block: max HWID matches",
         "description": "Number of matching HWIDs (same model) to trigger a hard block"

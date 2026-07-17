@@ -459,6 +459,18 @@ class IntelligentViolationDetector:
                     f"Массовый HWID абьюз: {hwid_score.shared_hwids_count} совпадающих HWID (порог: {hb_hwid})"
                 )
 
+            # 5) Много разных аккаунтов на ОДНОМ устройстве (HWID) — триальный абьюз.
+            # Проверка №4 меряет число общих HWID-значений и для «1 телефон × N аккаунтов»
+            # всегда даёт 1 — до неё такой абьюз не дотягивался никогда, а floor 80
+            # (temp_block) не доходит до автоблока. Подписки одного telegram_id
+            # сгруппированы анализатором в один аккаунт, мультитариф не задевает.
+            hb_hwid_accounts = config_service.get("violations_hard_block_hwid_accounts", 5)
+            hwid_accounts = getattr(hwid_score, 'max_accounts_per_hwid', 1)
+            if hb_hwid_accounts > 0 and hwid_accounts >= hb_hwid_accounts:
+                extreme_abuse_reasons.append(
+                    f"Массовый кросс-аккаунт: {hwid_accounts} аккаунтов на одном HWID (порог: {hb_hwid_accounts})"
+                )
+
             if extreme_abuse_reasons:
                 raw_score = 100.0
                 all_reasons_extra = extreme_abuse_reasons  # Will be added below

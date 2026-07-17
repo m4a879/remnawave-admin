@@ -569,13 +569,13 @@ async def lifespan(app: FastAPI):
                     # юзеров с активными подключениями СЕЙЧАС, поэтому кросс-аккаунт HWID у оффлайн-
                     # абузеров не ловится. Этот цикл периодически ставит юзеров с общими HWID в очередь.
                     async def _hwid_scan_loop():
-                        from web.backend.api.v2.collector import _enqueue_violation_users
+                        from web.backend.api.v2.collector import _enqueue_violation_users, _shared_hwid_user_uuids
                         await asyncio.sleep(600)
                         while True:
                             try:
                                 if config_service.get("violations_enabled", True) and config_service.get("violations_analyzer_hwid", True):
-                                    rows = await db_service.get_shared_hwids(min_users=2, limit=1000)
-                                    uuids = {r["user_uuid"] for r in rows if r.get("user_uuid")}
+                                    groups = await db_service.get_shared_hwids(min_users=2, limit=1000)
+                                    uuids = _shared_hwid_user_uuids(groups)
                                     if uuids:
                                         _enqueue_violation_users(uuids)
                                         logger.info("HWID scan: %d users sharing HWIDs enqueued for violation check", len(uuids))

@@ -737,6 +737,16 @@ DEFAULT_CONFIG_DEFINITIONS: List[Dict[str, Any]] = [
         "sort_order": 23,
     },
     {
+        "key": "violations_hard_block_hwid_accounts",
+        "value_type": "int",
+        "category": "violations",
+        "subcategory": "hard_block",
+        "display_name": "Жёсткая блокировка: аккаунтов на одном HWID",
+        "description": "Сколько разных аккаунтов на одном устройстве (HWID) считается массовым триальным абьюзом и даёт жёсткую блокировку. Подписки одного telegram_id считаются одним аккаунтом. 0 = отключено",
+        "default_value": "5",
+        "sort_order": 24,
+    },
+    {
         "key": "violations_trial_tags",
         "value_type": "string",
         "category": "violations",

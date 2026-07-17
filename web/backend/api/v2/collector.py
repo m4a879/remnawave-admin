@@ -126,6 +126,16 @@ def _enqueue_violation_users(user_uuids: set):
     if _violation_worker_task is None or _violation_worker_task.done():
         _violation_worker_task = asyncio.create_task(_violation_worker())
 
+
+def _shared_hwid_user_uuids(groups: list) -> set:
+    """UUID всех юзеров из групп get_shared_hwids() (форма: {hwid, users: [{uuid, ...}]})."""
+    return {
+        u["uuid"]
+        for g in groups or []
+        for u in (g.get("users") or [])
+        if u.get("uuid")
+    }
+
 # ── Generic background task helper (for torrent etc.) ──────
 _background_tasks: set = set()
 _MAX_BACKGROUND_TASKS = 20
