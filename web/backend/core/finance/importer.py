@@ -3,7 +3,8 @@
 Переносит провайдеров, биллинг-ноды (как finance_items категории «Ноды») и
 историю платежей. Идемпотентен: провайдеры апсертятся по имени, записи по
 node_uuid/имени не дублируются, платежи проверяются по (имя, дата, сумма).
-Суммы панели безвалютные — импортируются в базовой валюте отчётов.
+Суммы панели безвалютные — валюту выбирает пользователь (по умолчанию USD);
+повторный импорт перетегирует ранее импортированные платежи в новую валюту.
 """
 import logging
 from datetime import datetime, date
@@ -27,15 +28,19 @@ def _parse_date_obj(value: Optional[str]) -> Optional[date]:
         return None
 
 
-async def import_from_panel() -> Dict[str, Any]:
-    """Импортировать провайдеров, биллинг-ноды и историю из Panel API."""
+async def import_from_panel(currency: str = "USD") -> Dict[str, Any]:
+    """Импортировать провайдеров, биллинг-ноды и историю из Panel API.
+
+    currency — валюта безвалютных панельных сумм (панель считает в у.е.,
+    у большинства хостеров это USD). Ранее импортированные платежи с другой
+    валютой перетегируются, курс берётся текущий из finance_rates.
+    """
     from shared.api_client import api_client
     from shared.database import db_service
-    from shared.config_service import config_service
     from shared.db_schema import FINANCE_PAYMENTS_TABLE
 
-    base_currency = str(config_service.get("finance_base_currency", "RUB") or "RUB").upper()
-    result = {"providers": 0, "items": 0, "payments": 0, "skipped": 0, "errors": []}
+    currency = (currency or "USD").upper()
+    result = {"providers": 0, "items": 0, "payments": 0, "retagged": 0, "skipped": 0, "errors": []}
 
     # ── Провайдеры ──
     provider_map: Dict[str, int] = {}  # panel uuid -> наш id
@@ -88,7 +93,7 @@ async def import_from_panel() -> Dict[str, Any]:
                 category_id=nodes_category_id,
                 provider_id=provider_map.get(provider_uuid),
                 node_uuid=node_uuid,
-                currency=base_currency,
+                currency=currency,
                 amount=0.0,  # панель не хранит сумму по ноде — заполняется руками
                 billing_cycle="monthly",
                 next_due_at=_parse_date(bn.get("nextBillingAt")),
@@ -101,8 +106,26 @@ async def import_from_panel() -> Dict[str, Any]:
 
     # ── История платежей ──
     try:
+        # Курс выбранной валюты должен существовать до вставки/перетега
+        rates = {r["currency"] for r in (await db_service.get_finance_rates() or [])}
+        if currency not in rates:
+            from web.backend.core.finance.rates import update_rates
+            await update_rates([currency])
+
         resp = (await api_client.get_infra_billing_history(use_cache=False)).get("response", {})
         async with db_service.acquire() as conn:
+            # Ранее импортированные платежи в другой валюте -> перетег
+            retag = await conn.execute(
+                f"""UPDATE {FINANCE_PAYMENTS_TABLE}
+                    SET currency = $1,
+                        rate_rub = (SELECT rate_rub FROM finance_rates WHERE currency = $1)
+                    WHERE source = 'import' AND currency <> $1""",
+                currency,
+            )
+            try:
+                result["retagged"] = int(str(retag).split()[-1])
+            except (ValueError, IndexError, TypeError):
+                pass
             for rec in (resp.get("records") or []):
                 provider_name = (rec.get("provider") or {}).get("name") or "Панельный биллинг"
                 amount = round(float(rec.get("amount") or 0), 2)
@@ -124,7 +147,7 @@ async def import_from_panel() -> Dict[str, Any]:
                         VALUES (NULL, $1, 'expense', $2, $3, $4,
                                 (SELECT rate_rub FROM finance_rates WHERE currency = $4),
                                 'Импорт из панельного биллинга', 'import')""",
-                    provider_name, paid_at, amount, base_currency,
+                    provider_name, paid_at, amount, currency,
                 )
                 result["payments"] += 1
     except Exception as e:

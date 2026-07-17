@@ -4,8 +4,9 @@
 расходов/доходов с валютами и циклами, платежи с фиксацией курса, курсы
 валют, сводка P&L и импорт данных из панели.
 """
+import json
 import logging
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field, field_validator
@@ -164,6 +165,30 @@ class PaymentCreate(BaseModel):
 class RateUpdate(BaseModel):
     rate_rub: float = Field(gt=0)
     is_manual: bool = True
+
+
+class AccountCreate(BaseModel):
+    provider_id: int
+    adapter: str = Field(min_length=1, max_length=50)
+    base_url: Optional[str] = Field(default=None, max_length=500)
+    credentials: Dict[str, str]
+    auto_sync: bool = True
+    low_balance_threshold: Optional[float] = Field(default=None, ge=0)
+
+
+class AccountUpdate(BaseModel):
+    base_url: Optional[str] = Field(default=None, max_length=500)
+    credentials: Optional[Dict[str, str]] = None  # None = не трогать сохранённые
+    auto_sync: Optional[bool] = None
+    low_balance_threshold: Optional[float] = Field(default=None, ge=0)
+
+
+class AccountTest(BaseModel):
+    """Тест подключения: либо account_id (сохранённые креды), либо полный набор."""
+    account_id: Optional[int] = None
+    adapter: Optional[str] = None
+    base_url: Optional[str] = Field(default=None, max_length=500)
+    credentials: Optional[Dict[str, str]] = None
 
 
 # ── Summary / Upcoming ───────────────────────────────────────────
@@ -461,14 +486,159 @@ async def refresh_rates(admin: AdminUser = Depends(require_permission("finance",
     return {"updated": updated, "items": await db_service.get_finance_rates()}
 
 
+# ── Provider API accounts (автосинк хостеров) ────────────────────
+
+
+@router.get("/adapters")
+async def list_hoster_adapters(admin: AdminUser = Depends(require_permission("finance", "view"))):
+    """Реестр адаптеров с описанием полей — для динамической формы подключения."""
+    from web.backend.core.finance.adapters import list_adapters
+    return {"items": list_adapters()}
+
+
+@router.get("/accounts")
+async def list_accounts(admin: AdminUser = Depends(require_permission("finance", "view"))):
+    return {"items": await db_service.list_finance_accounts()}
+
+
+@router.post("/accounts")
+async def create_account(
+    data: AccountCreate,
+    admin: AdminUser = Depends(require_permission("finance", "create")),
+):
+    """Подключить API хостера к провайдеру (повтор по тому же провайдеру — перезапись)."""
+    from web.backend.core.finance.adapters import AdapterError, get_adapter
+    from web.backend.core.crypto import encrypt_field
+
+    try:
+        adapter = get_adapter(data.adapter)
+        adapter.validate_credentials(data.credentials)
+    except AdapterError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    if adapter.needs_base_url and not (data.base_url or "").strip():
+        raise HTTPException(status_code=400, detail="Не указан адрес биллинга (base_url)")
+
+    account = await db_service.create_finance_account(
+        provider_id=data.provider_id,
+        adapter=data.adapter,
+        credentials=encrypt_field(json.dumps(data.credentials, ensure_ascii=False)),
+        base_url=(data.base_url or "").strip().rstrip("/") or None,
+        auto_sync=data.auto_sync,
+        low_balance_threshold=data.low_balance_threshold,
+    )
+    if not account:
+        raise HTTPException(status_code=500, detail="Failed to create account")
+    return account
+
+
+@router.patch("/accounts/{account_id}")
+async def update_account(
+    account_id: int,
+    data: AccountUpdate,
+    admin: AdminUser = Depends(require_permission("finance", "edit")),
+):
+    from web.backend.core.crypto import encrypt_field
+
+    fields = data.model_dump(exclude_unset=True)
+    if fields.get("credentials") is not None:
+        fields["credentials"] = encrypt_field(json.dumps(fields["credentials"], ensure_ascii=False))
+    elif "credentials" in fields:
+        fields.pop("credentials")
+    if "base_url" in fields and fields["base_url"]:
+        fields["base_url"] = fields["base_url"].strip().rstrip("/")
+    account = await db_service.update_finance_account(account_id, **fields)
+    if not account:
+        raise HTTPException(status_code=404, detail="Account not found")
+    return account
+
+
+@router.delete("/accounts/{account_id}")
+async def delete_account(
+    account_id: int,
+    admin: AdminUser = Depends(require_permission("finance", "delete")),
+):
+    ok = await db_service.delete_finance_account(account_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Account not found")
+    return {"status": "ok"}
+
+
+@router.post("/accounts/test")
+async def test_account(
+    data: AccountTest,
+    admin: AdminUser = Depends(require_permission("finance", "edit")),
+):
+    """Проверка подключения до/после сохранения. Возвращает баланс и число услуг."""
+    from web.backend.core.finance.adapters import AdapterError, get_adapter
+    from web.backend.core.crypto import decrypt_field
+
+    adapter_slug, base_url, credentials = data.adapter, data.base_url, data.credentials
+    if data.account_id and not credentials:
+        account = await db_service.get_finance_account(data.account_id)
+        if not account:
+            raise HTTPException(status_code=404, detail="Account not found")
+        adapter_slug = adapter_slug or account["adapter"]
+        base_url = base_url or account.get("base_url")
+        encrypted = await db_service.get_finance_account_credentials(data.account_id)
+        credentials = json.loads(decrypt_field(encrypted or ""))
+    if not adapter_slug or credentials is None:
+        raise HTTPException(status_code=400, detail="adapter и credentials обязательны (или account_id)")
+
+    try:
+        adapter = get_adapter(adapter_slug)
+        adapter.validate_credentials(credentials)
+        result = await adapter.test((base_url or "").strip().rstrip("/") or None, credentials)
+    except AdapterError as e:
+        return {"status": "error", "error": str(e)}
+    except Exception as e:
+        logger.warning("Finance account test failed: %s", e)
+        return {"status": "error", "error": str(e)}
+    return {
+        "status": "ok",
+        "balance": result.balance,
+        "currency": result.currency,
+        "services": [s.to_dict() for s in result.services],
+    }
+
+
+@router.post("/accounts/{account_id}/sync")
+async def sync_account_now(
+    account_id: int,
+    admin: AdminUser = Depends(require_permission("finance", "edit")),
+):
+    """Синк аккаунта сейчас: баланс, снапшот, услуги, даты списаний."""
+    from web.backend.core.finance.sync import sync_account
+    result = await sync_account(account_id)
+    if result.get("error") == "Account not found":
+        raise HTTPException(status_code=404, detail="Account not found")
+    return result
+
+
+@router.get("/snapshots")
+async def balance_snapshots(
+    days: int = Query(90, ge=1, le=730),
+    account_id: Optional[int] = Query(None),
+    admin: AdminUser = Depends(require_permission("finance", "view")),
+):
+    """Дневные снапшоты балансов для тренда."""
+    return {"items": await db_service.list_finance_balance_snapshots(days=days, account_id=account_id)}
+
+
 # ── Import from panel ────────────────────────────────────────────
 
 
 @router.post("/import-panel")
-async def import_panel(admin: AdminUser = Depends(require_permission("finance", "create"))):
-    """Одноразовый импорт провайдеров/биллинг-нод/истории из панельного infra-billing."""
+async def import_panel(
+    currency: str = Query("USD", min_length=3, max_length=8),
+    admin: AdminUser = Depends(require_permission("finance", "create")),
+):
+    """Одноразовый импорт провайдеров/биллинг-нод/истории из панельного infra-billing.
+
+    Панельные суммы безвалютные — импортируются в выбранной валюте (default USD).
+    Повторный импорт перетегирует ранее импортированные платежи.
+    """
     from web.backend.core.finance.importer import import_from_panel
-    return await import_from_panel()
+    return await import_from_panel(currency=currency)
 
 
 # ── Bedolaga income ──────────────────────────────────────────────

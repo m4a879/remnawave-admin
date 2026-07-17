@@ -13,6 +13,7 @@ from shared.db.violations import ViolationsMixin
 from shared.db.resources import ResourcesMixin
 from shared.db.network import NetworkMixin
 from shared.db.finance import FinanceMixin
+from shared.db.finance_accounts import FinanceAccountsMixin
 
 
 class DatabaseService(
@@ -23,6 +24,7 @@ class DatabaseService(
     ResourcesMixin,
     NetworkMixin,
     FinanceMixin,
+    FinanceAccountsMixin,
     DatabaseBase,
 ):
     """Async database service assembled from mixin modules."""

@@ -1,0 +1,177 @@
+"""ISPsystem BILLmanager 5/6 — клиентский API.
+
+Покрывает инстансы BILLmanager (waicore, h2.nexus, 1cent.host и т.п.).
+Запросы: {base}/billmgr?func=<f>&out=json&authinfo=user:pass
+- баланс:  func=subaccount → balance, currency
+- услуги:  func=item        → name, cost, expiredate, status, pricelist
+
+Ответ out=json оборачивает значения как {"$": "..."}, списки — в doc.elem.
+Ошибка — наличие doc.error (тип в error.$type, текст в error.msg.$).
+"""
+import logging
+from typing import Any, Dict, List, Optional
+
+import httpx
+
+from web.backend.core.finance.adapters.base import (
+    DEFAULT_TIMEOUT, AdapterError, AdapterField, HosterAdapter, Service, SyncResult,
+    register_adapter,
+)
+
+logger = logging.getLogger(__name__)
+
+# Коды статусов услуг BILLmanager (item.status)
+_STATUS = {
+    "1": "ordered", "2": "active", "3": "active", "4": "stopped",
+    "5": "deleted", "6": "processing",
+}
+
+
+def _unwrap(v: Any) -> Any:
+    """{"$": x} -> x; остальное как есть."""
+    if isinstance(v, dict) and "$" in v and len(v) == 1:
+        return v["$"]
+    return v
+
+
+def _field(record: Dict[str, Any], *keys: str) -> Optional[str]:
+    for k in keys:
+        if k in record:
+            val = _unwrap(record[k])
+            if val not in (None, ""):
+                return str(val)
+    return None
+
+
+def _num(v: Optional[str]) -> Optional[float]:
+    if v is None:
+        return None
+    try:
+        return round(float(str(v).replace(",", ".").split()[0]), 2)
+    except (ValueError, IndexError):
+        return None
+
+
+def _rows(doc: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """doc.elem может быть списком, одиночным объектом или отсутствовать."""
+    elem = doc.get("elem")
+    if isinstance(elem, list):
+        return [e for e in elem if isinstance(e, dict)]
+    if isinstance(elem, dict):
+        return [elem]
+    return []
+
+
+def _normalize_date(v: Optional[str]) -> Optional[str]:
+    """BILLmanager отдаёт даты как YYYY-MM-DD; берём только дату."""
+    if not v:
+        return None
+    v = str(v).strip().split(" ")[0]
+    parts = v.split("-")
+    if len(parts) == 3 and len(parts[0]) == 4:
+        return v
+    return None
+
+
+@register_adapter
+class BillmanagerAdapter(HosterAdapter):
+    slug = "billmanager"
+    title = "ISPsystem BILLmanager"
+    description = "BILLmanager 5/6: Waicore, h2.nexus, 1cent.host и другие инстансы"
+    needs_base_url = True
+    fields = [
+        AdapterField("username", "Логин (email)", type="text",
+                     placeholder="client@mail.ru"),
+        AdapterField("password", "Пароль", type="password",
+                     help="Если включён 2FA или ограничение authinfo по IP — авторизация может не пройти."),
+    ]
+
+    def _endpoint(self, base_url: Optional[str]) -> str:
+        base = (base_url or "").strip().rstrip("/")
+        if not base:
+            raise AdapterError("Не указан адрес биллинга")
+        # base_url может быть https://host, https://host/billmgr или .../billmgr?func=logon
+        base = base.split("?")[0].rstrip("/")
+        if not base.endswith("/billmgr"):
+            base = base + "/billmgr"
+        return base
+
+    async def _call(self, client: httpx.AsyncClient, endpoint: str, func: str,
+                    credentials: Dict[str, str]) -> Dict[str, Any]:
+        params = {
+            "func": func, "out": "json",
+            "authinfo": f"{credentials.get('username', '')}:{credentials.get('password', '')}",
+        }
+        try:
+            resp = await client.get(endpoint, params=params)
+            resp.raise_for_status()
+            data = resp.json()
+        except httpx.HTTPError as e:
+            raise AdapterError(f"Сеть/HTTP: {e}")
+        except ValueError:
+            raise AdapterError("Биллинг вернул не JSON (проверьте адрес)")
+
+        doc = data.get("doc", data) if isinstance(data, dict) else {}
+        err = doc.get("error") if isinstance(doc, dict) else None
+        if err:
+            etype = _unwrap(err.get("$type")) or _unwrap(err.get("type"))
+            detail = err.get("detail") if isinstance(err.get("detail"), dict) else {}
+            msg = _field(err, "msg") or _field(detail, "$")
+            if etype in ("auth", "authtype") or (msg and "парол" in str(msg).lower()):
+                raise AdapterError(f"Ошибка авторизации: {msg or etype}")
+            if etype == "access":
+                raise AdapterError(f"Недостаточно прав: {msg or 'функция недоступна'}")
+            raise AdapterError(str(msg or etype or "Ошибка BILLmanager"))
+        return doc if isinstance(doc, dict) else {}
+
+    async def fetch(self, base_url: Optional[str], credentials: Dict[str, str]) -> SyncResult:
+        endpoint = self._endpoint(base_url)
+        async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT, follow_redirects=True) as client:
+            balance, currency = await self._fetch_balance(client, endpoint, credentials)
+            services = await self._fetch_services(client, endpoint, credentials)
+        return SyncResult(balance=balance, currency=currency, services=services)
+
+    async def _fetch_balance(self, client, endpoint, credentials):
+        doc = await self._call(client, endpoint, "subaccount", credentials)
+        rows = _rows(doc)
+        # баланс может лежать в записи subaccount или прямо в doc
+        candidates = rows or ([doc] if doc else [])
+        for rec in candidates:
+            bal = _num(_field(rec, "balance"))
+            if bal is not None:
+                cur = _field(rec, "currency", "currency_iso", "iso") or _field(rec, "money_currency")
+                return bal, (cur.upper() if cur else None)
+        # запасной раздел
+        try:
+            doc2 = await self._call(client, endpoint, "account", credentials)
+            for rec in (_rows(doc2) or [doc2]):
+                bal = _num(_field(rec, "balance"))
+                if bal is not None:
+                    cur = _field(rec, "currency", "iso")
+                    return bal, (cur.upper() if cur else None)
+        except AdapterError:
+            pass
+        return None, None
+
+    async def _fetch_services(self, client, endpoint, credentials) -> List[Service]:
+        try:
+            doc = await self._call(client, endpoint, "item", credentials)
+        except AdapterError as e:
+            logger.info("BILLmanager func=item failed (%s), услуги пропущены", e)
+            return []
+        services: List[Service] = []
+        for rec in _rows(doc):
+            name = _field(rec, "name", "domain", "pricelist")
+            if not name:
+                continue
+            status_raw = _field(rec, "status")
+            services.append(Service(
+                name=name,
+                status=_STATUS.get(status_raw or "", status_raw),
+                price=_num(_field(rec, "cost", "item_cost")),
+                currency=None,
+                period=_field(rec, "period"),
+                next_due_at=_normalize_date(_field(rec, "expiredate", "expire")),
+                external_id=_field(rec, "id"),
+            ))
+        return services

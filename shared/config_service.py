@@ -299,6 +299,33 @@ DEFAULT_CONFIG_DEFINITIONS: List[Dict[str, Any]] = [
         "default_value": "7,3,1",
         "sort_order": 4,
     },
+    {
+        "key": "finance_autosync_enabled",
+        "value_type": "bool",
+        "category": "finance",
+        "display_name": "Автосинк API хостеров",
+        "description": "Периодически снимать баланс и услуги с подключённых API хостеров",
+        "default_value": "true",
+        "sort_order": 5,
+    },
+    {
+        "key": "finance_autosync_interval_hours",
+        "value_type": "int",
+        "category": "finance",
+        "display_name": "Интервал автосинка (часы)",
+        "description": "Как часто опрашивать API хостеров (баланс, услуги, даты списаний)",
+        "default_value": "6",
+        "sort_order": 6,
+    },
+    {
+        "key": "finance_autosync_update_due_dates",
+        "value_type": "bool",
+        "category": "finance",
+        "display_name": "Подтягивать даты списаний",
+        "description": "Обновлять next_due_at записей по данным хостера (матч по имени услуги в рамках провайдера)",
+        "default_value": "true",
+        "sort_order": 7,
+    },
 
     # === SYNC ===
     {

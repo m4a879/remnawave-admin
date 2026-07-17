@@ -248,6 +248,7 @@ class TestPanelImport:
         db.list_finance_items = AsyncMock(return_value=[])
         db.create_finance_item = AsyncMock(return_value={"id": 21})
         db.get_node_by_uuid = AsyncMock(return_value={"name": "de-1"})
+        db.get_finance_rates = AsyncMock(return_value=[{"currency": "USD", "rate_rub": 90.0}])
 
         api = AsyncMock()
         api.get_infra_providers = AsyncMock(return_value={"response": {"providers": [
@@ -273,6 +274,8 @@ class TestPanelImport:
         item_kwargs = db.create_finance_item.await_args.kwargs
         assert item_kwargs["name"] == "de-1"
         assert item_kwargs["next_due_at"] == "2026-08-01"
+        # безвалютные панельные суммы импортируются в валюте по умолчанию (USD)
+        assert item_kwargs["currency"] == "USD"
         # paid_at в INSERT платежа — datetime.date (asyncpg отвергает str для date-параметра)
         from datetime import date as _date
         insert_call = next(c for c in mock_conn.execute.await_args_list if "INSERT INTO" in c.args[0])
@@ -345,6 +348,7 @@ class TestPanelImport:
             {"node_uuid": "3f339d94-0000-0000-0000-000000000001", "name": "de-1"},
         ])
         db.create_finance_item = AsyncMock()
+        db.get_finance_rates = AsyncMock(return_value=[{"currency": "USD", "rate_rub": 90.0}])
 
         api = AsyncMock()
         api.get_infra_providers = AsyncMock(return_value={"response": {"providers": []}})

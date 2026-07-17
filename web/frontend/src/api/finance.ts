@@ -88,6 +88,66 @@ export interface ItemPayload {
   status?: string
 }
 
+export interface AdapterField {
+  name: string
+  label: string
+  type: 'text' | 'password' | 'url'
+  required: boolean
+  placeholder: string | null
+  help: string | null
+}
+
+export interface HosterAdapter {
+  slug: string
+  title: string
+  description: string
+  needs_base_url: boolean
+  fields: AdapterField[]
+}
+
+export interface FinanceService {
+  name: string
+  status: string | null
+  price: number | null
+  currency: string | null
+  period: string | null
+  next_due_at: string | null
+  external_id: string | null
+}
+
+export interface FinanceAccount {
+  id: number
+  provider_id: number
+  provider_name: string
+  provider_url: string | null
+  adapter: string
+  base_url: string | null
+  auto_sync: boolean
+  low_balance_threshold: number | null
+  balance: number | null
+  balance_currency: string | null
+  services: FinanceService[] | null
+  last_sync_at: string | null
+  last_sync_status: 'ok' | 'error' | null
+  last_sync_error: string | null
+}
+
+export interface BalanceSnapshot {
+  account_id: number
+  snapshot_date: string
+  balance: number
+  currency: string
+  provider_name: string
+}
+
+export interface AccountTestResult {
+  status: 'ok' | 'error'
+  error?: string
+  balance?: number | null
+  currency?: string | null
+  services?: FinanceService[]
+}
+
 export const financeApi = {
   getSummary: async (months = 6): Promise<FinanceSummary> =>
     (await client.get('/finance/summary', { params: { months } })).data,
@@ -157,8 +217,42 @@ export const financeApi = {
   refreshRates: async (): Promise<{ updated: number; items: FinanceRate[] }> =>
     (await client.post('/finance/rates/refresh')).data,
 
-  importFromPanel: async (): Promise<{ providers: number; items: number; payments: number; skipped: number; errors: string[] }> =>
-    (await client.post('/finance/import-panel')).data,
+  importFromPanel: async (currency = 'USD'): Promise<{ providers: number; items: number; payments: number; retagged: number; skipped: number; errors: string[] }> =>
+    (await client.post('/finance/import-panel', null, { params: { currency } })).data,
+
+  listAdapters: async (): Promise<{ items: HosterAdapter[] }> =>
+    (await client.get('/finance/adapters')).data,
+
+  listAccounts: async (): Promise<{ items: FinanceAccount[] }> =>
+    (await client.get('/finance/accounts')).data,
+
+  createAccount: async (data: {
+    provider_id: number; adapter: string; base_url?: string | null
+    credentials: Record<string, string>; auto_sync?: boolean; low_balance_threshold?: number | null
+  }): Promise<FinanceAccount> =>
+    (await client.post('/finance/accounts', data)).data,
+
+  updateAccount: async (id: number, data: {
+    base_url?: string | null; credentials?: Record<string, string>
+    auto_sync?: boolean; low_balance_threshold?: number | null
+  }): Promise<FinanceAccount> =>
+    (await client.patch(`/finance/accounts/${id}`, data)).data,
+
+  deleteAccount: async (id: number): Promise<void> => {
+    await client.delete(`/finance/accounts/${id}`)
+  },
+
+  testAccount: async (data: {
+    account_id?: number; adapter?: string; base_url?: string | null
+    credentials?: Record<string, string>
+  }): Promise<AccountTestResult> =>
+    (await client.post('/finance/accounts/test', data)).data,
+
+  syncAccount: async (id: number): Promise<{ status: string; error?: string; balance?: number; currency?: string; services?: number; due_dates_updated?: number }> =>
+    (await client.post(`/finance/accounts/${id}/sync`)).data,
+
+  listSnapshots: async (days = 90): Promise<{ items: BalanceSnapshot[] }> =>
+    (await client.get('/finance/snapshots', { params: { days } })).data,
 
   getBedolagaIncome: async (): Promise<BedolagaIncome> =>
     (await client.get('/finance/bedolaga-income')).data,
