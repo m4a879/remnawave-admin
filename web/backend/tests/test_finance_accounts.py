@@ -205,9 +205,10 @@ class TestHostkeyAdapter:
             path = request.url.path
             body = parse_qs(request.content.decode())
             if path.endswith("/auth.php"):
-                # invapi ждёт ключ в `key`; конверт {"result":0,"token":...}
-                if body.get("key"):
-                    return httpx.Response(200, json={"result": 0, "token": "TKN"})
+                # invapi ждёт action=login + key, отвечает access_token
+                action = (body.get("action") or [""])[0]
+                if action == "login" and body.get("key"):
+                    return httpx.Response(200, json={"access_token": "TKN", "role": "client"})
                 return httpx.Response(200, json={"result": -2, "error": "auth: malformed request #1"})
             if path.endswith("/whmcs.php"):
                 action = (body.get("action") or [""])[0]

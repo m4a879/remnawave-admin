@@ -45,15 +45,17 @@ class HostkeyAdapter(HosterAdapter):
     async def _token(self, client: httpx.AsyncClient, base: str, api_key: str) -> str:
         """Обменять API-ключ на сессионный токен.
 
-        invapi/auth.php ждёт ключ в параметре `key` (как в ссылке на панель
-        ?key=...) и отвечает конвертом {"result":0,"token":...} либо
-        {"result":-N,"error":...}. Формат запроса перебираем на случай
-        вариаций инстанса (form/json/GET).
+        invapi/auth.php ждёт action=login + ключ в параметре `key` (как в
+        ссылке на панель ?key=...) и возвращает access_token. Ошибка приходит
+        конвертом {"result":-N,"error":...}. Формат перебираем на случай
+        вариаций инстанса (порядок параметров/имя ключа/метод).
         """
         attempts = (
+            ("post_form", {"action": "login", "key": api_key}),
+            ("post_form", {"action": "login", "api_key": api_key}),
+            ("post_json", {"action": "login", "key": api_key}),
+            ("get", {"action": "login", "key": api_key}),
             ("post_form", {"key": api_key}),
-            ("post_json", {"key": api_key}),
-            ("get", {"key": api_key}),
             ("post_form", {"api_key": api_key}),
         )
         url = f"{base}/auth.php"
