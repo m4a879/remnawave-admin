@@ -3955,7 +3955,7 @@
     "recurringNet": "Net",
     "perMonth": "per month",
     "monthIncome": "Income this month",
-    "monthToDate": "top-ups since the 1st",
+    "monthToDate": "all income since the 1st",
     "moShort": "mo",
     "plByMonth": "P&L by month",
     "expense": "Expenses",
@@ -4027,9 +4027,7 @@
     "bedolagaDeposits": "Balance top-ups",
     "bedolagaProfit": "Profit (per bot)",
     "bedolagaToday": "today",
-    "bedolagaByMethod": "By payment method",
-    "bedolagaImport": "Record {{month}} revenue",
-    "bedolagaImported": "Bedolaga revenue for {{month}}: {{amount}} RUB ({{count}} payments) recorded"
+    "bedolagaByMethod": "By payment method"
   },
   "reports": {
     "title": "Reports",

@@ -3955,7 +3955,7 @@
     "recurringNet": "Чистыми",
     "perMonth": "в месяц",
     "monthIncome": "Доход за месяц",
-    "monthToDate": "пополнения с 1 числа",
+    "monthToDate": "все доходы с 1 числа",
     "moShort": "мес",
     "plByMonth": "P&L по месяцам",
     "expense": "Расходы",
@@ -4027,9 +4027,7 @@
     "bedolagaDeposits": "Пополнения баланса",
     "bedolagaProfit": "Профит (по данным бота)",
     "bedolagaToday": "сегодня",
-    "bedolagaByMethod": "По способам оплаты",
-    "bedolagaImport": "Занести выручку за {{month}}",
-    "bedolagaImported": "Выручка Bedolaga за {{month}}: {{amount}} ₽ ({{count}} платежей) занесена"
+    "bedolagaByMethod": "По способам оплаты"
   },
   "reports": {
     "title": "Отчёты",

@@ -282,38 +282,6 @@ class TestPanelImport:
         assert isinstance(insert_call.args[2], _date)
 
     @pytest.mark.asyncio
-    async def test_bedolaga_month_sums_subscription_and_upserts(self, mock_db_acquire):
-        from web.backend.core.finance import bedolaga_income as bi
-
-        mock_conn, cm = mock_db_acquire
-        mock_conn.fetchval = AsyncMock(return_value=None)  # записи за месяц ещё нет
-        tx_cm = AsyncMock()
-        tx_cm.__aenter__ = AsyncMock(return_value=None)
-        tx_cm.__aexit__ = AsyncMock(return_value=False)
-        mock_conn.transaction = MagicMock(return_value=tx_cm)
-        db = AsyncMock()
-        db.is_connected = True
-        db.acquire = lambda: cm
-
-        client_bd = AsyncMock()
-        # первая страница — 2 платежа по 250 ₽ (25000 коп, знак минус — списание), вторая пустая
-        client_bd.list_transactions = AsyncMock(side_effect=[
-            {"items": [{"amount_kopeks": -25000}, {"amount_kopeks": -25000}]},
-            {"items": []},
-        ])
-        with patch("shared.database.db_service", db), \
-             patch("shared.bedolaga_client.bedolaga_client", client_bd), \
-             patch("web.backend.api.v2.bedolaga.ensure_configured", lambda: None):
-            result = await bi.import_month(2026, 6)
-
-        assert result["amount"] == 500.0
-        assert result["count"] == 2
-        assert result["saved"] is True
-        # INSERT (не UPDATE), kind='income'
-        insert = next(c for c in mock_conn.execute.await_args_list if "INSERT INTO" in c.args[0])
-        assert "'income'" in insert.args[0]
-
-    @pytest.mark.asyncio
     async def test_bedolaga_income_overview_normalizes(self):
         from web.backend.core.finance import bedolaga_income as bi
 
@@ -331,7 +299,6 @@ class TestPanelImport:
         assert ov["total"]["deposit_income"] == 1000.0
         assert ov["total"]["profit"] == 750.0
         assert ov["by_payment_method"]["card"] == 1000.0  # копейки → рубли
-        assert ov["month"]["deposit_income"] == 0.0  # БД не подключена в тесте
 
     def test_pm_amount_shapes(self):
         from web.backend.core.finance.bedolaga_income import _pm_amount

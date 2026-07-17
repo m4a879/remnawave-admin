@@ -86,8 +86,6 @@ function CurrencySelect({ value, onChange }: { value: string; onChange: (v: stri
 function OverviewTab() {
   const { t } = useTranslation()
   const chart = useChartTheme()
-  const qc = useQueryClient()
-  const canCreate = useHasPermission('finance', 'create')
 
   const { data: summary, isLoading, isError, refetch } = useQuery({
     queryKey: ['finance-summary'],
@@ -128,22 +126,6 @@ function OverviewTab() {
     return { rows: Array.from(byDate.values()), providers: Array.from(providers) }
   }, [snapshots])
 
-  // Прошлый закрытый месяц для импорта выручки
-  const prevMonth = useMemo(() => {
-    const now = new Date()
-    const d = new Date(now.getFullYear(), now.getMonth() - 1, 1)
-    return { year: d.getFullYear(), month: d.getMonth() + 1, label: d.toLocaleDateString('ru-RU', { month: 'long', year: 'numeric' }) }
-  }, [])
-  const importBedolagaMut = useMutation({
-    mutationFn: () => financeApi.importBedolagaMonth(prevMonth.year, prevMonth.month),
-    onSuccess: (r) => {
-      toast.success(t('finance.bedolagaImported', { month: r.month, amount: r.amount, count: r.count }))
-      qc.invalidateQueries({ queryKey: ['finance-summary'] })
-      qc.invalidateQueries({ queryKey: ['finance-payments'] })
-    },
-    onError: () => toast.error(t('common.error')),
-  })
-
   const base = summary?.base_currency || 'RUB'
 
   const monthlyChart = useMemo(
@@ -152,6 +134,14 @@ function OverviewTab() {
     })),
     [summary],
   )
+
+  // Доход за текущий месяц — все источники (пополнения Bedolaga, халтурки,
+  // ручные доходы), берём из P&L-агрегата по ключу YYYY-MM.
+  const monthIncome = useMemo(() => {
+    const now = new Date()
+    const key = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
+    return (summary?.monthly || []).find((m) => m.month === key)?.income ?? 0
+  }, [summary])
 
   if (isError) return <QueryError onRetry={refetch} />
 
@@ -172,11 +162,9 @@ function OverviewTab() {
             />
             <KpiCard
               icon={<TrendingUp className="w-5 h-5 text-green-400" />}
-              label={bedolaga ? t('finance.monthIncome') : t('finance.recurringIncome')}
-              value={bedolaga
-                ? fmtMoney(bedolaga.month.deposit_income, 'RUB')
-                : fmtMoney(summary?.recurring.income || 0, base)}
-              hint={bedolaga ? t('finance.monthToDate') : t('finance.perMonth')}
+              label={t('finance.monthIncome')}
+              value={fmtMoney(monthIncome, base)}
+              hint={t('finance.monthToDate')}
               tone="green"
             />
             <KpiCard
@@ -243,22 +231,10 @@ function OverviewTab() {
       {bedolaga && (
         <Card>
           <CardHeader className="pb-2">
-            <div className="flex items-center justify-between flex-wrap gap-2">
-              <div className="flex items-center gap-2">
-                <TrendingUp className="w-5 h-5 text-green-400" />
-                <CardTitle className="text-base">{t('finance.bedolagaIncome')}</CardTitle>
-                <InfoTooltip text={t('finance.bedolagaTooltip')} side="right" />
-              </div>
-              {canCreate && (
-                <Button
-                  size="sm" variant="outline" className="gap-1.5"
-                  onClick={() => importBedolagaMut.mutate()}
-                  disabled={importBedolagaMut.isPending}
-                >
-                  <Download className="w-4 h-4" />
-                  {t('finance.bedolagaImport', { month: prevMonth.label })}
-                </Button>
-              )}
+            <div className="flex items-center gap-2">
+              <TrendingUp className="w-5 h-5 text-green-400" />
+              <CardTitle className="text-base">{t('finance.bedolagaIncome')}</CardTitle>
+              <InfoTooltip text={t('finance.bedolagaTooltip')} side="right" />
             </div>
           </CardHeader>
           <CardContent>

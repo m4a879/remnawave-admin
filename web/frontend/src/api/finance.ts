@@ -256,15 +256,11 @@ export const financeApi = {
 
   getBedolagaIncome: async (): Promise<BedolagaIncome> =>
     (await client.get('/finance/bedolaga-income')).data,
-
-  importBedolagaMonth: async (year: number, month: number): Promise<{ month: string; amount: number; count: number; saved: boolean }> =>
-    (await client.post('/finance/import-bedolaga', null, { params: { year, month } })).data,
 }
 
 export interface BedolagaIncome {
   currency: string
   total: { deposit_income: number; subscription_income: number; profit: number }
   today: { deposit_income: number; transactions_count: number }
-  month: { deposit_income: number }
   by_payment_method: Record<string, number>
 }
