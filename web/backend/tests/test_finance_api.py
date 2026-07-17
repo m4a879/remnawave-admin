@@ -273,6 +273,10 @@ class TestPanelImport:
         item_kwargs = db.create_finance_item.await_args.kwargs
         assert item_kwargs["name"] == "de-1"
         assert item_kwargs["next_due_at"] == "2026-08-01"
+        # paid_at в INSERT платежа — datetime.date (asyncpg отвергает str для date-параметра)
+        from datetime import date as _date
+        insert_call = next(c for c in mock_conn.execute.await_args_list if "INSERT INTO" in c.args[0])
+        assert isinstance(insert_call.args[2], _date)
 
     @pytest.mark.asyncio
     async def test_skips_existing_node_items_and_duplicate_payments(self, mock_db_acquire):

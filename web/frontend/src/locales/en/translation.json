@@ -3000,7 +3000,8 @@
       "mailserver": "📧 Mail Server",
       "security": "🔒 Security",
       "performance": "⚡ Performance",
-      "backup": "💾 Backups"
+      "backup": "💾 Backups",
+      "finance": "💰 Finance"
     },
     "subcategories": {
       "topics": "💬 Notification topics",

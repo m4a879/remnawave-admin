@@ -34,6 +34,7 @@ class ConfigCategory(str, Enum):
     PERFORMANCE = "performance"
     SECURITY = "security"
     BACKUP = "backup"
+    FINANCE = "finance"
 
 
 @dataclass
@@ -1123,17 +1124,6 @@ DEFAULT_CONFIG_DEFINITIONS: List[Dict[str, Any]] = [
         "description": "Через сколько секунд закрывать неиспользуемое соединение в пуле. Требуется перезапуск.",
         "default_value": "300",
         "sort_order": 4,
-    },
-    {
-        "key": "sync_interval_seconds",
-        "value_type": "int",
-        "category": "performance",
-        "subcategory": "intervals",
-        "display_name": "Интервал синхронизации (сек)",
-        "description": "Как часто синхронизировать данные с API панели Remnawave. Меньше = актуальнее данные, но выше нагрузка.",
-        "default_value": "120",
-        "env_var_name": "SYNC_INTERVAL",
-        "sort_order": 10,
     },
     {
         "key": "alert_check_interval",

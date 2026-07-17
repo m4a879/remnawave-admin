@@ -6,17 +6,23 @@ node_uuid/имени не дублируются, платежи проверя�
 Суммы панели безвалютные — импортируются в базовой валюте отчётов.
 """
 import logging
-from datetime import datetime
+from datetime import datetime, date
 from typing import Any, Dict, Optional
 
 logger = logging.getLogger(__name__)
 
 
 def _parse_date(value: Optional[str]) -> Optional[str]:
+    d = _parse_date_obj(value)
+    return d.isoformat() if d else None
+
+
+def _parse_date_obj(value: Optional[str]) -> Optional[date]:
+    """ISO-строка панели -> datetime.date (для asyncpg-параметров типа date)."""
     if not value:
         return None
     try:
-        return datetime.fromisoformat(str(value).replace("Z", "+00:00")).date().isoformat()
+        return datetime.fromisoformat(str(value).replace("Z", "+00:00")).date()
     except (ValueError, TypeError):
         return None
 
@@ -100,13 +106,13 @@ async def import_from_panel() -> Dict[str, Any]:
             for rec in (resp.get("records") or []):
                 provider_name = (rec.get("provider") or {}).get("name") or "Панельный биллинг"
                 amount = round(float(rec.get("amount") or 0), 2)
-                paid_at = _parse_date(rec.get("billedAt"))
+                paid_at = _parse_date_obj(rec.get("billedAt"))
                 if not paid_at or amount <= 0:
                     result["skipped"] += 1
                     continue
                 exists = await conn.fetchval(
                     f"""SELECT 1 FROM {FINANCE_PAYMENTS_TABLE}
-                        WHERE item_name = $1 AND paid_at = $2::date AND amount = $3""",
+                        WHERE item_name = $1 AND paid_at = $2 AND amount = $3""",
                     provider_name, paid_at, amount,
                 )
                 if exists:
@@ -115,7 +121,7 @@ async def import_from_panel() -> Dict[str, Any]:
                 await conn.execute(
                     f"""INSERT INTO {FINANCE_PAYMENTS_TABLE}
                         (item_id, item_name, kind, paid_at, amount, currency, rate_rub, comment, source)
-                        VALUES (NULL, $1, 'expense', $2::date, $3, $4,
+                        VALUES (NULL, $1, 'expense', $2, $3, $4,
                                 (SELECT rate_rub FROM finance_rates WHERE currency = $4),
                                 'Импорт из панельного биллинга', 'import')""",
                     provider_name, paid_at, amount, base_currency,
