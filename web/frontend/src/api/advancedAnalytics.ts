@@ -60,6 +60,7 @@ export interface SharedHwidUser {
   expire_date: string | null
   is_active: boolean
   is_trial: boolean
+  app_version?: string | null
 }
 
 export interface SharedHwidGroup {
@@ -73,6 +74,7 @@ export interface SharedHwidGroup {
 export interface SharedHwidsData {
   items: SharedHwidGroup[]
   total_shared_hwids: number
+  hard_block_accounts_threshold?: number
 }
 
 export interface TimeseriesPoint {

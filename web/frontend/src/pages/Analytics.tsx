@@ -1,4 +1,5 @@
-import { useState, useMemo, useCallback, memo, lazy, Suspense, Fragment } from 'react'
+import { useState, useMemo, useCallback, useEffect, memo, lazy, Suspense } from 'react'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 import { useOpenUser } from '@/lib/useOpenUser'
@@ -15,12 +16,8 @@ import {
   Wifi,
   WifiOff,
   ChevronDown,
-  ChevronRight,
   Search,
   ArrowUpDown,
-  Fingerprint,
-  Smartphone,
-  Copy,
   Server,
   Cpu,
   Activity,
@@ -48,7 +45,7 @@ import {
 import { toast } from 'sonner'
 import client from '@/api/client'
 import { advancedAnalyticsApi } from '@/api/advancedAnalytics'
-import type { GeoCity, GeoCityUser, TopUser, SharedHwidGroup, NodeFleetItem, RetentionCohort, NodeMetricsHistoryItem, NodeMetricsTimeseriesPoint, GeoBalanceNode, GeoBalanceRecommendation, IpExportItem } from '@/api/advancedAnalytics'
+import type { GeoCity, GeoCityUser, TopUser, NodeFleetItem, RetentionCohort, NodeMetricsHistoryItem, NodeMetricsTimeseriesPoint, GeoBalanceNode, GeoBalanceRecommendation, IpExportItem } from '@/api/advancedAnalytics'
 import { ExportDropdown } from '@/components/ExportDropdown'
 import { exportCSV, exportJSON, formatBytesForExport } from '@/lib/export'
 
@@ -1179,251 +1176,6 @@ function TrendsCard() {
                 )}
               </AreaChart>
             </ResponsiveContainer>
-          </div>
-        )}
-      </CardContent>
-    </Card>
-  )
-}
-
-// ── Shared HWIDs Card ───────────────────────────────────────────
-
-type HwidFilter = 'all' | 'has_trial' | 'has_expired' | 'has_active'
-
-function SharedHwidsCard() {
-  const { t } = useTranslation()
-  const openUser = useOpenUser()
-  const [search, setSearch] = useState('')
-  const [expandedHwid, setExpandedHwid] = useState<string | null>(null)
-  const [filter, setFilter] = useState<HwidFilter>('all')
-
-  const { data, isLoading, isError, refetch } = useQuery({
-    queryKey: ['advanced-shared-hwids'],
-    queryFn: () => advancedAnalyticsApi.sharedHwids(),
-    staleTime: 60_000,
-    refetchInterval: 60_000,
-  })
-
-  const items: SharedHwidGroup[] = data?.items || []
-
-  const filtered = useMemo(() => {
-    let result = items
-    // Apply filter
-    if (filter === 'has_trial') {
-      result = result.filter((g) => g.users.some((u) => u.is_trial))
-    } else if (filter === 'has_expired') {
-      result = result.filter((g) => g.users.some((u) => !u.is_active && u.expire_date))
-    } else if (filter === 'has_active') {
-      result = result.filter((g) => g.users.some((u) => u.is_active))
-    }
-    // Apply search
-    if (search.trim()) {
-      const q = search.toLowerCase()
-      result = result.filter(
-        (g) =>
-          g.hwid.toLowerCase().includes(q) ||
-          g.users.some((u) => u.username?.toLowerCase().includes(q))
-      )
-    }
-    return result
-  }, [items, search, filter])
-
-  const truncHwid = (hwid: string) =>
-    hwid.length > 16 ? hwid.slice(0, 8) + '...' + hwid.slice(-4) : hwid
-
-  const copyHwid = (hwid: string) => {
-    navigator.clipboard.writeText(hwid)
-    toast.success(t('common.copied', { defaultValue: 'Copied' }))
-  }
-
-  const { formatDateShort: formatDate } = useFormatters()
-
-  return (
-    <Card className="animate-fade-in-up" style={{ animationDelay: '0.2s' }}>
-      <CardHeader className="pb-2">
-        <div className="flex items-center justify-between flex-wrap gap-2">
-          <div className="flex items-center gap-2">
-            <Fingerprint className="w-5 h-5 text-red-400" />
-            <CardTitle className="text-base">{t('analytics.sharedHwids.title')}</CardTitle>
-            <InfoTooltip text={t('analytics.sharedHwids.tooltip')} side="right" />
-            {items.length > 0 && (
-              <Badge variant="secondary" className="text-xs bg-red-500/20 text-red-300">
-                {items.length}
-              </Badge>
-            )}
-          </div>
-          <div className="flex items-center gap-1 flex-wrap">
-            <ExportDropdown
-              disabled={filtered.length === 0}
-              onExportCSV={() => exportCSV(filtered.flatMap((g) =>
-                g.users.map((u) => ({
-                  hwid: g.hwid, platform: g.platform ?? '', device: g.device_model ?? '',
-                  username: u.username, status: u.status, is_trial: u.is_trial, is_active: u.is_active,
-                }))
-              ), 'shared-hwids')}
-              onExportJSON={() => exportJSON(filtered, 'shared-hwids')}
-            />
-            {(['all', 'has_trial', 'has_active', 'has_expired'] as HwidFilter[]).map((f) => (
-              <Button
-                key={f}
-                variant={filter === f ? 'default' : 'outline'}
-                size="sm"
-                className="h-7 text-xs px-2.5"
-                onClick={() => setFilter(f)}
-              >
-                {t(`analytics.sharedHwids.filter.${f}`, {
-                  defaultValue: f === 'all' ? 'All' : f === 'has_trial' ? 'Trial' : f === 'has_active' ? 'Active' : 'Expired',
-                })}
-              </Button>
-            ))}
-          </div>
-          <div className="relative w-full sm:w-64">
-            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-            <Input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder={t('analytics.sharedHwids.searchPlaceholder')}
-              className="pl-9 h-8 text-sm"
-            />
-          </div>
-        </div>
-      </CardHeader>
-      <CardContent>
-        {isLoading ? (
-          <div className="space-y-3">
-            {Array.from({ length: 4 }).map((_, i) => (
-              <Skeleton key={i} className="h-14 w-full" />
-            ))}
-          </div>
-        ) : isError ? (
-          <QueryError onRetry={refetch} />
-        ) : filtered.length === 0 ? (
-          <div className="h-48 flex items-center justify-center text-muted-foreground">
-            <div className="text-center">
-              <Fingerprint className="w-12 h-12 mx-auto mb-2 opacity-30" />
-              <p>{t('analytics.sharedHwids.noData')}</p>
-              <p className="text-xs mt-1">{t('analytics.sharedHwids.noDataHint')}</p>
-            </div>
-          </div>
-        ) : (
-          <div className="space-y-2">
-            {filtered.map((group) => {
-              const isOpen = expandedHwid === group.hwid
-              return (
-                <Fragment key={group.hwid}>
-                  <div
-                    className={cn(
-                      'flex items-center gap-3 px-3 py-2.5 rounded-lg cursor-pointer transition-colors',
-                      isOpen
-                        ? 'bg-red-500/10 border border-red-500/20'
-                        : 'hover:bg-[var(--glass-bg-hover)]/40 border border-transparent'
-                    )}
-                    onClick={() => setExpandedHwid(isOpen ? null : group.hwid)}
-                  >
-                    {isOpen ? (
-                      <ChevronDown className="w-4 h-4 text-muted-foreground shrink-0" />
-                    ) : (
-                      <ChevronRight className="w-4 h-4 text-muted-foreground shrink-0" />
-                    )}
-
-                    <Smartphone className="w-4 h-4 text-muted-foreground shrink-0" />
-
-                    <button
-                      className="font-mono text-xs text-white hover:text-primary-400 transition-colors"
-                      title={group.hwid}
-                      onClick={(e) => { e.stopPropagation(); copyHwid(group.hwid) }}
-                    >
-                      {truncHwid(group.hwid)}
-                      <Copy className="w-3 h-3 inline ml-1 opacity-40" />
-                    </button>
-
-                    {group.platform && (
-                      <Badge variant="outline" className="text-[10px] h-5">
-                        {group.platform}
-                      </Badge>
-                    )}
-                    {group.device_model && (
-                      <span className="text-xs text-muted-foreground hidden sm:inline truncate max-w-[150px]">
-                        {group.device_model}
-                      </span>
-                    )}
-
-                    <div className="ml-auto flex items-center gap-1.5">
-                      {group.users.some((u) => u.is_trial) && (
-                        <Badge className="bg-yellow-500/20 text-yellow-300 text-[10px]">trial</Badge>
-                      )}
-                      <Badge className="bg-red-500/20 text-red-300 text-xs">
-                        {group.user_count} {t('analytics.sharedHwids.accounts')}
-                      </Badge>
-                    </div>
-                  </div>
-
-                  {isOpen && (
-                    <div className="ml-8 mb-2 border border-[var(--glass-border)] rounded-lg overflow-x-auto">
-                      <Table>
-                        <TableHeader>
-                          <TableRow>
-                            <TableHead className="text-xs">{t('analytics.topUsers.user')}</TableHead>
-                            <TableHead className="text-xs hidden sm:table-cell">{t('analytics.topUsers.status')}</TableHead>
-                            <TableHead className="text-xs hidden sm:table-cell">{t('analytics.sharedHwids.subscription', 'Подписка')}</TableHead>
-                            <TableHead className="text-xs hidden md:table-cell">{t('analytics.sharedHwids.createdAt')}</TableHead>
-                            <TableHead className="text-xs hidden md:table-cell">{t('analytics.sharedHwids.firstSeen')}</TableHead>
-                          </TableRow>
-                        </TableHeader>
-                        <TableBody>
-                          {group.users.map((user) => (
-                            <TableRow
-                              key={user.uuid}
-                              className="cursor-pointer hover:bg-[var(--glass-bg-hover)]/30"
-                              {...openUser(user.uuid)}
-                            >
-                              <TableCell>
-                                <div className="flex items-center gap-1.5">
-                                  <span className="font-medium text-white text-sm hover:text-primary-400 transition-colors">
-                                    {user.username || user.uuid.slice(0, 8)}
-                                  </span>
-                                  {user.is_trial && (
-                                    <Badge className="bg-yellow-500/20 text-yellow-300 text-[10px] px-1.5 py-0">trial</Badge>
-                                  )}
-                                </div>
-                              </TableCell>
-                              <TableCell className="hidden sm:table-cell">
-                                <Badge
-                                  variant="secondary"
-                                  className={cn('text-xs', STATUS_COLORS[user.status] || '')}
-                                >
-                                  {t(`analytics.status.${user.status}`, { defaultValue: user.status })}
-                                </Badge>
-                              </TableCell>
-                              <TableCell className="hidden sm:table-cell">
-                                {user.expire_date ? (
-                                  <Badge
-                                    variant="secondary"
-                                    className={cn('text-xs', user.is_active ? 'bg-green-500/20 text-green-300' : 'bg-[var(--glass-bg-hover)] text-dark-200')}
-                                  >
-                                    {user.is_active
-                                      ? t('analytics.sharedHwids.active', 'Активна')
-                                      : t('analytics.sharedHwids.expired', 'Истекла')}
-                                  </Badge>
-                                ) : (
-                                  <span className="text-xs text-dark-300">-</span>
-                                )}
-                              </TableCell>
-                              <TableCell className="hidden md:table-cell text-xs text-muted-foreground">
-                                {formatDate(user.created_at)}
-                              </TableCell>
-                              <TableCell className="hidden md:table-cell text-xs text-muted-foreground">
-                                {formatDate(user.hwid_first_seen)}
-                              </TableCell>
-                            </TableRow>
-                          ))}
-                        </TableBody>
-                      </Table>
-                    </div>
-                  )}
-                </Fragment>
-              )
-            })}
           </div>
         )}
       </CardContent>
@@ -3060,13 +2812,22 @@ function TorrentAnalyticsCard() {
 
 // ── Main Page ───────────────────────────────────────────────────
 
-const VALID_TABS = ['geography', 'users', 'trends', 'shared-hwids', 'providers', 'nodes-traffic', 'nodes', 'geo-balance', 'torrent', 'retention'] as const
+const VALID_TABS = ['geography', 'users', 'trends', 'providers', 'nodes-traffic', 'nodes', 'geo-balance', 'torrent', 'retention'] as const
 
 export default function Analytics() {
   const { t } = useTranslation()
   const hasPermission = usePermissionStore((s) => s.hasPermission)
   const canViewAnalytics = hasPermission('analytics', 'view')
   const [tab, setTab] = useTabParam('geography', [...VALID_TABS])
+
+  // Таб «Общие HWID» переехал на страницу «Нарушения» — старые диплинки редиректим
+  const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
+  useEffect(() => {
+    if (searchParams.get('tab') === 'shared-hwids') {
+      navigate('/violations?tab=hwids', { replace: true })
+    }
+  }, [searchParams, navigate])
 
   if (!canViewAnalytics) {
     return (
@@ -3099,10 +2860,6 @@ export default function Analytics() {
           <TabsTrigger value="trends" className="gap-1.5">
             <TrendingUp className="w-4 h-4" />
             {t('analytics.tabs.trends')}
-          </TabsTrigger>
-          <TabsTrigger value="shared-hwids" className="gap-1.5">
-            <Fingerprint className="w-4 h-4" />
-            {t('analytics.tabs.sharedHwids')}
           </TabsTrigger>
           <TabsTrigger value="providers" className="gap-1.5">
             <Network className="w-4 h-4" />
@@ -3141,10 +2898,6 @@ export default function Analytics() {
         <TabsContent value="trends" className="space-y-4">
           <OnlineTrendCard />
           <TrendsCard />
-        </TabsContent>
-
-        <TabsContent value="shared-hwids">
-          <SharedHwidsCard />
         </TabsContent>
 
         <TabsContent value="providers">

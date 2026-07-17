@@ -989,6 +989,7 @@ class NetworkMixin:
                         "expire_date": expire_at.isoformat() if expire_at else None,
                         "is_active": is_active,
                         "is_trial": is_trial,
+                        "app_version": r["app_version"],
                     })
 
                 # Sort by user_count desc

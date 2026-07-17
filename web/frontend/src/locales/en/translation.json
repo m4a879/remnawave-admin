@@ -1538,7 +1538,46 @@
       "all": "All",
       "pending": "Pending",
       "topViolators": "Top violators",
+      "hwids": "Shared HWIDs",
       "reports": "Reports & ASN"
+    },
+    "sharedHwids": {
+      "title": "Shared HWID Devices",
+      "tooltip": "Devices (HWID) used by multiple accounts — indicates trial abuse. The hard-block threshold is configurable in violation settings",
+      "noData": "No shared HWIDs found",
+      "noDataHint": "Data will appear when different users share the same HWID",
+      "accounts": "accounts",
+      "user": "User",
+      "status": "Status",
+      "createdAt": "Created",
+      "firstSeen": "First HWID",
+      "appVersion": "Client",
+      "searchPlaceholder": "Search by HWID or username...",
+      "subscription": "Subscription",
+      "active": "Active",
+      "expired": "Expired",
+      "activeShort": "active",
+      "newAccount": "new in 7d",
+      "lastActivityTooltip": "Most recent appearance of this HWID on a new account",
+      "overThresholdBadge": "≥{{thr}} → ban",
+      "overThresholdTooltip": "Account count has reached the hard-block threshold ({{thr}}) — the next violation gets hard_block",
+      "stats": {
+        "groups": "Devices",
+        "accounts": "Accounts",
+        "withActive": "With active",
+        "overThreshold": "Over ban threshold ({{thr}}+)"
+      },
+      "sort": {
+        "accounts": "By accounts",
+        "recent": "By recency",
+        "active": "By active"
+      },
+      "filter": {
+        "all": "All",
+        "has_trial": "With trial",
+        "has_active": "With active",
+        "has_expired": "With expired"
+      }
     },
     "severity": {
       "critical": "Critical",
@@ -2148,7 +2187,6 @@
       "geography": "Geography",
       "topUsers": "Top Users",
       "trends": "Trends",
-      "sharedHwids": "Shared HWIDs",
       "providers": "Providers / IP",
       "nodesTraffic": "Node Traffic",
       "nodes": "Nodes",
@@ -2247,25 +2285,6 @@
       "average": "Avg",
       "points": "Points",
       "empty": "No data yet — samples accumulate every 5 minutes."
-    },
-    "sharedHwids": {
-      "title": "Shared HWID Devices",
-      "tooltip": "Devices (HWID) used by multiple accounts — indicates trial abuse",
-      "noData": "No shared HWIDs found",
-      "noDataHint": "Data will appear when different users share the same HWID",
-      "accounts": "accounts",
-      "createdAt": "Created",
-      "firstSeen": "First HWID",
-      "searchPlaceholder": "Search by HWID or username...",
-      "subscription": "Subscription",
-      "active": "Active",
-      "expired": "Expired",
-      "filter": {
-        "all": "All",
-        "has_trial": "With trial",
-        "has_active": "With active",
-        "has_expired": "With expired"
-      }
     },
     "providers": {
       "title": "Providers & ASN",

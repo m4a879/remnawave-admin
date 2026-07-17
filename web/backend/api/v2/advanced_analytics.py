@@ -642,10 +642,17 @@ async def get_shared_hwids(
     request: Request,
     min_users: int = Query(2, ge=2, le=10),
     limit: int = Query(50, ge=5, le=200),
-    admin: AdminUser = Depends(require_permission("analytics", "view")),
+    admin: AdminUser = Depends(require_permission("violations", "view")),
 ):
     """Get HWIDs shared across multiple user accounts."""
-    return await _compute_shared_hwids(min_users=min_users, limit=limit)
+    data = await _compute_shared_hwids(min_users=min_users, limit=limit)
+    # Порог «N аккаунтов на HWID -> hard_block» — вне кэша, чтобы UI видел смену настройки сразу
+    from shared.config_service import config_service
+    try:
+        threshold = int(config_service.get("violations_hard_block_hwid_accounts", 5) or 0)
+    except (TypeError, ValueError):
+        threshold = 0
+    return {**data, "hard_block_accounts_threshold": threshold}
 
 
 @cached("analytics:shared-hwids", ttl=CACHE_TTL_LONG, key_args=("min_users", "limit"))

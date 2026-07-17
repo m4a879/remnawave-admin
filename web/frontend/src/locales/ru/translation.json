@@ -1538,7 +1538,46 @@
       "all": "Все",
       "pending": "Ожидают",
       "topViolators": "Топ нарушителей",
+      "hwids": "Общие HWID",
       "reports": "Отчёты и ASN"
+    },
+    "sharedHwids": {
+      "title": "Общие HWID устройства",
+      "tooltip": "Устройства (HWID), используемые несколькими аккаунтами — признак триального абьюза. Порог жёсткой блокировки настраивается в настройках нарушений",
+      "noData": "Общих HWID не найдено",
+      "noDataHint": "Данные появятся при совпадении HWID у разных пользователей",
+      "accounts": "аккаунтов",
+      "user": "Пользователь",
+      "status": "Статус",
+      "createdAt": "Создан",
+      "firstSeen": "Первый HWID",
+      "appVersion": "Клиент",
+      "searchPlaceholder": "Поиск по HWID или юзеру...",
+      "subscription": "Подписка",
+      "active": "Активна",
+      "expired": "Истекла",
+      "activeShort": "актив.",
+      "newAccount": "новый за 7 дн",
+      "lastActivityTooltip": "Последнее появление этого HWID на новом аккаунте",
+      "overThresholdBadge": "≥{{thr}} → бан",
+      "overThresholdTooltip": "Аккаунтов не меньше порога жёсткой блокировки ({{thr}}) — следующее нарушение получит hard_block",
+      "stats": {
+        "groups": "Устройств",
+        "accounts": "Аккаунтов",
+        "withActive": "С активными",
+        "overThreshold": "Выше порога бана ({{thr}}+)"
+      },
+      "sort": {
+        "accounts": "По аккаунтам",
+        "recent": "По свежести",
+        "active": "По активным"
+      },
+      "filter": {
+        "all": "Все",
+        "has_trial": "С триалом",
+        "has_active": "С активными",
+        "has_expired": "С истёкшими"
+      }
     },
     "severity": {
       "critical": "Критический",
@@ -2148,7 +2187,6 @@
       "geography": "География",
       "topUsers": "Топ юзеры",
       "trends": "Тренды",
-      "sharedHwids": "Общие HWID",
       "providers": "Провайдеры / IP",
       "nodesTraffic": "Трафик по нодам",
       "nodes": "Ноды",
@@ -2247,25 +2285,6 @@
       "average": "Средне",
       "points": "Точек",
       "empty": "Пока нет данных. Снимки накапливаются с 5-минутным интервалом."
-    },
-    "sharedHwids": {
-      "title": "Общие HWID устройства",
-      "tooltip": "Устройства (HWID), используемые несколькими аккаунтами — признак триального абьюза",
-      "noData": "Общих HWID не найдено",
-      "noDataHint": "Данные появятся при совпадении HWID у разных пользователей",
-      "accounts": "аккаунтов",
-      "createdAt": "Создан",
-      "firstSeen": "Первый HWID",
-      "searchPlaceholder": "Поиск по HWID или юзеру...",
-      "subscription": "Подписка",
-      "active": "Активна",
-      "expired": "Истекла",
-      "filter": {
-        "all": "Все",
-        "has_trial": "С триалом",
-        "has_active": "С активными",
-        "has_expired": "С истёкшими"
-      }
     },
     "providers": {
       "title": "Провайдеры и ASN",
