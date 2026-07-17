@@ -23,16 +23,27 @@ _DEFAULT_BASE = "https://invapi.hostkey.ru"
 
 
 def _unwrap_envelope(data: Any):
-    """Hostkey заворачивает payload в `result`.
+    """Hostkey заворачивает ответ в `result`.
 
-    Успех: {"result": <dict|list>}. Ошибка: {"result": -N, "error": "..."}.
-    Возвращает (payload, error): payload — развёрнутое тело или None при ошибке.
+    Варианты result:
+    - dict/list  -> это payload (напр. auth: {"result":{"token":...}});
+    - число < 0 либо наличие `error` без payload -> ошибка;
+    - строка-статус ("OK") -> успех, payload в ОСТАЛЬНЫХ ключах верхнего уровня
+      (напр. {"result":"OK","credits":{...}}).
+    Возвращает (payload, error): payload=None при ошибке.
     """
     if isinstance(data, dict) and "result" in data:
         res = data["result"]
+        if isinstance(res, bool):  # на всякий, bool — подкласс int
+            res = None
+        if isinstance(res, (int, float)) and res < 0:
+            return None, str(data.get("error") or f"result={res}")
         if isinstance(res, (dict, list)):
             return res, None
-        return None, str(data.get("error") or f"result={res}")
+        if data.get("error"):
+            return None, str(data["error"])
+        # result="OK"/статус -> данные в остальных ключах
+        return {k: v for k, v in data.items() if k != "result"}, None
     return data, None
 
 
@@ -137,6 +148,7 @@ class HostkeyAdapter(HosterAdapter):
             raise AdapterError(f"Сеть/HTTP ({action}): {e}")
         except ValueError:
             raise AdapterError(f"Некорректный ответ Invapi на {action}")
+        logger.info("Hostkey %s raw: %s", action, str(data)[:400])
         inner, err = _unwrap_envelope(data)
         if err:
             raise AdapterError(f"{action}: {err}")
@@ -156,7 +168,6 @@ class HostkeyAdapter(HosterAdapter):
 
     async def _fetch_balance(self, client, base, token):
         data = await self._call(client, base, "getcredits", token)
-        logger.info("Hostkey getcredits payload: %s", str(data)[:300])
         currency = None
         total = 0.0
         found = False
@@ -196,7 +207,6 @@ class HostkeyAdapter(HosterAdapter):
         except AdapterError as e:
             logger.info("Hostkey getclientsproducts недоступен (%s), услуги пропущены", e)
             return []
-        logger.info("Hostkey getclientsproducts payload: %s", str(data)[:300])
         if isinstance(data, list):
             data = {"products": {"product": data}}
         products = data.get("products") if isinstance(data, dict) else None

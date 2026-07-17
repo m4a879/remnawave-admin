@@ -186,6 +186,21 @@ class TestHostkeyAdapter:
         # явный invapi сохраняется
         assert a._base("https://invapi.hostkey.com") == "https://invapi.hostkey.com"
 
+    def test_unwrap_envelope_semantics(self):
+        from web.backend.core.finance.adapters.hostkey import _unwrap_envelope
+
+        # dict/list в result -> payload
+        assert _unwrap_envelope({"result": {"token": "T"}}) == ({"token": "T"}, None)
+        assert _unwrap_envelope({"result": [1, 2]}) == ([1, 2], None)
+        # отрицательный код / error -> ошибка
+        p, e = _unwrap_envelope({"result": -2, "error": "malformed"})
+        assert p is None and "malformed" in e
+        # статус "OK" -> успех, payload в остальных ключах
+        p, e = _unwrap_envelope({"result": "OK", "credits": {"credit": []}})
+        assert e is None and p == {"credits": {"credit": []}}
+        # нет конверта -> данные как есть
+        assert _unwrap_envelope({"amount": 5}) == ({"amount": 5}, None)
+
     def test_extract_token_rejects_html(self):
         from web.backend.core.finance.adapters.hostkey import HostkeyAdapter
 
@@ -215,10 +230,11 @@ class TestHostkeyAdapter:
             if path.endswith("/whmcs.php"):
                 action = (body.get("action") or [""])[0]
                 if action == "getcredits":
-                    return httpx.Response(200, json={"result": {"credits": {"credit": [
+                    # реальный конверт: result="OK", данные в остальных ключах
+                    return httpx.Response(200, json={"result": "OK", "credits": {"credit": [
                         {"amount": "10.50", "currencycode": "USD"},
                         {"amount": "4.50", "currencycode": "USD"},
-                    ]}}})
+                    ]}})
                 if action == "getclientsproducts":
                     return httpx.Response(200, json={"result": {"products": {"product": [
                         {"id": 1, "name": "VDS-1", "recurringamount": "5.00",
