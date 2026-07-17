@@ -1,8 +1,10 @@
 """Cluster-wide online users snapshot recorder.
 
-Periodically samples the sum of users_online across active (non-disabled,
-connected) nodes and stores it in online_users_snapshots. Used by the
-Trends tab to draw the avg/max online trend chart.
+Periodically samples the panel-reported online (SUM(nodes.users_online) — the
+same metric the dashboard "Сейчас онлайн" card shows) and stores it in
+online_users_snapshots. Used by the Trends tab to draw the avg/max online
+trend chart. Falls back to counting distinct users in user_connections when
+the panel figure is zero/stale, so the chart survives sync outages.
 """
 import asyncio
 import logging
@@ -70,11 +72,15 @@ class OnlineSnapshotRecorder:
             return DEFAULT_WINDOW_MINUTES
 
     async def _capture(self) -> None:
-        """Count unique users seen in the last window_minutes and append a snapshot row.
+        """Append a snapshot of the same online metric the dashboard shows.
 
-        Source: user_connections, which node-agent populates via /collector/batch every
-        ~30 sec. SUM(nodes.users_online) was unreliable because that column only refreshes
-        on Panel sync (rare and often zero).
+        Primary source — SUM(nodes.users_online) (панельный онлайн, ровно то
+        число, что на карточке «Сейчас онлайн»); раньше тренд считался по
+        user_connections и расходился с дашбордом. Колонка обновляется синком
+        нод (sync_interval_seconds), поэтому при нулевой панельной сумме
+        падаем обратно на счёт уникальных юзеров в user_connections за окно
+        window_minutes — иначе график пустеет, когда синк нод отстаёт (та же
+        проблема, из-за которой в мае от nodes.users_online уходили совсем).
         """
         from shared.database import db_service
         if not db_service.is_connected:
@@ -84,13 +90,21 @@ class OnlineSnapshotRecorder:
             async with db_service.acquire() as conn:
                 total = await conn.fetchval(
                     """
-                    SELECT COUNT(DISTINCT user_uuid)
-                    FROM user_connections
-                    WHERE user_uuid IS NOT NULL
-                      AND connected_at >= NOW() - make_interval(mins => $1)
+                    SELECT COALESCE(SUM(users_online), 0)::int
+                    FROM nodes
+                    WHERE is_connected = true AND NOT is_disabled
                     """,
-                    window,
                 )
+                if not total:
+                    total = await conn.fetchval(
+                        """
+                        SELECT COUNT(DISTINCT user_uuid)
+                        FROM user_connections
+                        WHERE user_uuid IS NOT NULL
+                          AND connected_at >= NOW() - make_interval(mins => $1)
+                        """,
+                        window,
+                    )
             await db_service.insert_online_users_snapshot(int(total or 0))
         except Exception as e:
             logger.warning("Online snapshot capture failed: %s", e)

@@ -2278,7 +2278,7 @@
     },
     "onlineTrend": {
       "title": "Online trend",
-      "tooltip": "Sum of users_online across active nodes. Samples every 5 min, bucketed at read time.",
+      "tooltip": "The same online figure as the dashboard \"Online now\" card (sum of users_online across active nodes). Sampled every minute, bucketed at read time.",
       "avg": "Average",
       "max": "Peak",
       "peak": "Peak",
