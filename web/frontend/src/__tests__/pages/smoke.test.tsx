@@ -340,9 +340,9 @@ describe('Page smoke tests', () => {
     expect(container).toBeTruthy()
   })
 
-  it('Billing renders without errors', async () => {
-    const Billing = (await import('@/pages/Billing')).default
-    const { container } = renderPage(<Billing />)
+  it('Finance renders without errors', async () => {
+    const Finance = (await import('@/pages/Finance')).default
+    const { container } = renderPage(<Finance />)
     expect(container).toBeTruthy()
   })
 

@@ -57,7 +57,7 @@ import {
   Area,
 } from 'recharts'
 import client from '../api/client'
-import { billingApi } from '../api/billing'
+import { financeApi } from '../api/finance'
 import { auditApi, type AuditLogEntry } from '../api/audit'
 import { usePermissionStore } from '../store/permissionStore'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -1021,29 +1021,38 @@ function SystemStatusCard({
 function BillingSummaryCard({ loading }: { loading: boolean }) {
   const { t } = useTranslation()
   const navigate = useNavigate()
-  const { formatCurrency, formatDate } = useFormatters()
 
-  const { data: billing, isLoading } = useQuery({
-    queryKey: ['billingSummary'],
-    queryFn: billingApi.getSummary,
+  const { data: summary, isLoading } = useQuery({
+    queryKey: ['finance-dashboard-summary'],
+    queryFn: () => financeApi.getSummary(1),
+    refetchInterval: 120000,
+    staleTime: 60_000,
+    retry: false,
+  })
+  const { data: upcoming } = useQuery({
+    queryKey: ['finance-dashboard-upcoming'],
+    queryFn: () => financeApi.getUpcoming(14),
     refetchInterval: 120000,
     staleTime: 60_000,
     retry: false,
   })
 
   const isCardLoading = loading || isLoading
+  const base = summary?.base_currency || 'RUB'
+  const money = (v: number) => `${v.toLocaleString('ru-RU', { maximumFractionDigits: 0 })} ${base}`
+  const nearest = upcoming?.items?.[0]
 
   return (
     <Card
       className="animate-fade-in-up cursor-pointer hover:shadow-glow-teal transition-shadow"
       style={{ animationDelay: '0.35s' }}
-      onClick={() => navigate('/billing')}
+      onClick={() => navigate('/finance')}
     >
       <CardHeader className="pb-2">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <CardTitle className="text-base md:text-lg">{t('dashboard.billing')}</CardTitle>
-            <InfoTooltip text={t('dashboard.billingTooltip')} side="right" />
+            <CardTitle className="text-base md:text-lg">{t('dashboard.finance')}</CardTitle>
+            <InfoTooltip text={t('dashboard.financeTooltip')} side="right" />
           </div>
           <div
             className="p-2 rounded-lg"
@@ -1063,38 +1072,32 @@ function BillingSummaryCard({ loading }: { loading: boolean }) {
             <Skeleton className="h-4 w-full" />
             <Skeleton className="h-4 w-3/4" />
           </div>
-        ) : billing ? (
+        ) : summary ? (
           <div className="space-y-3">
             <div>
-              <p className="text-xs text-muted-foreground">{t('dashboard.billingMonthly')}</p>
-              <p className="text-xl font-bold text-white">
-                {formatCurrency(Number(billing.current_month_payments) || 0)}
+              <p className="text-xs text-muted-foreground">{t('dashboard.financeNet')}</p>
+              <p className={cn('text-xl font-bold', summary.recurring.net >= 0 ? 'text-green-400' : 'text-red-400')}>
+                {money(summary.recurring.net)}<span className="text-xs text-muted-foreground font-normal">/{t('finance.moShort')}</span>
               </p>
             </div>
             <Separator />
             <div className="space-y-1.5">
               <div className="flex items-center justify-between bg-[var(--glass-bg)] rounded-lg px-3 py-1.5 border border-[var(--glass-border)]">
-                <span className="text-xs text-muted-foreground">{t('dashboard.billingProviders')}</span>
-                <span className="text-xs text-white font-mono">{billing.total_providers}</span>
+                <span className="text-xs text-muted-foreground">{t('dashboard.financeExpense')}</span>
+                <span className="text-xs text-red-400 font-mono">{money(summary.recurring.expense)}</span>
               </div>
               <div className="flex items-center justify-between bg-[var(--glass-bg)] rounded-lg px-3 py-1.5 border border-[var(--glass-border)]">
-                <span className="text-xs text-muted-foreground">{t('dashboard.billingNodes')}</span>
-                <span className="text-xs text-white font-mono">{billing.total_billing_nodes}</span>
+                <span className="text-xs text-muted-foreground">{t('dashboard.financeIncome')}</span>
+                <span className="text-xs text-green-400 font-mono">{money(summary.recurring.income)}</span>
               </div>
-              <div className="flex items-center justify-between bg-[var(--glass-bg)] rounded-lg px-3 py-1.5 border border-[var(--glass-border)]">
-                <span className="text-xs text-muted-foreground">{t('dashboard.billingTotalSpent')}</span>
-                <span className="text-xs text-primary-400 font-semibold font-mono">
-                  {formatCurrency(Number(billing.total_spent) || 0)}
-                </span>
-              </div>
-              {billing.next_payment_date && (
+              {nearest && (
                 <div className="flex items-center justify-between bg-[var(--glass-bg)] rounded-lg px-3 py-1.5 border border-[var(--glass-border)]">
                   <span className="text-xs text-muted-foreground flex items-center gap-1">
                     <CalendarClock className="w-3 h-3" />
-                    {t('dashboard.billingNextPayment')}
+                    {nearest.name}
                   </span>
-                  <span className="text-xs text-primary-400 font-mono">
-                    {formatDate(billing.next_payment_date)}
+                  <span className={cn('text-xs font-mono', nearest.is_overdue ? 'text-red-400' : 'text-primary-400')}>
+                    {nearest.next_due_at}
                   </span>
                 </div>
               )}
