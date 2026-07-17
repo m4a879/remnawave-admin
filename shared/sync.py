@@ -871,11 +871,13 @@ class SyncService:
             "is_new": False
         }
 
-        # Извлекаем данные о пользователе и устройстве
-        user_data = event_data.get("user", {})
-        hwid_data = event_data.get("hwidDevice", {})
+        # Извлекаем данные о пользователе и устройстве.
+        # Панель шлёт устройство в ключе hwidUserDevice (не hwidDevice) —
+        # принимаем оба варианта, иначе added/deleted молча не синкаются.
+        user_data = event_data.get("user") or {}
+        hwid_data = event_data.get("hwidDevice") or event_data.get("hwidUserDevice") or {}
 
-        user_uuid = user_data.get("uuid")
+        user_uuid = user_data.get("uuid") or hwid_data.get("userUuid")
         hwid = hwid_data.get("hwid")
 
         if not user_uuid or not hwid:
@@ -1160,6 +1162,7 @@ class SyncService:
         total_synced = 0
         start = 0
         page_size = 500
+        users_seen: set = set()
 
         try:
             while True:
@@ -1200,11 +1203,21 @@ class SyncService:
                         total_synced += synced
                     except Exception as e:
                         logger.warning("Failed to sync HWID devices for user %s: %s", user_uuid, e)
+                users_seen.update(devices_by_user)
 
                 # Проверяем, достигли ли конца
                 start += page_size
                 if start >= total or len(devices) < page_size:
                     break
+
+            # Юзеры, у которых в панели удалили последнее устройство, в выдаче
+            # API отсутствуют — per-user синк их не чистит. Добираем здесь.
+            # Только после полного прохода и непустой выдачи (защита от wipe
+            # на пустом/битом ответе API).
+            if users_seen:
+                removed = await db_service.delete_hwid_devices_except_users(list(users_seen))
+                if removed:
+                    logger.info("Removed %d stale HWID device rows (users no longer in panel HWID list)", removed)
 
             # Обновляем метаданные синхронизации
             await db_service.update_sync_metadata(
