@@ -2278,13 +2278,15 @@
     },
     "onlineTrend": {
       "title": "Online trend",
-      "tooltip": "The same online figure as the dashboard \"Online now\" card (sum of users_online across active nodes). Sampled every minute, bucketed at read time.",
-      "avg": "Average",
-      "max": "Peak",
+      "tooltip": "The same online figure as the dashboard \"Online now\" card (sum of users_online across active nodes). Sampled every minute; on 7d/30d each chart point is an hour/day, the toggle picks average or peak online within the point.",
+      "avgHour": "Hourly average",
+      "peakHour": "Hourly peak",
+      "avgDay": "Daily average",
+      "peakDay": "Daily peak",
       "peak": "Peak",
       "average": "Avg",
       "points": "Points",
-      "empty": "No data yet — samples accumulate every 5 minutes."
+      "empty": "No data yet — online snapshots are recorded every minute."
     },
     "providers": {
       "title": "Providers & ASN",

@@ -834,32 +834,46 @@ function OnlineTrendCard() {
             </CardTitle>
             <InfoTooltip
               text={t('analytics.onlineTrend.tooltip', {
-                defaultValue: 'Сумма users_online по активным нодам. Снимок раз в 5 мин, агрегация в бакеты при чтении.',
+                defaultValue: 'Тот же онлайн, что на карточке «Сейчас онлайн» дашборда. Снимок раз в минуту; на 7д/30д точка графика — час/день, переключатель выбирает средний или пиковый онлайн внутри точки.',
               })}
               side="right"
             />
           </div>
           <div className="flex items-center gap-2 flex-wrap">
-            {/* Aggregation switch (slide-tab) */}
-            <div className="flex items-center gap-1 bg-[var(--glass-bg)] rounded-lg p-0.5">
-              {([
-                { value: 'avg', label: t('analytics.onlineTrend.avg', { defaultValue: 'Средний' }) },
-                { value: 'max', label: t('analytics.onlineTrend.max', { defaultValue: 'Максимум' }) },
-              ] as const).map((opt) => (
-                <button
-                  key={opt.value}
-                  onClick={() => setAgg(opt.value)}
-                  className={cn(
-                    'px-2.5 py-2 sm:py-1 text-xs rounded-md transition-all duration-200 min-h-[44px] sm:min-h-0',
-                    aggregation === opt.value
-                      ? 'bg-primary/20 text-primary-400 font-medium'
-                      : 'text-muted-foreground hover:text-white',
-                  )}
-                >
-                  {opt.label}
-                </button>
-              ))}
-            </div>
+            {/* Aggregation switch: точка графика на 7д = час, на 30д = день; переключатель
+                решает, показывать средний или пиковый онлайн внутри точки. На 24ч точка
+                минутная (один снимок), avg и max совпадают — переключатель прячем. */}
+            {period !== '24h' && (
+              <div className="flex items-center gap-1 bg-[var(--glass-bg)] rounded-lg p-0.5">
+                {([
+                  {
+                    value: 'avg',
+                    label: period === '30d'
+                      ? t('analytics.onlineTrend.avgDay', { defaultValue: 'Средний за день' })
+                      : t('analytics.onlineTrend.avgHour', { defaultValue: 'Средний за час' }),
+                  },
+                  {
+                    value: 'max',
+                    label: period === '30d'
+                      ? t('analytics.onlineTrend.peakDay', { defaultValue: 'Пик за день' })
+                      : t('analytics.onlineTrend.peakHour', { defaultValue: 'Пик за час' }),
+                  },
+                ] as const).map((opt) => (
+                  <button
+                    key={opt.value}
+                    onClick={() => setAgg(opt.value)}
+                    className={cn(
+                      'px-2.5 py-2 sm:py-1 text-xs rounded-md transition-all duration-200 min-h-[44px] sm:min-h-0',
+                      aggregation === opt.value
+                        ? 'bg-primary/20 text-primary-400 font-medium'
+                        : 'text-muted-foreground hover:text-white',
+                    )}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+            )}
             <PeriodSwitcher
               value={period}
               onChange={setPeriod}
@@ -886,7 +900,7 @@ function OnlineTrendCard() {
           <div className="h-[240px] flex items-center justify-center">
             <p className="text-sm text-muted-foreground">
               {t('analytics.onlineTrend.empty', {
-                defaultValue: 'Пока нет данных. Снимки накапливаются с 5-минутным интервалом.',
+                defaultValue: 'Пока нет данных. Снимки онлайна пишутся раз в минуту.',
               })}
             </p>
           </div>
