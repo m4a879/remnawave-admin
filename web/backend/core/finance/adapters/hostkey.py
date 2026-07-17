@@ -34,7 +34,13 @@ class HostkeyAdapter(HosterAdapter):
     ]
 
     def _base(self, base_url: Optional[str]) -> str:
-        return (base_url or "").strip().rstrip("/") or _DEFAULT_BASE
+        b = (base_url or "").strip().rstrip("/")
+        # Invapi живёт на invapi.hostkey.* — НЕ на сайте провайдера hostkey.ru.
+        # Если в base_url случайно попал адрес сайта (префилл провайдера),
+        # берём дефолтный invapi-эндпоинт.
+        if not b or "invapi" not in b.lower():
+            return _DEFAULT_BASE
+        return b
 
     # Разные версии Invapi отдают токен на разных путях — пробуем оба.
     _AUTH_PATHS = ("auth.php", "auth/login")
@@ -60,7 +66,12 @@ class HostkeyAdapter(HosterAdapter):
         try:
             data = resp.json()
         except ValueError:
-            return resp.text.strip().strip('"') or None
+            # не JSON: принимаем только короткую опаковую строку-токен,
+            # а не HTML-страницу сайта (иначе сбой авторизации маскируется)
+            t = resp.text.strip().strip('"')
+            if t and "<" not in t and len(t) <= 256:
+                return t
+            return None
         if isinstance(data, dict):
             return (
                 data.get("token") or data.get("HOSTKEY_TOKEN")

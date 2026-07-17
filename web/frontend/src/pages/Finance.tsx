@@ -847,13 +847,17 @@ function HostersTab({ canCreate, canEdit, canDelete }: { canCreate: boolean; can
 
   const saveMut = useMutation({
     mutationFn: () => {
+      // base_url нужен только адаптерам с needs_base_url (self-hosted биллинги
+      // типа BILLmanager); для Hostkey и подобных эндпоинт фиксирован — не шлём
+      // адрес провайдера, иначе синк уйдёт не туда
+      const base_url = selectedAdapter?.needs_base_url ? (form.base_url || null) : null
       if (editingAccount && !hasCreds) {
         return financeApi.updateAccount(editingAccount.id, {
-          base_url: form.base_url || null, auto_sync: form.auto_sync, low_balance_threshold: threshold,
+          base_url, auto_sync: form.auto_sync, low_balance_threshold: threshold,
         })
       }
       return financeApi.createAccount({
-        provider_id: dialogProvider!.id, adapter: form.adapter, base_url: form.base_url || null,
+        provider_id: dialogProvider!.id, adapter: form.adapter, base_url,
         credentials: form.credentials, auto_sync: form.auto_sync, low_balance_threshold: threshold,
       })
     },

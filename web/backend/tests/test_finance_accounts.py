@@ -171,6 +171,68 @@ class TestBillmanagerAdapter:
                 await adapter.fetch("https://my.waicore.com", {"username": "u", "password": "bad"})
 
 
+# ── Hostkey адаптер ──────────────────────────────────────────────
+
+
+class TestHostkeyAdapter:
+    def test_base_ignores_provider_site_url(self):
+        from web.backend.core.finance.adapters.hostkey import HostkeyAdapter, _DEFAULT_BASE
+
+        a = HostkeyAdapter()
+        # адрес сайта провайдера -> дефолтный invapi-эндпоинт
+        assert a._base("https://hostkey.ru") == _DEFAULT_BASE
+        assert a._base("") == _DEFAULT_BASE
+        assert a._base(None) == _DEFAULT_BASE
+        # явный invapi сохраняется
+        assert a._base("https://invapi.hostkey.com") == "https://invapi.hostkey.com"
+
+    def test_extract_token_rejects_html(self):
+        from web.backend.core.finance.adapters.hostkey import HostkeyAdapter
+
+        assert HostkeyAdapter._extract_token(httpx.Response(200, text="<html><body>site</body></html>")) is None
+        assert HostkeyAdapter._extract_token(httpx.Response(200, json={"token": "TKN"})) == "TKN"
+        assert HostkeyAdapter._extract_token(httpx.Response(200, text="OPAQUE-TOKEN-123")) == "OPAQUE-TOKEN-123"
+
+    @pytest.mark.asyncio
+    async def test_fetch_full_flow_via_invapi(self):
+        from urllib.parse import parse_qs
+        from web.backend.core.finance.adapters.hostkey import HostkeyAdapter
+
+        hosts_seen = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            hosts_seen.append(request.url.host)
+            path = request.url.path
+            body = parse_qs(request.content.decode())
+            if path.endswith("/auth.php"):
+                return httpx.Response(200, json={"token": "TKN"})
+            if path.endswith("/whmcs.php"):
+                action = (body.get("action") or [""])[0]
+                if action == "getcredits":
+                    return httpx.Response(200, json={"credits": {"credit": [
+                        {"amount": "10.50", "currencycode": "USD"},
+                        {"amount": "4.50", "currencycode": "USD"},
+                    ]}})
+                if action == "getclientsproducts":
+                    return httpx.Response(200, json={"products": {"product": [
+                        {"id": 1, "name": "VDS-1", "recurringamount": "5.00",
+                         "billingcycle": "monthly", "nextduedate": "2026-08-10", "status": "Active"},
+                    ]}})
+            return httpx.Response(404)
+
+        adapter = HostkeyAdapter()
+        # передаём адрес сайта провайдера — адаптер обязан уйти на invapi
+        with patch("httpx.AsyncClient", _patched_client(handler)):
+            result = await adapter.fetch("https://hostkey.ru", {"api_key": "KEY"})
+
+        assert all(h.startswith("invapi.") for h in hosts_seen)
+        assert result.balance == 15.0
+        assert result.currency == "USD"
+        assert len(result.services) == 1
+        assert result.services[0].next_due_at == "2026-08-10"
+        assert result.services[0].price == 5.0
+
+
 # ── Автосинк ─────────────────────────────────────────────────────
 
 
