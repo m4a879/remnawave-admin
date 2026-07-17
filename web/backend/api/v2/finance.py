@@ -469,3 +469,24 @@ async def import_panel(admin: AdminUser = Depends(require_permission("finance", 
     """Одноразовый импорт провайдеров/биллинг-нод/истории из панельного infra-billing."""
     from web.backend.core.finance.importer import import_from_panel
     return await import_from_panel()
+
+
+# ── Bedolaga income ──────────────────────────────────────────────
+
+
+@router.get("/bedolaga-income")
+async def bedolaga_income(admin: AdminUser = Depends(require_permission("finance", "view"))):
+    """Живой доход из Bedolaga Bot API (пополнения / выручка с подписок / профит)."""
+    from web.backend.core.finance.bedolaga_income import fetch_income_overview
+    return await fetch_income_overview()
+
+
+@router.post("/import-bedolaga")
+async def import_bedolaga(
+    year: int = Query(..., ge=2020, le=2100),
+    month: int = Query(..., ge=1, le=12),
+    admin: AdminUser = Depends(require_permission("finance", "create")),
+):
+    """Занести выручку с подписок Bedolaga за месяц в историю платежей (идемпотентно)."""
+    from web.backend.core.finance.bedolaga_income import import_month
+    return await import_month(year, month)

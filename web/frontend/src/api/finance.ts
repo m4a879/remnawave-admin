@@ -159,4 +159,17 @@ export const financeApi = {
 
   importFromPanel: async (): Promise<{ providers: number; items: number; payments: number; skipped: number; errors: string[] }> =>
     (await client.post('/finance/import-panel')).data,
+
+  getBedolagaIncome: async (): Promise<BedolagaIncome> =>
+    (await client.get('/finance/bedolaga-income')).data,
+
+  importBedolagaMonth: async (year: number, month: number): Promise<{ month: string; amount: number; count: number; saved: boolean }> =>
+    (await client.post('/finance/import-bedolaga', null, { params: { year, month } })).data,
+}
+
+export interface BedolagaIncome {
+  currency: string
+  total: { deposit_income: number; subscription_income: number; profit: number }
+  today: { deposit_income: number; transactions_count: number }
+  by_payment_method: Record<string, number>
 }

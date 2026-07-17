@@ -3983,7 +3983,17 @@
     "manual": "manual",
     "importPanel": "Import from panel",
     "importDone": "Imported: {{providers}} providers, {{items}} items, {{payments}} payments",
-    "importError": "Panel import failed"
+    "importError": "Panel import failed",
+    "allTime": "all time",
+    "bedolagaIncome": "Bedolaga income",
+    "bedolagaTooltip": "Live data from Bedolaga Bot. \"Subscription revenue\" is what was actually earned on sales; \"Top-ups\" is inflow to user balances; profit is computed by the bot. Only subscription revenue is written to payment history (otherwise double-counting).",
+    "bedolagaSubscription": "Subscription revenue",
+    "bedolagaDeposits": "Balance top-ups",
+    "bedolagaProfit": "Profit (per bot)",
+    "bedolagaToday": "today",
+    "bedolagaByMethod": "By payment method",
+    "bedolagaImport": "Record {{month}} revenue",
+    "bedolagaImported": "Bedolaga revenue for {{month}}: {{amount}} RUB ({{count}} payments) recorded"
   },
   "reports": {
     "title": "Reports",

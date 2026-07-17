@@ -1,6 +1,6 @@
 """Тесты финансового модуля: циклы оплат, API /api/v2/finance, курсы, напоминания, импорт."""
 from datetime import date
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -277,6 +277,57 @@ class TestPanelImport:
         from datetime import date as _date
         insert_call = next(c for c in mock_conn.execute.await_args_list if "INSERT INTO" in c.args[0])
         assert isinstance(insert_call.args[2], _date)
+
+    @pytest.mark.asyncio
+    async def test_bedolaga_month_sums_subscription_and_upserts(self, mock_db_acquire):
+        from web.backend.core.finance import bedolaga_income as bi
+
+        mock_conn, cm = mock_db_acquire
+        mock_conn.fetchval = AsyncMock(return_value=None)  # записи за месяц ещё нет
+        tx_cm = AsyncMock()
+        tx_cm.__aenter__ = AsyncMock(return_value=None)
+        tx_cm.__aexit__ = AsyncMock(return_value=False)
+        mock_conn.transaction = MagicMock(return_value=tx_cm)
+        db = AsyncMock()
+        db.is_connected = True
+        db.acquire = lambda: cm
+
+        client_bd = AsyncMock()
+        # первая страница — 2 платежа по 250 ₽ (25000 коп, знак минус — списание), вторая пустая
+        client_bd.list_transactions = AsyncMock(side_effect=[
+            {"items": [{"amount_kopeks": -25000}, {"amount_kopeks": -25000}]},
+            {"items": []},
+        ])
+        with patch("shared.database.db_service", db), \
+             patch("shared.bedolaga_client.bedolaga_client", client_bd), \
+             patch("web.backend.api.v2.bedolaga.ensure_configured", lambda: None):
+            result = await bi.import_month(2026, 6)
+
+        assert result["amount"] == 500.0
+        assert result["count"] == 2
+        assert result["saved"] is True
+        # INSERT (не UPDATE), kind='income'
+        insert = next(c for c in mock_conn.execute.await_args_list if "INSERT INTO" in c.args[0])
+        assert "'income'" in insert.args[0]
+
+    @pytest.mark.asyncio
+    async def test_bedolaga_income_overview_normalizes(self):
+        from web.backend.core.finance import bedolaga_income as bi
+
+        full = {"transactions": {
+            "totals": {"income_rubles": 1000.0, "subscription_income_rubles": 800.0, "profit_rubles": 750.0},
+            "today": {"income_rubles": 50.0, "transactions_count": 3},
+            "by_payment_method": {"card": {"amount": 100000}},
+        }}
+        client_bd = AsyncMock()
+        client_bd.get_full_stats = AsyncMock(return_value=full)
+        with patch("shared.bedolaga_client.bedolaga_client", client_bd), \
+             patch("web.backend.api.v2.bedolaga.ensure_configured", lambda: None):
+            ov = await bi.fetch_income_overview()
+        assert ov["total"]["subscription_income"] == 800.0
+        assert ov["total"]["deposit_income"] == 1000.0
+        assert ov["total"]["profit"] == 750.0
+        assert ov["by_payment_method"]["card"] == 1000.0  # копейки → рубли
 
     @pytest.mark.asyncio
     async def test_skips_existing_node_items_and_duplicate_payments(self, mock_db_acquire):

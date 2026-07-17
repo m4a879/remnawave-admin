@@ -51,6 +51,8 @@ function fmtMoney(amount: number, currency: string): string {
 function OverviewTab() {
   const { t } = useTranslation()
   const chart = useChartTheme()
+  const qc = useQueryClient()
+  const canCreate = useHasPermission('finance', 'create')
 
   const { data: summary, isLoading, isError, refetch } = useQuery({
     queryKey: ['finance-summary'],
@@ -61,6 +63,28 @@ function OverviewTab() {
     queryKey: ['finance-upcoming'],
     queryFn: () => financeApi.getUpcoming(30),
     staleTime: 60_000,
+  })
+  const { data: bedolaga } = useQuery({
+    queryKey: ['finance-bedolaga-income'],
+    queryFn: financeApi.getBedolagaIncome,
+    staleTime: 120_000,
+    retry: false,  // не настроена (503) → просто прячем блок
+  })
+
+  // Прошлый закрытый месяц для импорта выручки
+  const prevMonth = useMemo(() => {
+    const now = new Date()
+    const d = new Date(now.getFullYear(), now.getMonth() - 1, 1)
+    return { year: d.getFullYear(), month: d.getMonth() + 1, label: d.toLocaleDateString('ru-RU', { month: 'long', year: 'numeric' }) }
+  }, [])
+  const importBedolagaMut = useMutation({
+    mutationFn: () => financeApi.importBedolagaMonth(prevMonth.year, prevMonth.month),
+    onSuccess: (r) => {
+      toast.success(t('finance.bedolagaImported', { month: r.month, amount: r.amount, count: r.count }))
+      qc.invalidateQueries({ queryKey: ['finance-summary'] })
+      qc.invalidateQueries({ queryKey: ['finance-payments'] })
+    },
+    onError: () => toast.error(t('common.error')),
   })
 
   const base = summary?.base_currency || 'RUB'
@@ -106,6 +130,60 @@ function OverviewTab() {
           </>
         )}
       </div>
+
+      {/* Доход Bedolaga (живой) */}
+      {bedolaga && (
+        <Card>
+          <CardHeader className="pb-2">
+            <div className="flex items-center justify-between flex-wrap gap-2">
+              <div className="flex items-center gap-2">
+                <TrendingUp className="w-5 h-5 text-green-400" />
+                <CardTitle className="text-base">{t('finance.bedolagaIncome')}</CardTitle>
+                <InfoTooltip text={t('finance.bedolagaTooltip')} side="right" />
+              </div>
+              {canCreate && (
+                <Button
+                  size="sm" variant="outline" className="gap-1.5"
+                  onClick={() => importBedolagaMut.mutate()}
+                  disabled={importBedolagaMut.isPending}
+                >
+                  <Download className="w-4 h-4" />
+                  {t('finance.bedolagaImport', { month: prevMonth.label })}
+                </Button>
+              )}
+            </div>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div className="bg-[var(--glass-bg)] rounded-lg px-3 py-2.5 border border-[var(--glass-border)]">
+                <p className="text-xs text-muted-foreground">{t('finance.bedolagaSubscription')}</p>
+                <p className="text-lg font-bold text-green-400">{fmtMoney(bedolaga.total.subscription_income, 'RUB')}</p>
+                <p className="text-[11px] text-muted-foreground">{t('finance.allTime')}</p>
+              </div>
+              <div className="bg-[var(--glass-bg)] rounded-lg px-3 py-2.5 border border-[var(--glass-border)]">
+                <p className="text-xs text-muted-foreground">{t('finance.bedolagaDeposits')}</p>
+                <p className="text-lg font-bold text-white">{fmtMoney(bedolaga.total.deposit_income, 'RUB')}</p>
+                <p className="text-[11px] text-muted-foreground">{t('finance.bedolagaToday')}: {fmtMoney(bedolaga.today.deposit_income, 'RUB')}</p>
+              </div>
+              <div className="bg-[var(--glass-bg)] rounded-lg px-3 py-2.5 border border-[var(--glass-border)]">
+                <p className="text-xs text-muted-foreground">{t('finance.bedolagaProfit')}</p>
+                <p className={cn('text-lg font-bold', bedolaga.total.profit >= 0 ? 'text-green-400' : 'text-red-400')}>
+                  {fmtMoney(bedolaga.total.profit, 'RUB')}
+                </p>
+                <p className="text-[11px] text-muted-foreground">{t('finance.allTime')}</p>
+              </div>
+            </div>
+            {Object.keys(bedolaga.by_payment_method).length > 0 && (
+              <div className="flex items-center gap-2 flex-wrap mt-3">
+                <span className="text-xs text-muted-foreground">{t('finance.bedolagaByMethod')}:</span>
+                {Object.entries(bedolaga.by_payment_method).map(([m, amt]) => (
+                  <Badge key={m} variant="outline" className="text-[10px]">{m}: {fmtMoney(amt, 'RUB')}</Badge>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
 
       {/* P&L график + структура расходов */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">

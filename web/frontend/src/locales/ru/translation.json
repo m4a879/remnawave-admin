@@ -3983,7 +3983,17 @@
     "manual": "вручную",
     "importPanel": "Импорт из панели",
     "importDone": "Импортировано: провайдеров {{providers}}, записей {{items}}, платежей {{payments}}",
-    "importError": "Ошибка импорта из панели"
+    "importError": "Ошибка импорта из панели",
+    "allTime": "за всё время",
+    "bedolagaIncome": "Доход Bedolaga",
+    "bedolagaTooltip": "Живые данные из Bedolaga Bot. «Выручка с подписок» — реально заработано на продажах; «Пополнения» — приток на баланс юзеров; профит считает бот. В историю платежей заносится только выручка с подписок (иначе двойной учёт).",
+    "bedolagaSubscription": "Выручка с подписок",
+    "bedolagaDeposits": "Пополнения баланса",
+    "bedolagaProfit": "Профит (по данным бота)",
+    "bedolagaToday": "сегодня",
+    "bedolagaByMethod": "По способам оплаты",
+    "bedolagaImport": "Занести выручку за {{month}}",
+    "bedolagaImported": "Выручка Bedolaga за {{month}}: {{amount}} ₽ ({{count}} платежей) занесена"
   },
   "reports": {
     "title": "Отчёты",
