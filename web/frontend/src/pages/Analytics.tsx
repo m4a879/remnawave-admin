@@ -1025,6 +1025,7 @@ function TrendsCard() {
       const points = tsData?.points || []
       const mapped = points.map((p) => ({
         date: formatDate(p.timestamp.split('T')[0]),
+        rawDate: p.timestamp.split('T')[0],
         value: p.value,
       }))
       const totalGrowth = points.reduce((s, p) => s + p.value, 0)
@@ -1035,6 +1036,7 @@ function TrendsCard() {
 
     const mapped = series.map((p, i) => ({
       date: formatDate(p.date),
+      rawDate: p.date,
       value: p.value,
       prevValue: prevSeries[i]?.value ?? undefined,
     }))
@@ -1137,11 +1139,12 @@ function TrendsCard() {
           <InteractiveChart
             data={chartData}
             xKey="date"
+            rawKey="rawDate"
             height={256}
-            brush
             exportName={`trend-${metric}-${period}`}
             yFormatter={(v) => (metric === 'traffic' ? formatBytesShort(v) : v.toLocaleString())}
             tooltip={<TrendTooltip metric={metric} />}
+            onRangeSelect={(from, to) => { setTrendDateFrom(from.slice(0, 10)); setTrendDateTo(to.slice(0, 10)) }}
             series={
               compare && !isTraffic
                 ? [

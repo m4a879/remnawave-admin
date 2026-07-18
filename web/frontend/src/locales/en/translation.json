@@ -5203,6 +5203,8 @@
       "line": "Line",
       "bar": "Bars"
     },
-    "exportCsv": "Export CSV"
+    "exportCsv": "Export CSV",
+    "resetZoom": "Reset zoom",
+    "dragHint": "Drag across the chart to select a range"
   }
 }
