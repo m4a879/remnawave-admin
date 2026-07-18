@@ -455,7 +455,7 @@ class FinanceMixin:
                 months,
             )
             item_rows = await conn.fetch(
-                f"""SELECT i.kind, i.amount, i.billing_cycle, i.cycle_days, i.currency,
+                f"""SELECT i.id, i.kind, i.amount, i.billing_cycle, i.cycle_days, i.currency,
                            COALESCE(c.name, '—') AS category_name,
                            COALESCE(c.color, '#64748b') AS category_color
                     FROM {FINANCE_ITEMS_TABLE} i
@@ -465,15 +465,15 @@ class FinanceMixin:
             rates = {r["currency"]: _num(r["rate_rub"]) for r in await conn.fetch(
                 f"SELECT currency, rate_rub FROM {FINANCE_RATES_TABLE}"
             )}
-            # предстоящие списания/поступления до конца текущего месяца
-            # (для KPI «за месяц»: факт может быть пуст, пока продления впереди)
-            upcoming_rows = await conn.fetch(
-                f"""SELECT i.kind, i.amount, i.currency
-                    FROM {FINANCE_ITEMS_TABLE} i
-                    WHERE i.status = 'active' AND i.next_due_at IS NOT NULL
-                      AND i.next_due_at >= CURRENT_DATE
-                      AND i.next_due_at < (date_trunc('month', CURRENT_DATE) + INTERVAL '1 month')"""
-            )
+            # записи, по которым в этом месяце УЖЕ был платёж, — их обязательная
+            # часть в KPI заменяется фактом (без двойного счёта)
+            paid_this_month = {
+                r["item_id"] for r in await conn.fetch(
+                    f"""SELECT DISTINCT item_id FROM {FINANCE_PAYMENTS_TABLE}
+                        WHERE item_id IS NOT NULL
+                          AND paid_at >= date_trunc('month', CURRENT_DATE)"""
+                )
+            }
 
         monthly: Dict[str, Dict[str, float]] = {}
         for r in monthly_rows:
@@ -503,14 +503,18 @@ class FinanceMixin:
 
         recurring["net_rub"] = round(recurring["income_rub"] - recurring["expense_rub"], 2)
 
-        # KPI текущего месяца: фактические платежи + предстоящие списания
-        # активных записей до конца месяца (иначе расходы = 0, пока все
-        # продления хостеров впереди)
+        # KPI текущего месяца: факт + обязательные. Обязательная часть — месячный
+        # эквивалент активных регулярных записей, ещё не оплаченных в этом месяце
+        # (оплаченные уже сидят в факте). Так расходы не обнуляются, пока все
+        # продления хостеров впереди, и нет двойного счёта после оплаты.
         cur_key = date.today().strftime("%Y-%m")
         actual = monthly.get(cur_key, {"expense": 0.0, "income": 0.0})
         upcoming = {"expense": 0.0, "income": 0.0}
-        for r in upcoming_rows:
-            upcoming[r["kind"]] += _num(r["amount"]) * rates.get(r["currency"], 1.0)
+        for r in item_rows:
+            if r["id"] in paid_this_month:
+                continue
+            me = monthly_equivalent(_num(r["amount"]), r["billing_cycle"], r["cycle_days"])
+            upcoming[r["kind"]] += me * rates.get(r["currency"], 1.0)
         this_month = {
             "month": cur_key,
             "expense_actual_rub": actual["expense"],
