@@ -198,7 +198,7 @@ class HostkeyAdapter(HosterAdapter):
             raise AdapterError(f"Сеть/HTTP ({action}): {e}")
         except ValueError:
             raise AdapterError(f"Некорректный ответ Invapi на {action}")
-        logger.info("Hostkey %s/%s raw: %s", endpoint, action, str(data)[:400])
+        logger.debug("Hostkey %s/%s raw: %s", endpoint, action, str(data)[:400])
         inner, err = _unwrap_envelope(data)
         if err:
             raise AdapterError(f"{action}: {err}")

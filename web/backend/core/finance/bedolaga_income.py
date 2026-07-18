@@ -70,7 +70,7 @@ async def fetch_income_overview() -> Dict[str, Any]:
     totals = tx.get("totals") or {}
     today = tx.get("today") or {}
     raw_pm = tx.get("by_payment_method") or {}
-    logger.info("Bedolaga by_payment_method raw: %s", str(raw_pm)[:300])
+    logger.debug("Bedolaga by_payment_method raw: %s", str(raw_pm)[:300])
 
     return {
         "currency": "RUB",

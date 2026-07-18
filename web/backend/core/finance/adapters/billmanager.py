@@ -264,7 +264,7 @@ class BillmanagerAdapter(HosterAdapter):
         else:
             # функция отвечает, но список пуст — ключи и elem покажут,
             # в каком поле инстанс держит услуги (не doc.elem)
-            logger.info(
+            logger.debug(
                 "BILLmanager func=%s: пусто, keys=%s, elem=%r",
                 func, [k for k in doc.keys() if not k.startswith("$")] or list(doc.keys())[:25],
                 str(doc.get("elem"))[:200],
