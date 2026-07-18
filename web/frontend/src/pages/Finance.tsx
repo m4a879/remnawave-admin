@@ -388,12 +388,12 @@ function OverviewTab() {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="text-xs text-muted-foreground text-left">
-                    <th className="pb-2 pr-3 font-normal">{t('finance.nodeCosts.node')}</th>
-                    <th className="pb-2 pr-3 font-normal text-right">{t('finance.nodeCosts.monthlyCost')}</th>
-                    <th className="pb-2 pr-3 font-normal text-right">{t('finance.nodeCosts.traffic', { days: nodeCosts!.days })}</th>
-                    <th className="pb-2 pr-3 font-normal text-right">{t('finance.nodeCosts.perGb')}</th>
-                    <th className="pb-2 pr-3 font-normal text-right">{t('finance.nodeCosts.users')}</th>
-                    <th className="pb-2 font-normal text-right">{t('finance.nodeCosts.perUser')}</th>
+                    <th scope="col" className="pb-2 pr-3 font-normal">{t('finance.nodeCosts.node')}</th>
+                    <th scope="col" className="pb-2 pr-3 font-normal text-right">{t('finance.nodeCosts.monthlyCost')}</th>
+                    <th scope="col" className="pb-2 pr-3 font-normal text-right">{t('finance.nodeCosts.traffic', { days: nodeCosts!.days })}</th>
+                    <th scope="col" className="pb-2 pr-3 font-normal text-right">{t('finance.nodeCosts.perGb')}</th>
+                    <th scope="col" className="pb-2 pr-3 font-normal text-right">{t('finance.nodeCosts.users')}</th>
+                    <th scope="col" className="pb-2 font-normal text-right">{t('finance.nodeCosts.perUser')}</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-white/5">
@@ -730,7 +730,7 @@ function ItemsTab({ canCreate, canEdit, canDelete, prefillProvider, onPrefillCon
                   onValueChange={(v) => setForm({ ...form, provider_id: v === 'none' ? null : Number(v) })}>
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="none">—</SelectItem>
+                    <SelectItem value="none">{t('finance.field.noProvider')}</SelectItem>
                     {(provs?.items || []).map((p) => <SelectItem key={p.id} value={String(p.id)}>{p.name}</SelectItem>)}
                   </SelectContent>
                 </Select>
@@ -741,7 +741,7 @@ function ItemsTab({ canCreate, canEdit, canDelete, prefillProvider, onPrefillCon
                   onValueChange={(v) => setForm({ ...form, node_uuid: v === 'none' ? null : v })}>
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="none">—</SelectItem>
+                    <SelectItem value="none">{t('finance.field.noNode')}</SelectItem>
                     {(nodesList || []).map((n) => <SelectItem key={n.uuid} value={n.uuid}>{n.name}</SelectItem>)}
                   </SelectContent>
                 </Select>
@@ -1116,10 +1116,13 @@ function HostersTab({ canCreate, canEdit, canDelete, onAddItem }: {
           return (
             <Card key={p.id}>
               <CardContent className="py-3">
-                <div className="flex items-center gap-2.5 sm:gap-3">
+                {/* хедер целиком раскрывает карточку — шеврон 20px слишком мелкая цель на мобиле */}
+                <div className={cn('flex items-center gap-2.5 sm:gap-3', canExpand && 'cursor-pointer select-none')}
+                  onClick={() => canExpand && toggleExpand(p.id)}>
                   {canExpand ? (
-                    <button type="button" onClick={() => toggleExpand(p.id)}
+                    <button type="button" onClick={(e) => { e.stopPropagation(); toggleExpand(p.id) }}
                       className="shrink-0 text-primary-400 hover:text-primary-300 transition-colors"
+                      aria-expanded={isOpen}
                       title={t(isOpen ? 'finance.hoster.hideServices' : 'finance.hoster.showServices')}>
                       <ChevronDown className={cn('w-5 h-5 transition-transform', isOpen && 'rotate-180')} />
                     </button>
@@ -1140,13 +1143,9 @@ function HostersTab({ canCreate, canEdit, canDelete, onAddItem }: {
                       )}
                     </div>
                     <div className="text-xs text-muted-foreground truncate">
-                      {p.url && <a href={p.url} target="_blank" rel="noreferrer" className="hover:text-primary-400">{p.url.replace(/^https?:\/\//, '').replace(/\/.*$/, '')}</a>}
+                      {p.url && <a href={p.url} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()} className="hover:text-primary-400">{p.url.replace(/^https?:\/\//, '').replace(/\/.*$/, '')}</a>}
                       {p.url ? ' · ' : ''}{t('finance.itemsCount', { count: p.items_count || 0 })}
-                      {hasServices && (
-                        <button type="button" onClick={() => toggleExpand(p.id)} className="hover:text-primary-400">
-                          {' · '}{t('finance.hoster.servicesCount', { count: services.length })}
-                        </button>
-                      )}
+                      {hasServices && <span>{' · '}{t('finance.hoster.servicesCount', { count: services.length })}</span>}
                     </div>
                   </div>
                   <div className="text-right shrink-0">
@@ -1165,23 +1164,25 @@ function HostersTab({ canCreate, canEdit, canDelete, onAddItem }: {
                       </>
                     )}
                   </div>
-                  <div className="flex items-center gap-0.5 shrink-0">
+                  <div className="flex items-center gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
                     {acc && canEdit && (
-                      <Button size="sm" variant="ghost" className="h-8 px-2" title={t('finance.syncNow')}
+                      <Button size="sm" variant="ghost" className="h-8 w-8 p-0" title={t('finance.syncNow')} aria-label={t('finance.syncNow')}
                         onClick={() => syncMut.mutate(acc.id)} disabled={syncMut.isPending}>
                         <RefreshCw className={cn('w-4 h-4', syncMut.isPending && 'animate-spin')} />
                       </Button>
                     )}
                     {(acc ? canEdit : canCreate) && (
-                      <Button size="sm" variant={acc ? 'ghost' : 'outline'} className="h-8 px-2 sm:px-3 gap-1.5"
-                        title={acc ? undefined : t('finance.connectApi')} onClick={() => openDialog(p)}>
+                      <Button size="sm" variant={acc ? 'ghost' : 'outline'} className={cn('h-8 gap-1.5', acc ? 'w-8 p-0' : 'px-2 sm:px-3')}
+                        title={acc ? t('finance.editConnection', { name: p.name }) : t('finance.connectApi')}
+                        aria-label={acc ? t('finance.editConnection', { name: p.name }) : t('finance.connectApi')}
+                        onClick={() => openDialog(p)}>
                         {acc ? <Settings2 className="w-4 h-4" /> : <><Zap className="w-4 h-4" /><span className="hidden sm:inline">{t('finance.connectApi')}</span></>}
                       </Button>
                     )}
                     {(canEdit || canDelete) && (
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
-                          <Button size="sm" variant="ghost" className="h-8 px-1.5">
+                          <Button size="sm" variant="ghost" className="h-8 w-8 p-0" title={t('common.actions')} aria-label={t('common.actions')}>
                             <MoreVertical className="w-4 h-4" />
                           </Button>
                         </DropdownMenuTrigger>
@@ -1214,12 +1215,12 @@ function HostersTab({ canCreate, canEdit, canDelete, onAddItem }: {
                           <div className="flex items-center gap-1.5 min-w-0">
                             <span className="text-sm text-white truncate">{s.name}</span>
                             {s.node_name ? (
-                              <Badge variant="outline" className="text-[9px] text-primary-300 shrink-0" title={t('finance.hoster.nodeBadge')}>
+                              <Badge variant="outline" className="text-[10px] text-primary-300 shrink-0" title={t('finance.hoster.nodeBadge')}>
                                 {s.node_name}
                               </Badge>
                             ) : linked && linked.name !== s.name ? (
                               // не нода панели (панель, бот, мост) — показываем имя связанной записи
-                              <Badge variant="outline" className="text-[9px] text-muted-foreground shrink-0" title={t('finance.hoster.linkedItem', { name: linked.name })}>
+                              <Badge variant="outline" className="text-[10px] text-muted-foreground shrink-0" title={t('finance.hoster.linkedItem', { name: linked.name })}>
                                 {linked.name}
                               </Badge>
                             ) : null}
@@ -1242,15 +1243,15 @@ function HostersTab({ canCreate, canEdit, canDelete, onAddItem }: {
                           )}
                         </div>
                         {linked && (canEdit || canDelete) && (
-                          <div className="flex items-center shrink-0 -mr-2" title={t('finance.hoster.linkedItem', { name: linked.name })}>
+                          <div className="flex items-center gap-1 shrink-0 -mr-2" title={t('finance.hoster.linkedItem', { name: linked.name })}>
                             {canEdit && (
-                              <Button size="sm" variant="ghost" className="h-7 px-1.5" title={t('finance.archive.itemArchive')}
+                              <Button size="sm" variant="ghost" className="h-8 w-8 p-0" title={t('finance.archive.itemArchive')} aria-label={t('finance.archive.itemArchive')}
                                 onClick={() => archiveItemMut.mutate(linked.id)} disabled={archiveItemMut.isPending}>
                                 <Archive className="w-3.5 h-3.5" />
                               </Button>
                             )}
                             {canDelete && (
-                              <Button size="sm" variant="ghost" className="h-7 px-1.5 text-red-400 hover:text-red-300" title={t('common.delete')}
+                              <Button size="sm" variant="ghost" className="h-8 w-8 p-0 text-red-400 hover:text-red-300" title={t('common.delete')} aria-label={t('common.delete')}
                                 onClick={() => setDeleteItemId(linked.id)}>
                                 <Trash2 className="w-3.5 h-3.5" />
                               </Button>
@@ -1272,7 +1273,7 @@ function HostersTab({ canCreate, canEdit, canDelete, onAddItem }: {
                               <div className="flex items-center gap-1.5 min-w-0">
                                 <span className="text-sm text-white truncate">{it.name}</span>
                                 {it.node_name && (
-                                  <Badge variant="outline" className="text-[9px] text-primary-300 shrink-0" title={t('finance.hoster.nodeBadge')}>
+                                  <Badge variant="outline" className="text-[10px] text-primary-300 shrink-0" title={t('finance.hoster.nodeBadge')}>
                                     {it.node_name}
                                   </Badge>
                                 )}
@@ -1295,15 +1296,15 @@ function HostersTab({ canCreate, canEdit, canDelete, onAddItem }: {
                               )}
                             </div>
                             {(canEdit || canDelete) && (
-                              <div className="flex items-center shrink-0 -mr-2">
+                              <div className="flex items-center gap-1 shrink-0 -mr-2">
                                 {canEdit && (
-                                  <Button size="sm" variant="ghost" className="h-7 px-1.5" title={t('finance.archive.itemArchive')}
+                                  <Button size="sm" variant="ghost" className="h-8 w-8 p-0" title={t('finance.archive.itemArchive')} aria-label={t('finance.archive.itemArchive')}
                                     onClick={() => archiveItemMut.mutate(it.id)} disabled={archiveItemMut.isPending}>
                                     <Archive className="w-3.5 h-3.5" />
                                   </Button>
                                 )}
                                 {canDelete && (
-                                  <Button size="sm" variant="ghost" className="h-7 px-1.5 text-red-400 hover:text-red-300" title={t('common.delete')}
+                                  <Button size="sm" variant="ghost" className="h-8 w-8 p-0 text-red-400 hover:text-red-300" title={t('common.delete')} aria-label={t('common.delete')}
                                     onClick={() => setDeleteItemId(it.id)}>
                                     <Trash2 className="w-3.5 h-3.5" />
                                   </Button>
@@ -1472,6 +1473,7 @@ function ArchivedItemRow({ it, canEdit, canDelete, onRestore, onDelete }: {
       <CardContent className="py-2.5 flex items-center gap-2.5">
         <button type="button" onClick={() => setOpen(!open)}
           className="shrink-0 text-primary-400 hover:text-primary-300 transition-colors"
+          aria-expanded={open} aria-label={t('finance.archive.payments')}
           title={t('finance.archive.payments')}>
           <ChevronDown className={cn('w-4 h-4 transition-transform', open && 'rotate-180')} />
         </button>
@@ -1484,15 +1486,15 @@ function ArchivedItemRow({ it, canEdit, canDelete, onRestore, onDelete }: {
         <span className={cn('text-sm font-mono shrink-0', it.kind === 'income' ? 'text-green-400' : 'text-white')}>
           {fmtMoney(it.amount, it.currency)}
         </span>
-        <div className="flex items-center shrink-0 -mr-1">
+        <div className="flex items-center gap-1 shrink-0 -mr-1">
           {canEdit && (
-            <Button size="sm" variant="ghost" className="h-7 px-1.5" title={t('finance.archive.restore')}
+            <Button size="sm" variant="ghost" className="h-8 w-8 p-0" title={t('finance.archive.restore')}
               onClick={() => onRestore(it.id)}>
               <RotateCcw className="w-3.5 h-3.5" />
             </Button>
           )}
           {canDelete && (
-            <Button size="sm" variant="ghost" className="h-7 px-1.5 text-red-400 hover:text-red-300" title={t('common.delete')}
+            <Button size="sm" variant="ghost" className="h-8 w-8 p-0 text-red-400 hover:text-red-300" title={t('common.delete')}
               onClick={() => onDelete(it.id)}>
               <Trash2 className="w-3.5 h-3.5" />
             </Button>
@@ -1588,15 +1590,15 @@ function ArchiveTab({ canEdit, canDelete }: { canEdit: boolean; canDelete: boole
                   <div className="text-sm text-white truncate">{p.name}</div>
                   {p.url && <div className="text-xs text-muted-foreground truncate">{p.url.replace(/^https?:\/\//, '').replace(/\/.*$/, '')}</div>}
                 </div>
-                <div className="flex items-center shrink-0 -mr-1">
+                <div className="flex items-center gap-1 shrink-0 -mr-1">
                   {canEdit && (
-                    <Button size="sm" variant="ghost" className="h-7 px-1.5" title={t('finance.archive.restore')}
+                    <Button size="sm" variant="ghost" className="h-8 w-8 p-0" title={t('finance.archive.restore')}
                       onClick={() => restoreProvMut.mutate(p.id)}>
                       <RotateCcw className="w-3.5 h-3.5" />
                     </Button>
                   )}
                   {canDelete && (
-                    <Button size="sm" variant="ghost" className="h-7 px-1.5 text-red-400 hover:text-red-300" title={t('common.delete')}
+                    <Button size="sm" variant="ghost" className="h-8 w-8 p-0 text-red-400 hover:text-red-300" title={t('common.delete')}
                       onClick={() => setDeleteProviderId(p.id)}>
                       <Trash2 className="w-3.5 h-3.5" />
                     </Button>

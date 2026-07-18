@@ -3948,7 +3948,9 @@
       "cycle": "Billing cycle",
       "cycleDays": "Days per cycle",
       "provider": "Provider",
+      "noProvider": "No provider",
       "node": "Node",
+      "noNode": "No node",
       "nextDue": "Next payment",
       "paymentDate": "Payment date",
       "url": "Dashboard URL"
