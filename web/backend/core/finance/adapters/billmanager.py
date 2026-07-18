@@ -31,7 +31,7 @@ _STATUS = {
 # (на некоторых func=item/service отвечает «управляющий модуль не загружен»).
 # Сначала пробуем единый список, при недоступности — фолбэк на списки по типам.
 _UNIFIED_SERVICE_FUNCS = ("service", "item")
-_TYPED_SERVICE_FUNCS = ("vds", "dedic", "vhost", "domain", "soft", "certificate")
+_TYPED_SERVICE_FUNCS = ("vds", "instances", "vps", "dedic", "vhost", "domain", "soft", "certificate")
 
 
 def _unwrap(v: Any) -> Any:
@@ -177,7 +177,34 @@ class BillmanagerAdapter(HosterAdapter):
                     continue
                 seen.add(key)
                 services.append(svc)
+        if not services:
+            # ничего не нашли ни одной функцией — показать клиентское меню:
+            # в нём видно, как модуль услуг называется у этого инстанса
+            await self._log_client_menu(client, endpoint, credentials)
         return services
+
+    async def _log_client_menu(self, client, endpoint, credentials) -> None:
+        """func=menu: имена доступных клиенту функций (диагностика нестандартных модулей)."""
+        try:
+            doc = await self._call(client, endpoint, "menu", credentials)
+        except AdapterError as e:
+            logger.info("BILLmanager func=menu недоступна (%s)", e)
+            return
+        names: List[str] = []
+
+        def walk(node: Any) -> None:
+            if isinstance(node, dict):
+                nm = _unwrap(node.get("$name")) or _unwrap(node.get("name"))
+                if nm:
+                    names.append(str(nm))
+                for v in node.values():
+                    walk(v)
+            elif isinstance(node, list):
+                for x in node:
+                    walk(x)
+
+        walk(doc.get("menu") or doc)
+        logger.info("BILLmanager меню клиента (funcs): %s", names[:60] or str(doc)[:400])
 
     async def _try_list(self, client, endpoint, func, credentials) -> List[Dict[str, Any]]:
         """Вызвать func со списком услуг; вернуть строки, [] если функция недоступна.
@@ -194,9 +221,13 @@ class BillmanagerAdapter(HosterAdapter):
         if rows:
             logger.info("BILLmanager func=%s: услуг %d", func, len(rows))
         else:
-            # функция отвечает, но список пуст — сырой ответ поможет понять,
+            # функция отвечает, но список пуст — ключи и elem покажут,
             # в каком поле инстанс держит услуги (не doc.elem)
-            logger.info("BILLmanager func=%s: пусто, doc=%s", func, str(doc)[:300])
+            logger.info(
+                "BILLmanager func=%s: пусто, keys=%s, elem=%r",
+                func, [k for k in doc.keys() if not k.startswith("$")] or list(doc.keys())[:25],
+                str(doc.get("elem"))[:200],
+            )
         return rows
 
     @staticmethod
