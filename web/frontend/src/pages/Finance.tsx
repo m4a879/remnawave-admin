@@ -1213,11 +1213,16 @@ function HostersTab({ canCreate, canEdit, canDelete, onAddItem }: {
                         <div className="min-w-0 flex-1">
                           <div className="flex items-center gap-1.5 min-w-0">
                             <span className="text-sm text-white truncate">{s.name}</span>
-                            {s.node_name && (
+                            {s.node_name ? (
                               <Badge variant="outline" className="text-[9px] text-primary-300 shrink-0" title={t('finance.hoster.nodeBadge')}>
                                 {s.node_name}
                               </Badge>
-                            )}
+                            ) : linked && linked.name !== s.name ? (
+                              // не нода панели (панель, бот, мост) — показываем имя связанной записи
+                              <Badge variant="outline" className="text-[9px] text-muted-foreground shrink-0" title={t('finance.hoster.linkedItem', { name: linked.name })}>
+                                {linked.name}
+                              </Badge>
+                            ) : null}
                           </div>
                           {s.specs && <div className="text-xs text-muted-foreground truncate">{s.specs}</div>}
                         </div>
