@@ -206,6 +206,7 @@ async def finance_summary(
     def conv(v_rub: float) -> float:
         return round(v_rub / base_rate, 2)
 
+    tm = summary.get("this_month") or {}
     return {
         "base_currency": base,
         "monthly": [
@@ -221,6 +222,16 @@ async def finance_summary(
             "expense": conv(summary["recurring"].get("expense_rub", 0)),
             "income": conv(summary["recurring"].get("income_rub", 0)),
             "net": conv(summary["recurring"].get("net_rub", 0)),
+        },
+        "this_month": {
+            "month": tm.get("month"),
+            "expense": conv(tm.get("expense_rub", 0)),
+            "income": conv(tm.get("income_rub", 0)),
+            "net": conv(tm.get("net_rub", 0)),
+            "expense_actual": conv(tm.get("expense_actual_rub", 0)),
+            "income_actual": conv(tm.get("income_actual_rub", 0)),
+            "expense_upcoming": conv(tm.get("expense_upcoming_rub", 0)),
+            "income_upcoming": conv(tm.get("income_upcoming_rub", 0)),
         },
     }
 

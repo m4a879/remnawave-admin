@@ -4031,6 +4031,7 @@
     "bedolagaProfit": "Профит (по данным бота)",
     "bedolagaToday": "сегодня",
     "bedolagaByMethod": "По способам оплаты",
+    "factPlusUpcoming": "факт {{actual}} + предстоит {{upcoming}}",
     "hoster": {
       "showServices": "Показать услуги",
       "hideServices": "Свернуть услуги",

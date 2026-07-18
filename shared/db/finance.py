@@ -465,6 +465,15 @@ class FinanceMixin:
             rates = {r["currency"]: _num(r["rate_rub"]) for r in await conn.fetch(
                 f"SELECT currency, rate_rub FROM {FINANCE_RATES_TABLE}"
             )}
+            # предстоящие списания/поступления до конца текущего месяца
+            # (для KPI «за месяц»: факт может быть пуст, пока продления впереди)
+            upcoming_rows = await conn.fetch(
+                f"""SELECT i.kind, i.amount, i.currency
+                    FROM {FINANCE_ITEMS_TABLE} i
+                    WHERE i.status = 'active' AND i.next_due_at IS NOT NULL
+                      AND i.next_due_at >= CURRENT_DATE
+                      AND i.next_due_at < (date_trunc('month', CURRENT_DATE) + INTERVAL '1 month')"""
+            )
 
         monthly: Dict[str, Dict[str, float]] = {}
         for r in monthly_rows:
@@ -494,8 +503,28 @@ class FinanceMixin:
 
         recurring["net_rub"] = round(recurring["income_rub"] - recurring["expense_rub"], 2)
 
+        # KPI текущего месяца: фактические платежи + предстоящие списания
+        # активных записей до конца месяца (иначе расходы = 0, пока все
+        # продления хостеров впереди)
+        cur_key = date.today().strftime("%Y-%m")
+        actual = monthly.get(cur_key, {"expense": 0.0, "income": 0.0})
+        upcoming = {"expense": 0.0, "income": 0.0}
+        for r in upcoming_rows:
+            upcoming[r["kind"]] += _num(r["amount"]) * rates.get(r["currency"], 1.0)
+        this_month = {
+            "month": cur_key,
+            "expense_actual_rub": actual["expense"],
+            "income_actual_rub": actual["income"],
+            "expense_upcoming_rub": round(upcoming["expense"], 2),
+            "income_upcoming_rub": round(upcoming["income"], 2),
+            "expense_rub": round(actual["expense"] + upcoming["expense"], 2),
+            "income_rub": round(actual["income"] + upcoming["income"], 2),
+        }
+        this_month["net_rub"] = round(this_month["income_rub"] - this_month["expense_rub"], 2)
+
         return {
             "monthly": monthly_list,
+            "this_month": this_month,
             "by_category": sorted(by_category.values(), key=lambda c: -c["monthly_rub"]),
             "by_currency": [
                 {"currency": k, "expense_monthly": v["expense"], "income_monthly": v["income"]}

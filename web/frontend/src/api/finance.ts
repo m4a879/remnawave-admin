@@ -71,6 +71,16 @@ export interface FinanceSummary {
   by_category: { category: string; color: string; monthly: number }[]
   by_currency: { currency: string; expense_monthly: number; income_monthly: number }[]
   recurring: { expense: number; income: number; net: number }
+  this_month?: {
+    month: string | null
+    expense: number
+    income: number
+    net: number
+    expense_actual: number
+    income_actual: number
+    expense_upcoming: number
+    income_upcoming: number
+  }
 }
 
 export interface ItemPayload {

@@ -4031,6 +4031,7 @@
     "bedolagaProfit": "Profit (per bot)",
     "bedolagaToday": "today",
     "bedolagaByMethod": "By payment method",
+    "factPlusUpcoming": "actual {{actual}} + upcoming {{upcoming}}",
     "hoster": {
       "showServices": "Show services",
       "hideServices": "Collapse services",
