@@ -22,6 +22,7 @@ import {
   ChevronUp,
   Tag,
   RotateCcw,
+  LayoutGrid,
 } from '@/components/brand/icons'
 import {
   DndContext,
@@ -41,6 +42,11 @@ import {
 } from '@dnd-kit/sortable'
 import { SortableSection } from '@/components/SortableSection'
 import { useOrderPreference } from '@/lib/useOrderPreference'
+import { useWidgetVisibility } from '@/lib/useWidgetVisibility'
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuTrigger, DropdownMenuItem,
+  DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuCheckboxItem,
+} from '@/components/ui/dropdown-menu'
 import { backupApi } from '@/api/backup'
 import {
   BarChart,
@@ -1895,14 +1901,17 @@ export default function Dashboard() {
     useSensor(TouchSensor, { activationConstraint: { delay: 200, tolerance: 8 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   )
-  const widgetIds = order.applyOrder([...DASHBOARD_WIDGETS])
+  const orderedWidgetIds = order.applyOrder([...DASHBOARD_WIDGETS])
+  const visibility = useWidgetVisibility('dashboard-widget-hidden-v1')
+  // рендерим только видимые; drag работает в пределах видимых
+  const widgetIds = orderedWidgetIds.filter((w) => visibility.isVisible(w))
   const handleWidgetDragEnd = (event: DragEndEvent) => {
     const { active, over } = event
     if (!over || active.id === over.id) return
-    const oldIndex = widgetIds.indexOf(String(active.id))
-    const newIndex = widgetIds.indexOf(String(over.id))
+    const oldIndex = orderedWidgetIds.indexOf(String(active.id))
+    const newIndex = orderedWidgetIds.indexOf(String(over.id))
     if (oldIndex < 0 || newIndex < 0) return
-    order.setCustomOrder(arrayMove(widgetIds, oldIndex, newIndex))
+    order.setCustomOrder(arrayMove(orderedWidgetIds, oldIndex, newIndex))
   }
   // Chart state
   const [trafficPeriod, setTrafficPeriod] = useState('7d')
@@ -2136,21 +2145,40 @@ export default function Dashboard() {
         </Card>
       )}
 
-      {/* ── Reset custom layout (shown only if user reordered) ──── */}
-      {order.isCustomized && (
-        <div className="flex justify-end">
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={order.reset}
-            className="h-8 px-2 text-xs text-dark-200 hover:text-white"
-            title={t('dashboard.resetLayout', { defaultValue: 'Сбросить порядок виджетов' })}
-          >
-            <RotateCcw className="w-3.5 h-3.5 mr-1.5" />
-            {t('dashboard.resetLayout', { defaultValue: 'Сбросить порядок виджетов' })}
-          </Button>
-        </div>
-      )}
+      {/* ── Настройка дашборда: показать/скрыть виджеты + сброс ──── */}
+      <div className="flex justify-end">
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="ghost" size="sm" className="h-8 px-2 text-xs text-dark-200 hover:text-white gap-1.5">
+              <LayoutGrid className="w-3.5 h-3.5" />
+              {t('dashboard.customize', { defaultValue: 'Настроить' })}
+              {(visibility.isCustomized || order.isCustomized) && <span className="w-1.5 h-1.5 rounded-full bg-primary-400" />}
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-56">
+            <DropdownMenuLabel>{t('dashboard.widgets', { defaultValue: 'Виджеты' })}</DropdownMenuLabel>
+            {DASHBOARD_WIDGETS.map((w) => (
+              <DropdownMenuCheckboxItem
+                key={w}
+                checked={visibility.isVisible(w)}
+                onCheckedChange={() => visibility.toggle(w)}
+                onSelect={(e) => e.preventDefault()}
+              >
+                {t(`dashboard.widget.${w}`, { defaultValue: w })}
+              </DropdownMenuCheckboxItem>
+            ))}
+            {(visibility.isCustomized || order.isCustomized) && (
+              <>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={() => { order.reset(); visibility.reset() }}>
+                  <RotateCcw className="w-3.5 h-3.5 mr-2" />
+                  {t('dashboard.resetLayout', { defaultValue: 'Сбросить настройки' })}
+                </DropdownMenuItem>
+              </>
+            )}
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
 
       {/* ── Your quota card ──────────────────────────────────────── */}
       <AdminQuotaCard />

@@ -323,7 +323,7 @@
     "syncError": "Sync failed",
     "loadError": "Failed to load data",
     "retry": "Retry",
-    "resetLayout": "Reset widget order",
+    "resetLayout": "Reset layout",
     "period24h": "24h",
     "period7d": "7d",
     "period30d": "30d",
@@ -459,7 +459,17 @@
     "financeTooltip": "Recurring infrastructure P&L and the nearest payment",
     "financeNet": "Net per month",
     "financeExpense": "Expenses/mo",
-    "financeIncome": "Income/mo"
+    "financeIncome": "Income/mo",
+    "widget": {
+      "stats": "Stats",
+      "traffic": "Traffic",
+      "connections": "Connections",
+      "load": "Load",
+      "activity": "Activity",
+      "system": "System"
+    },
+    "customize": "Customize",
+    "widgets": "Widgets"
   },
   "users": {
     "title": "Users",
