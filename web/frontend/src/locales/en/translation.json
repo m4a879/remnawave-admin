@@ -4036,11 +4036,15 @@
       "showServices": "Show services",
       "hideServices": "Collapse services",
       "servicesCount": "servers: {{count}}",
-      "renewsAt": "Renews"
+      "renewsAt": "Renews",
+      "fromApi": "From API",
+      "manualItems": "Items",
+      "addServer": "Add server"
     },
     "period": {
       "monthly": "/mo",
       "yearly": "/yr",
+      "once": "one-time",
       "days": "/{{count}}d"
     }
   },

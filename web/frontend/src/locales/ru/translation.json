@@ -4036,11 +4036,15 @@
       "showServices": "Показать услуги",
       "hideServices": "Свернуть услуги",
       "servicesCount": "серверов: {{count}}",
-      "renewsAt": "Продление"
+      "renewsAt": "Продление",
+      "fromApi": "Из API",
+      "manualItems": "Записи",
+      "addServer": "Добавить сервер"
     },
     "period": {
       "monthly": "в месяц",
       "yearly": "в год",
+      "once": "разово",
       "days": "за {{count}} дн."
     }
   },

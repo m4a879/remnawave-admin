@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useTabParam } from '@/lib/useTabParam'
 import { useTranslation } from 'react-i18next'
@@ -433,7 +433,10 @@ const EMPTY_FORM: ItemPayload = {
   next_due_at: null, url: null, notes: null,
 }
 
-function ItemsTab({ canCreate, canEdit, canDelete }: { canCreate: boolean; canEdit: boolean; canDelete: boolean }) {
+function ItemsTab({ canCreate, canEdit, canDelete, prefillProvider, onPrefillConsumed }: {
+  canCreate: boolean; canEdit: boolean; canDelete: boolean
+  prefillProvider?: number | null; onPrefillConsumed?: () => void
+}) {
   const { t } = useTranslation()
   const qc = useQueryClient()
   const [kindFilter, setKindFilter] = useState<string>('all')
@@ -441,6 +444,16 @@ function ItemsTab({ canCreate, canEdit, canDelete }: { canCreate: boolean; canEd
   const [editing, setEditing] = useState<FinanceItem | null>(null)
   const [form, setForm] = useState<ItemPayload>(EMPTY_FORM)
   const [deleteId, setDeleteId] = useState<number | null>(null)
+
+  // «Добавить сервер» из карточки хостера: открыть диалог с выбранным провайдером
+  useEffect(() => {
+    if (prefillProvider != null) {
+      setEditing(null)
+      setForm({ ...EMPTY_FORM, provider_id: prefillProvider })
+      setDialogOpen(true)
+      onPrefillConsumed?.()
+    }
+  }, [prefillProvider, onPrefillConsumed])
 
   const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ['finance-items', kindFilter],
@@ -786,7 +799,10 @@ const EMPTY_ACCOUNT_FORM = {
   auto_sync: true, low_balance_threshold: '' as string,
 }
 
-function HostersTab({ canCreate, canEdit, canDelete }: { canCreate: boolean; canEdit: boolean; canDelete: boolean }) {
+function HostersTab({ canCreate, canEdit, canDelete, onAddItem }: {
+  canCreate: boolean; canEdit: boolean; canDelete: boolean
+  onAddItem: (providerId: number) => void
+}) {
   const { t } = useTranslation()
   const qc = useQueryClient()
   const { data: provs, isLoading, isError, refetch } = useQuery({
@@ -798,12 +814,32 @@ function HostersTab({ canCreate, canEdit, canDelete }: { canCreate: boolean; can
   const { data: adapters } = useQuery({
     queryKey: ['finance-adapters'], queryFn: financeApi.listAdapters, staleTime: 600_000,
   })
+  const { data: allItems } = useQuery({
+    queryKey: ['finance-items', 'all'],
+    queryFn: () => financeApi.listItems(),
+    staleTime: 30_000,
+  })
 
   const accountByProvider = useMemo(() => {
     const m = new Map<number, FinanceAccount>()
     for (const a of accounts?.items || []) m.set(a.provider_id, a)
     return m
   }, [accounts])
+
+  // Записи по провайдерам — «сервера», заведённые вручную (хостеры без API)
+  const itemsByProvider = useMemo(() => {
+    const m = new Map<number, FinanceItem[]>()
+    for (const it of allItems?.items || []) {
+      if (it.provider_id == null || it.status !== 'active') continue
+      const arr = m.get(it.provider_id) || []
+      arr.push(it)
+      m.set(it.provider_id, arr)
+    }
+    for (const arr of m.values()) {
+      arr.sort((a, b) => (a.next_due_at || '9999').localeCompare(b.next_due_at || '9999'))
+    }
+    return m
+  }, [allItems])
 
   const [dialogProvider, setDialogProvider] = useState<FinanceProvider | null>(null)
   const [form, setForm] = useState(EMPTY_ACCOUNT_FORM)
@@ -819,6 +855,7 @@ function HostersTab({ canCreate, canEdit, canDelete }: { canCreate: boolean; can
   const fmtPeriod = (period: string) => {
     if (period === 'monthly') return t('finance.period.monthly')
     if (period === 'yearly') return t('finance.period.yearly')
+    if (period === 'once') return t('finance.period.once')
     const m = /^days:(\d+)$/.exec(period)
     if (m) return t('finance.period.days', { count: Number(m[1]) })
     return period
@@ -912,6 +949,8 @@ function HostersTab({ canCreate, canEdit, canDelete }: { canCreate: boolean; can
           const low = acc?.balance != null && acc.low_balance_threshold != null && acc.balance < acc.low_balance_threshold
           const services = acc?.services || []
           const hasServices = services.length > 0
+          const provItems = itemsByProvider.get(p.id) || []
+          const canExpand = hasServices || provItems.length > 0 || canCreate
           const isOpen = expanded.has(p.id)
           const sortedServices = [...services].sort((a, b) => {
             if (!a.next_due_at) return 1
@@ -922,7 +961,7 @@ function HostersTab({ canCreate, canEdit, canDelete }: { canCreate: boolean; can
             <Card key={p.id}>
               <CardContent className="py-3">
                 <div className="flex items-center gap-2.5 sm:gap-3">
-                  {hasServices ? (
+                  {canExpand ? (
                     <button type="button" onClick={() => toggleExpand(p.id)}
                       className="shrink-0 text-primary-400 hover:text-primary-300 transition-colors"
                       title={t(isOpen ? 'finance.hoster.hideServices' : 'finance.hoster.showServices')}>
@@ -986,31 +1025,75 @@ function HostersTab({ canCreate, canEdit, canDelete }: { canCreate: boolean; can
                   </div>
                 </div>
               </CardContent>
-              {isOpen && hasServices && (
-                <div className="border-t border-white/5 divide-y divide-white/5 max-h-80 overflow-y-auto">
-                  {sortedServices.map((s, i) => (
-                    <div key={s.external_id || `${p.id}-${i}`} className="px-4 py-2.5 flex items-center gap-3">
-                      <div className="min-w-0 flex-1">
-                        <div className="text-sm text-white truncate">{s.name}</div>
-                        {s.specs && <div className="text-xs text-muted-foreground truncate">{s.specs}</div>}
-                      </div>
-                      <div className="text-right shrink-0">
-                        <div>
-                          {s.price != null ? (
-                            <span className="text-sm font-mono text-white">{fmtMoney(s.price, s.currency || acc?.balance_currency || '')}</span>
-                          ) : (
-                            <span className="text-sm text-muted-foreground">—</span>
-                          )}
-                          {s.period && <span className="text-[10px] text-muted-foreground ml-1">{fmtPeriod(s.period)}</span>}
+              {isOpen && (
+                <div className="border-t border-white/5 max-h-96 overflow-y-auto">
+                  {hasServices && provItems.length > 0 && (
+                    <div className="px-4 pt-2 text-[10px] uppercase tracking-wider text-muted-foreground">{t('finance.hoster.fromApi')}</div>
+                  )}
+                  <div className="divide-y divide-white/5">
+                    {sortedServices.map((s, i) => (
+                      <div key={s.external_id || `${p.id}-${i}`} className="px-4 py-2.5 flex items-center gap-3">
+                        <div className="min-w-0 flex-1">
+                          <div className="text-sm text-white truncate">{s.name}</div>
+                          {s.specs && <div className="text-xs text-muted-foreground truncate">{s.specs}</div>}
                         </div>
-                        {s.next_due_at && (
-                          <div className="text-[11px] text-muted-foreground">
-                            {t('finance.hoster.renewsAt')} {s.next_due_at.slice(0, 10)}
+                        <div className="text-right shrink-0">
+                          <div>
+                            {s.price != null ? (
+                              <span className="text-sm font-mono text-white">{fmtMoney(s.price, s.currency || acc?.balance_currency || '')}</span>
+                            ) : (
+                              <span className="text-sm text-muted-foreground">—</span>
+                            )}
+                            {s.period && <span className="text-[10px] text-muted-foreground ml-1">{fmtPeriod(s.period)}</span>}
                           </div>
-                        )}
+                          {s.next_due_at && (
+                            <div className="text-[11px] text-muted-foreground">
+                              {t('finance.hoster.renewsAt')} {s.next_due_at.slice(0, 10)}
+                            </div>
+                          )}
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    ))}
+                  </div>
+                  {provItems.length > 0 && (
+                    <>
+                      {hasServices && (
+                        <div className="px-4 pt-2 text-[10px] uppercase tracking-wider text-muted-foreground border-t border-white/5">{t('finance.hoster.manualItems')}</div>
+                      )}
+                      <div className="divide-y divide-white/5">
+                        {provItems.map((it) => (
+                          <div key={`it-${it.id}`} className="px-4 py-2.5 flex items-center gap-3">
+                            <div className="min-w-0 flex-1">
+                              <div className="text-sm text-white truncate">{it.name}</div>
+                              {it.notes && <div className="text-xs text-muted-foreground truncate">{it.notes}</div>}
+                            </div>
+                            <div className="text-right shrink-0">
+                              <div>
+                                <span className={cn('text-sm font-mono', it.kind === 'income' ? 'text-green-400' : 'text-white')}>
+                                  {fmtMoney(it.amount, it.currency)}
+                                </span>
+                                <span className="text-[10px] text-muted-foreground ml-1">
+                                  {fmtPeriod(it.billing_cycle === 'days' ? `days:${it.cycle_days || 30}` : it.billing_cycle)}
+                                </span>
+                              </div>
+                              {it.next_due_at && (
+                                <div className="text-[11px] text-muted-foreground">
+                                  {t('finance.hoster.renewsAt')} {it.next_due_at.slice(0, 10)}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </>
+                  )}
+                  {canCreate && (
+                    <button type="button"
+                      className="w-full px-4 py-2.5 text-sm text-primary-400 hover:text-primary-300 hover:bg-white/[0.02] text-left flex items-center gap-2 border-t border-white/5"
+                      onClick={() => onAddItem(p.id)}>
+                      <Plus className="w-4 h-4" /> {t('finance.hoster.addServer')}
+                    </button>
+                  )}
                 </div>
               )}
             </Card>
@@ -1137,6 +1220,8 @@ export default function Finance() {
   const canDelete = useHasPermission('finance', 'delete')
   const [importOpen, setImportOpen] = useState(false)
   const [importCurrency, setImportCurrency] = useState('USD')
+  // провайдер для предзаполнения диалога записи («Добавить сервер» из карточки хостера)
+  const [prefillProvider, setPrefillProvider] = useState<number | null>(null)
 
   const importMut = useMutation({
     mutationFn: () => financeApi.importFromPanel(importCurrency),
@@ -1188,9 +1273,15 @@ export default function Finance() {
           <TabsTrigger value="rates">{t('finance.tabs.rates')}</TabsTrigger>
         </TabsList>
         <TabsContent value="overview"><OverviewTab /></TabsContent>
-        <TabsContent value="items"><ItemsTab canCreate={canCreate} canEdit={canEdit} canDelete={canDelete} /></TabsContent>
+        <TabsContent value="items">
+          <ItemsTab canCreate={canCreate} canEdit={canEdit} canDelete={canDelete}
+            prefillProvider={prefillProvider} onPrefillConsumed={() => setPrefillProvider(null)} />
+        </TabsContent>
         <TabsContent value="payments"><PaymentsTab canDelete={canDelete} /></TabsContent>
-        <TabsContent value="hosters"><HostersTab canCreate={canCreate} canEdit={canEdit} canDelete={canDelete} /></TabsContent>
+        <TabsContent value="hosters">
+          <HostersTab canCreate={canCreate} canEdit={canEdit} canDelete={canDelete}
+            onAddItem={(id) => { setPrefillProvider(id); setTab('items') }} />
+        </TabsContent>
         <TabsContent value="rates"><RatesTab canEdit={canEdit} /></TabsContent>
       </Tabs>
 
