@@ -10,13 +10,46 @@ from typing import Any, Dict, List, Optional
 import asyncpg
 
 from shared.logger import logger
-from shared.db_schema import USER_CONNECTIONS_TABLE, VIOLATIONS_TABLE, USERS_TABLE
+from shared.db_schema import USER_CONNECTIONS_TABLE, VIOLATIONS_TABLE, USERS_TABLE, NODES_TABLE
 from shared.db_query import select_sql, insert_sql, update_sql, delete_sql
 
 
 class ConnectionsMixin:
     # ==================== User Connections (for future device tracking) ====================
-    
+
+    async def get_user_connection_history(
+        self, user_uuid: str, days: int = 30, limit: int = 200,
+    ) -> List[Dict[str, Any]]:
+        """История подключений юзера (сессии) — для таймлайна."""
+        if not self.is_connected:
+            return []
+        async with self.acquire() as conn:
+            rows = await conn.fetch(
+                f"""SELECT uc.id, uc.ip_address, uc.node_uuid::text AS node_uuid,
+                           uc.connected_at, uc.disconnected_at, uc.device_info,
+                           n.name AS node_name
+                    FROM {USER_CONNECTIONS_TABLE} uc
+                    LEFT JOIN {NODES_TABLE} n ON n.uuid = uc.node_uuid
+                    WHERE uc.user_uuid = $1::uuid
+                      AND uc.connected_at >= NOW() - INTERVAL '1 day' * $2
+                    ORDER BY uc.connected_at DESC
+                    LIMIT $3""",
+                user_uuid, days, limit,
+            )
+        out: List[Dict[str, Any]] = []
+        for r in rows:
+            d = dict(r)
+            for k in ("connected_at", "disconnected_at"):
+                if d.get(k) is not None:
+                    d[k] = d[k].isoformat()
+            if isinstance(d.get("device_info"), str):
+                try:
+                    d["device_info"] = json.loads(d["device_info"])
+                except (ValueError, TypeError):
+                    d["device_info"] = None
+            out.append(d)
+        return out
+
     async def add_user_connection(
         self,
         user_uuid: str,

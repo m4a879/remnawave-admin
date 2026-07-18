@@ -1822,7 +1822,15 @@
       "mode_partial": "Частичное",
       "mode_full": "Полный whitelist"
     },
-    "userAgent": "User-Agent"
+    "userAgent": "User-Agent",
+    "timeline": {
+      "title": "Таймлайн",
+      "violation": "Нарушение",
+      "connection": "Подключение",
+      "hwid": "HWID-устройство",
+      "daysShort": "д",
+      "empty": "Событий за период нет"
+    }
   },
   "admins": {
     "title": "Администраторы",

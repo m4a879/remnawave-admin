@@ -1822,7 +1822,15 @@
       "mode_partial": "Partial",
       "mode_full": "Full whitelist"
     },
-    "userAgent": "User-Agent"
+    "userAgent": "User-Agent",
+    "timeline": {
+      "title": "Timeline",
+      "violation": "Violation",
+      "connection": "Connection",
+      "hwid": "HWID device",
+      "daysShort": "d",
+      "empty": "No events for this period"
+    }
   },
   "admins": {
     "title": "Admins",
