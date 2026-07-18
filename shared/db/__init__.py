@@ -15,6 +15,7 @@ from shared.db.network import NetworkMixin
 from shared.db.finance import FinanceMixin
 from shared.db.finance_accounts import FinanceAccountsMixin
 from shared.db.config_versions import ConfigVersionsMixin
+from shared.db.user_presets import UserPresetsMixin
 
 
 class DatabaseService(
@@ -27,6 +28,7 @@ class DatabaseService(
     FinanceMixin,
     FinanceAccountsMixin,
     ConfigVersionsMixin,
+    UserPresetsMixin,
     DatabaseBase,
 ):
     """Async database service assembled from mixin modules."""

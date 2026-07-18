@@ -671,7 +671,16 @@
       "enable": "Enabling user in 5s — click to undo",
       "disable": "Disabling user in 5s — click to undo"
     },
-    "tryDifferentFilter": "Try a different filter combination"
+    "tryDifferentFilter": "Try a different filter combination",
+    "presets": {
+      "apply": "Apply preset",
+      "empty": "No presets yet",
+      "saveCurrent": "Save current settings as a preset",
+      "saveShort": "Save preset",
+      "namePlaceholder": "Preset name",
+      "saved": "Preset saved",
+      "applied": "Preset \"{{name}}\" applied"
+    }
   },
   "userDetail": {
     "strategies": {
