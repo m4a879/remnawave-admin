@@ -4,6 +4,46 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 
+class TestProfileCrud:
+    @pytest.mark.asyncio
+    async def test_create_rename_delete(self, client):
+        api = AsyncMock()
+        api.create_config_profile = AsyncMock(return_value={"response": {"uuid": "u-9", "name": "New One"}})
+        api.update_config_profile = AsyncMock(return_value={"response": {"uuid": "u-9", "name": "Renamed"}})
+        api.delete_config_profile = AsyncMock(return_value={"response": {"isDeleted": True}})
+        db = AsyncMock()
+        with patch("shared.api_client.api_client", api), \
+             patch("shared.database.db_service", db):
+            r = await client.post("/api/v2/config-profiles", json={"name": "New One"})
+            assert r.status_code == 200 and r.json()["uuid"] == "u-9"
+            # в панель ушла дефолтная заготовка конфига
+            sent = api.create_config_profile.await_args.args[0]
+            assert sent["config"]["outbounds"][0]["tag"] == "DIRECT"
+
+            r = await client.patch("/api/v2/config-profiles/u-9/name", json={"name": "Renamed"})
+            assert r.status_code == 200
+            api.update_config_profile.assert_awaited_with({"uuid": "u-9", "name": "Renamed"})
+
+            r = await client.delete("/api/v2/config-profiles/u-9")
+            assert r.status_code == 200
+
+    @pytest.mark.asyncio
+    async def test_create_validates_name(self, client):
+        # кириллица/короткое имя — валидация панельного паттерна на нашей стороне
+        r = await client.post("/api/v2/config-profiles", json={"name": "П"})
+        assert r.status_code == 422
+
+    @pytest.mark.asyncio
+    async def test_x25519_proxy(self, client):
+        api = AsyncMock()
+        api.generate_x25519 = AsyncMock(
+            return_value={"response": {"keypairs": [{"publicKey": "P", "privateKey": "S"}]}})
+        with patch("shared.api_client.api_client", api):
+            r = await client.get("/api/v2/config-profiles/tools/x25519")
+        assert r.status_code == 200
+        assert r.json()["keypairs"][0]["privateKey"] == "S"
+
+
 class TestConfigVersions:
     @pytest.mark.asyncio
     async def test_list_versions(self, client):

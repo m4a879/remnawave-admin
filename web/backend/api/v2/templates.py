@@ -19,6 +19,8 @@ class TemplateCreate(BaseModel):
 class TemplateUpdate(BaseModel):
     name: Optional[str] = None
     templateJson: Optional[dict] = None
+    # YAML-шаблоны (MIHOMO/CLASH/STASH): base64-строка YAML
+    encodedTemplateYaml: Optional[str] = None
 
 
 class ReorderItem(BaseModel):
@@ -86,9 +88,10 @@ async def update_template(
     try:
         from shared.api_client import api_client
         result = await api_client.update_template(
-            uuid=template_uuid,
+            template_uuid,
             name=data.name,
             template_json=data.templateJson,
+            encoded_template_yaml=data.encodedTemplateYaml,
         )
         return result.get("response", result)
     except Exception as e:
