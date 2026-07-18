@@ -3925,7 +3925,8 @@
       "items": "Записи",
       "payments": "Платежи",
       "hosters": "Хостеры",
-      "rates": "Курсы валют"
+      "rates": "Курсы валют",
+      "archive": "Архив"
     },
     "kind": {
       "all": "Все",
@@ -4032,6 +4033,25 @@
     "bedolagaToday": "сегодня",
     "bedolagaByMethod": "По способам оплаты",
     "factPlusUpcoming": "факт {{actual}} + предстоит {{upcoming}}",
+    "archive": {
+      "archiveProvider": "В архив",
+      "deleteProvider": "Удалить хостера",
+      "providerArchived": "Хостер в архиве (записей затронуто: {{count}})",
+      "itemArchive": "В архив",
+      "itemArchived": "Запись в архиве",
+      "restore": "Вернуть из архива",
+      "restored": "Возвращено из архива",
+      "payments": "История оплат",
+      "noPayments": "Оплат не было",
+      "hostersSection": "Хостеры",
+      "itemsSection": "Записи",
+      "empty": "Архив пуст",
+      "emptyHint": "Сюда попадают неактивные хостеры и бывшие сервера — с сохранённой историей оплат",
+      "deleteProviderTitle": "Удалить хостера навсегда?",
+      "deleteProviderDesc": "Хостер и его API-подключение удалятся. Записи и история оплат останутся, но отвяжутся от хостера. Действие необратимо.",
+      "deleteItemTitle": "Удалить запись навсегда?",
+      "deleteItemDesc": "Запись удалится, история оплат сохранится без привязки. Если нужна история — лучше отправить в архив."
+    },
     "hoster": {
       "showServices": "Показать услуги",
       "hideServices": "Свернуть услуги",

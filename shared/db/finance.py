@@ -163,7 +163,7 @@ class FinanceMixin:
     async def update_finance_provider(self, provider_id: int, **fields) -> bool:
         if not self.is_connected:
             return False
-        allowed = {k: v for k, v in fields.items() if k in ("name", "url", "favicon_url", "notes")}
+        allowed = {k: v for k, v in fields.items() if k in ("name", "url", "favicon_url", "notes", "archived")}
         if not allowed:
             return False
         sets = ", ".join(f"{k} = ${i + 2}" for i, k in enumerate(allowed))
@@ -173,6 +173,22 @@ class FinanceMixin:
                 provider_id, *allowed.values(),
             )
         return "UPDATE 1" in result
+
+    async def archive_finance_provider_items(self, provider_id: int) -> int:
+        """Архивировать все активные записи провайдера (каскад при архиве хостера)."""
+        if not self.is_connected:
+            return 0
+        async with self.acquire() as conn:
+            result = await conn.execute(
+                f"""UPDATE {FINANCE_ITEMS_TABLE}
+                    SET status = 'archived', next_due_at = NULL, updated_at = NOW()
+                    WHERE provider_id = $1 AND status = 'active'""",
+                provider_id,
+            )
+        try:
+            return int(result.split()[-1])
+        except (ValueError, IndexError):
+            return 0
 
     async def delete_finance_provider(self, provider_id: int) -> bool:
         if not self.is_connected:

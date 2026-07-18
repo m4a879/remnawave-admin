@@ -71,6 +71,7 @@ class ProviderUpdate(BaseModel):
     url: Optional[str] = None
     favicon_url: Optional[str] = None
     notes: Optional[str] = None
+    archived: Optional[bool] = None
 
 
 class ItemCreate(BaseModel):
@@ -321,7 +322,12 @@ async def update_provider(
     )
     if not ok:
         raise HTTPException(status_code=404, detail="Provider not found")
-    return {"status": "ok"}
+    # архив хостера утаскивает в архив и его активные записи —
+    # иначе они продолжают сидеть в обязательных расходах месяца
+    archived_items = 0
+    if data.archived is True:
+        archived_items = await db_service.archive_finance_provider_items(provider_id)
+    return {"status": "ok", "archived_items": archived_items}
 
 
 @router.delete("/providers/{provider_id}")

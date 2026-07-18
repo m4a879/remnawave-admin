@@ -16,6 +16,7 @@ export interface FinanceProvider {
   url: string | null
   favicon_url: string | null
   notes: string | null
+  archived?: boolean
   items_count?: number
 }
 
@@ -213,6 +214,9 @@ export const financeApi = {
 
   createProvider: async (data: { name: string; url?: string; notes?: string }): Promise<FinanceProvider> =>
     (await client.post('/finance/providers', data)).data,
+
+  updateProvider: async (id: number, data: { name?: string; url?: string; notes?: string; archived?: boolean }): Promise<{ status: string; archived_items?: number }> =>
+    (await client.patch(`/finance/providers/${id}`, data)).data,
 
   deleteProvider: async (id: number): Promise<void> => {
     await client.delete(`/finance/providers/${id}`)

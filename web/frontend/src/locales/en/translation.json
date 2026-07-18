@@ -3925,7 +3925,8 @@
       "items": "Items",
       "payments": "Payments",
       "hosters": "Hosters",
-      "rates": "Rates"
+      "rates": "Rates",
+      "archive": "Archive"
     },
     "kind": {
       "all": "All",
@@ -4032,6 +4033,25 @@
     "bedolagaToday": "today",
     "bedolagaByMethod": "By payment method",
     "factPlusUpcoming": "actual {{actual}} + upcoming {{upcoming}}",
+    "archive": {
+      "archiveProvider": "Archive",
+      "deleteProvider": "Delete hoster",
+      "providerArchived": "Hoster archived ({{count}} items affected)",
+      "itemArchive": "Archive",
+      "itemArchived": "Item archived",
+      "restore": "Restore from archive",
+      "restored": "Restored from archive",
+      "payments": "Payment history",
+      "noPayments": "No payments",
+      "hostersSection": "Hosters",
+      "itemsSection": "Items",
+      "empty": "Archive is empty",
+      "emptyHint": "Inactive hosters and former servers end up here — with their payment history preserved",
+      "deleteProviderTitle": "Delete hoster permanently?",
+      "deleteProviderDesc": "The hoster and its API connection will be removed. Items and payment history are kept but detached. This cannot be undone.",
+      "deleteItemTitle": "Delete item permanently?",
+      "deleteItemDesc": "The item will be removed; payment history is kept unattached. If you need history — archive it instead."
+    },
     "hoster": {
       "showServices": "Show services",
       "hideServices": "Collapse services",

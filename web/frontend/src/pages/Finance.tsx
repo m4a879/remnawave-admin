@@ -19,7 +19,13 @@ import {
   Settings2,
   Zap,
   ChevronDown,
+  Archive,
+  MoreVertical,
+  RotateCcw,
 } from '@/components/brand/icons'
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip,
   ResponsiveContainer, PieChart, Pie, Cell, Legend, LineChart, Line,
@@ -845,6 +851,8 @@ function HostersTab({ canCreate, canEdit, canDelete, onAddItem }: {
   const [form, setForm] = useState(EMPTY_ACCOUNT_FORM)
   const [testResult, setTestResult] = useState<AccountTestResult | null>(null)
   const [deleteAccountId, setDeleteAccountId] = useState<number | null>(null)
+  const [deleteProviderId, setDeleteProviderId] = useState<number | null>(null)
+  const [deleteItemId, setDeleteItemId] = useState<number | null>(null)
   const [expanded, setExpanded] = useState<Set<number>>(new Set())
   const toggleExpand = (id: number) => setExpanded((prev) => {
     const next = new Set(prev)
@@ -868,6 +876,8 @@ function HostersTab({ canCreate, canEdit, canDelete, onAddItem }: {
     qc.invalidateQueries({ queryKey: ['finance-snapshots'] })
     qc.invalidateQueries({ queryKey: ['finance-items'] })
     qc.invalidateQueries({ queryKey: ['finance-upcoming'] })
+    qc.invalidateQueries({ queryKey: ['finance-provs'] })
+    qc.invalidateQueries({ queryKey: ['finance-summary'] })
   }
 
   const openDialog = (p: FinanceProvider) => {
@@ -936,15 +946,41 @@ function HostersTab({ canCreate, canEdit, canDelete, onAddItem }: {
     onSuccess: () => { toast.success(t('common.deleted')); setDeleteAccountId(null); setDialogProvider(null); invalidate() },
   })
 
+  const archiveProvMut = useMutation({
+    mutationFn: (id: number) => financeApi.updateProvider(id, { archived: true }),
+    onSuccess: (r) => {
+      toast.success(t('finance.archive.providerArchived', { count: r.archived_items || 0 }))
+      invalidate()
+    },
+    onError: () => toast.error(t('common.error')),
+  })
+  const deleteProvMut = useMutation({
+    mutationFn: (id: number) => financeApi.deleteProvider(id),
+    onSuccess: () => { toast.success(t('common.deleted')); setDeleteProviderId(null); invalidate() },
+    onError: () => toast.error(t('common.error')),
+  })
+  const archiveItemMut = useMutation({
+    mutationFn: (id: number) => financeApi.updateItem(id, { status: 'archived' }),
+    onSuccess: () => { toast.success(t('finance.archive.itemArchived')); invalidate() },
+    onError: () => toast.error(t('common.error')),
+  })
+  const deleteItemMut = useMutation({
+    mutationFn: (id: number) => financeApi.deleteItem(id),
+    onSuccess: () => { toast.success(t('common.deleted')); setDeleteItemId(null); invalidate() },
+    onError: () => toast.error(t('common.error')),
+  })
+
+  const visibleProvs = (provs?.items || []).filter((p) => !p.archived)
+
   if (isError) return <QueryError onRetry={refetch} />
   if (isLoading) return <div className="space-y-2">{Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-16" />)}</div>
-  if (!provs?.items.length) return <EmptyState icon={Server} title={t('finance.noProviders')} description={t('finance.noProvidersHint')} />
+  if (!visibleProvs.length) return <EmptyState icon={Server} title={t('finance.noProviders')} description={t('finance.noProvidersHint')} />
 
   return (
     <div className="space-y-3">
       <p className="text-sm text-muted-foreground">{t('finance.hostersHint')}</p>
       <div className="space-y-1.5">
-        {provs.items.map((p) => {
+        {visibleProvs.map((p) => {
           const acc = accountByProvider.get(p.id)
           const low = acc?.balance != null && acc.low_balance_threshold != null && acc.balance < acc.low_balance_threshold
           const services = acc?.services || []
@@ -1022,6 +1058,27 @@ function HostersTab({ canCreate, canEdit, canDelete, onAddItem }: {
                         {acc ? <Settings2 className="w-4 h-4" /> : <><Zap className="w-4 h-4" /><span className="hidden sm:inline">{t('finance.connectApi')}</span></>}
                       </Button>
                     )}
+                    {(canEdit || canDelete) && (
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button size="sm" variant="ghost" className="h-8 px-1.5">
+                            <MoreVertical className="w-4 h-4" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          {canEdit && (
+                            <DropdownMenuItem onClick={() => archiveProvMut.mutate(p.id)}>
+                              <Archive className="w-4 h-4 mr-2" /> {t('finance.archive.archiveProvider')}
+                            </DropdownMenuItem>
+                          )}
+                          {canDelete && (
+                            <DropdownMenuItem className="text-red-400 focus:text-red-300" onClick={() => setDeleteProviderId(p.id)}>
+                              <Trash2 className="w-4 h-4 mr-2" /> {t('finance.archive.deleteProvider')}
+                            </DropdownMenuItem>
+                          )}
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    )}
                   </div>
                 </div>
               </CardContent>
@@ -1082,6 +1139,22 @@ function HostersTab({ canCreate, canEdit, canDelete, onAddItem }: {
                                 </div>
                               )}
                             </div>
+                            {(canEdit || canDelete) && (
+                              <div className="flex items-center shrink-0 -mr-2">
+                                {canEdit && (
+                                  <Button size="sm" variant="ghost" className="h-7 px-1.5" title={t('finance.archive.itemArchive')}
+                                    onClick={() => archiveItemMut.mutate(it.id)} disabled={archiveItemMut.isPending}>
+                                    <Archive className="w-3.5 h-3.5" />
+                                  </Button>
+                                )}
+                                {canDelete && (
+                                  <Button size="sm" variant="ghost" className="h-7 px-1.5 text-red-400 hover:text-red-300" title={t('common.delete')}
+                                    onClick={() => setDeleteItemId(it.id)}>
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </Button>
+                                )}
+                              </div>
+                            )}
                           </div>
                         ))}
                       </div>
@@ -1204,6 +1277,206 @@ function HostersTab({ canCreate, canEdit, canDelete, onAddItem }: {
         variant="destructive"
         onConfirm={() => deleteAccountId && deleteMut.mutate(deleteAccountId)}
       />
+      <ConfirmDialog
+        open={deleteProviderId !== null}
+        onOpenChange={(o) => !o && setDeleteProviderId(null)}
+        title={t('finance.archive.deleteProviderTitle')}
+        description={t('finance.archive.deleteProviderDesc')}
+        variant="destructive"
+        onConfirm={() => deleteProviderId && deleteProvMut.mutate(deleteProviderId)}
+      />
+      <ConfirmDialog
+        open={deleteItemId !== null}
+        onOpenChange={(o) => !o && setDeleteItemId(null)}
+        title={t('finance.archive.deleteItemTitle')}
+        description={t('finance.archive.deleteItemDesc')}
+        variant="destructive"
+        onConfirm={() => deleteItemId && deleteItemMut.mutate(deleteItemId)}
+      />
+    </div>
+  )
+}
+
+// ── Archive ──────────────────────────────────────────────────────
+
+function ArchivedItemRow({ it, canEdit, canDelete, onRestore, onDelete }: {
+  it: FinanceItem; canEdit: boolean; canDelete: boolean
+  onRestore: (id: number) => void; onDelete: (id: number) => void
+}) {
+  const { t } = useTranslation()
+  const [open, setOpen] = useState(false)
+  // историю оплат тянем лениво — только при раскрытии записи
+  const { data: pays, isLoading } = useQuery({
+    queryKey: ['finance-payments', 'item', it.id],
+    queryFn: () => financeApi.listPayments({ item_id: it.id }),
+    enabled: open,
+    staleTime: 60_000,
+  })
+  return (
+    <Card>
+      <CardContent className="py-2.5 flex items-center gap-2.5">
+        <button type="button" onClick={() => setOpen(!open)}
+          className="shrink-0 text-primary-400 hover:text-primary-300 transition-colors"
+          title={t('finance.archive.payments')}>
+          <ChevronDown className={cn('w-4 h-4 transition-transform', open && 'rotate-180')} />
+        </button>
+        <div className="min-w-0 flex-1">
+          <div className="text-sm text-white truncate">{it.name}</div>
+          <div className="text-xs text-muted-foreground truncate">
+            {[it.provider_name, it.category_name].filter(Boolean).join(' · ')}
+          </div>
+        </div>
+        <span className={cn('text-sm font-mono shrink-0', it.kind === 'income' ? 'text-green-400' : 'text-white')}>
+          {fmtMoney(it.amount, it.currency)}
+        </span>
+        <div className="flex items-center shrink-0 -mr-1">
+          {canEdit && (
+            <Button size="sm" variant="ghost" className="h-7 px-1.5" title={t('finance.archive.restore')}
+              onClick={() => onRestore(it.id)}>
+              <RotateCcw className="w-3.5 h-3.5" />
+            </Button>
+          )}
+          {canDelete && (
+            <Button size="sm" variant="ghost" className="h-7 px-1.5 text-red-400 hover:text-red-300" title={t('common.delete')}
+              onClick={() => onDelete(it.id)}>
+              <Trash2 className="w-3.5 h-3.5" />
+            </Button>
+          )}
+        </div>
+      </CardContent>
+      {open && (
+        <div className="border-t border-white/5 divide-y divide-white/5 max-h-60 overflow-y-auto">
+          {isLoading ? (
+            <div className="px-4 py-2"><Skeleton className="h-5" /></div>
+          ) : pays?.items.length ? (
+            pays.items.map((pm) => (
+              <div key={pm.id} className="px-4 py-2 flex items-center gap-3 text-sm">
+                <span className="text-muted-foreground shrink-0">{pm.paid_at}</span>
+                {pm.comment && <span className="text-xs text-muted-foreground truncate flex-1">{pm.comment}</span>}
+                <span className={cn('ml-auto font-mono shrink-0', pm.kind === 'income' ? 'text-green-400' : 'text-white')}>
+                  {fmtMoney(pm.amount, pm.currency)}
+                </span>
+              </div>
+            ))
+          ) : (
+            <div className="px-4 py-2 text-sm text-muted-foreground">{t('finance.archive.noPayments')}</div>
+          )}
+        </div>
+      )}
+    </Card>
+  )
+}
+
+function ArchiveTab({ canEdit, canDelete }: { canEdit: boolean; canDelete: boolean }) {
+  const { t } = useTranslation()
+  const qc = useQueryClient()
+  const { data: provs, isLoading: provsLoading } = useQuery({
+    queryKey: ['finance-provs'], queryFn: financeApi.listProviders, staleTime: 300_000,
+  })
+  const { data: archived, isLoading, isError, refetch } = useQuery({
+    queryKey: ['finance-items', 'archived'],
+    queryFn: () => financeApi.listItems({ status: 'archived' }),
+    staleTime: 30_000,
+  })
+  const [deleteItemId, setDeleteItemId] = useState<number | null>(null)
+  const [deleteProviderId, setDeleteProviderId] = useState<number | null>(null)
+
+  const invalidate = () => {
+    qc.invalidateQueries({ queryKey: ['finance-items'] })
+    qc.invalidateQueries({ queryKey: ['finance-provs'] })
+    qc.invalidateQueries({ queryKey: ['finance-summary'] })
+    qc.invalidateQueries({ queryKey: ['finance-upcoming'] })
+  }
+
+  const restoreItemMut = useMutation({
+    mutationFn: (id: number) => financeApi.updateItem(id, { status: 'active' }),
+    onSuccess: () => { toast.success(t('finance.archive.restored')); invalidate() },
+    onError: () => toast.error(t('common.error')),
+  })
+  const deleteItemMut = useMutation({
+    mutationFn: (id: number) => financeApi.deleteItem(id),
+    onSuccess: () => { toast.success(t('common.deleted')); setDeleteItemId(null); invalidate() },
+    onError: () => toast.error(t('common.error')),
+  })
+  const restoreProvMut = useMutation({
+    mutationFn: (id: number) => financeApi.updateProvider(id, { archived: false }),
+    onSuccess: () => { toast.success(t('finance.archive.restored')); invalidate() },
+    onError: () => toast.error(t('common.error')),
+  })
+  const deleteProvMut = useMutation({
+    mutationFn: (id: number) => financeApi.deleteProvider(id),
+    onSuccess: () => { toast.success(t('common.deleted')); setDeleteProviderId(null); invalidate() },
+    onError: () => toast.error(t('common.error')),
+  })
+
+  const archivedProvs = (provs?.items || []).filter((p) => p.archived)
+  const items = archived?.items || []
+
+  if (isError) return <QueryError onRetry={refetch} />
+  if (isLoading || provsLoading) {
+    return <div className="space-y-2">{Array.from({ length: 3 }).map((_, i) => <Skeleton key={i} className="h-14" />)}</div>
+  }
+  if (!archivedProvs.length && !items.length) {
+    return <EmptyState icon={Archive} title={t('finance.archive.empty')} description={t('finance.archive.emptyHint')} />
+  }
+
+  return (
+    <div className="space-y-4">
+      {archivedProvs.length > 0 && (
+        <div className="space-y-1.5">
+          <h3 className="text-sm font-medium text-white">{t('finance.archive.hostersSection')}</h3>
+          {archivedProvs.map((p) => (
+            <Card key={p.id}>
+              <CardContent className="py-2.5 flex items-center gap-2.5">
+                <Server className="w-4 h-4 text-muted-foreground shrink-0" />
+                <div className="min-w-0 flex-1">
+                  <div className="text-sm text-white truncate">{p.name}</div>
+                  {p.url && <div className="text-xs text-muted-foreground truncate">{p.url.replace(/^https?:\/\//, '').replace(/\/.*$/, '')}</div>}
+                </div>
+                <div className="flex items-center shrink-0 -mr-1">
+                  {canEdit && (
+                    <Button size="sm" variant="ghost" className="h-7 px-1.5" title={t('finance.archive.restore')}
+                      onClick={() => restoreProvMut.mutate(p.id)}>
+                      <RotateCcw className="w-3.5 h-3.5" />
+                    </Button>
+                  )}
+                  {canDelete && (
+                    <Button size="sm" variant="ghost" className="h-7 px-1.5 text-red-400 hover:text-red-300" title={t('common.delete')}
+                      onClick={() => setDeleteProviderId(p.id)}>
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </Button>
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      )}
+      {items.length > 0 && (
+        <div className="space-y-1.5">
+          <h3 className="text-sm font-medium text-white">{t('finance.archive.itemsSection')}</h3>
+          {items.map((it) => (
+            <ArchivedItemRow key={it.id} it={it} canEdit={canEdit} canDelete={canDelete}
+              onRestore={(id) => restoreItemMut.mutate(id)} onDelete={(id) => setDeleteItemId(id)} />
+          ))}
+        </div>
+      )}
+      <ConfirmDialog
+        open={deleteItemId !== null}
+        onOpenChange={(o) => !o && setDeleteItemId(null)}
+        title={t('finance.archive.deleteItemTitle')}
+        description={t('finance.archive.deleteItemDesc')}
+        variant="destructive"
+        onConfirm={() => deleteItemId && deleteItemMut.mutate(deleteItemId)}
+      />
+      <ConfirmDialog
+        open={deleteProviderId !== null}
+        onOpenChange={(o) => !o && setDeleteProviderId(null)}
+        title={t('finance.archive.deleteProviderTitle')}
+        description={t('finance.archive.deleteProviderDesc')}
+        variant="destructive"
+        onConfirm={() => deleteProviderId && deleteProvMut.mutate(deleteProviderId)}
+      />
     </div>
   )
 }
@@ -1213,7 +1486,7 @@ function HostersTab({ canCreate, canEdit, canDelete, onAddItem }: {
 export default function Finance() {
   const { t } = useTranslation()
   const qc = useQueryClient()
-  const [tab, setTab] = useTabParam('overview', ['overview', 'items', 'payments', 'hosters', 'rates'])
+  const [tab, setTab] = useTabParam('overview', ['overview', 'items', 'payments', 'hosters', 'rates', 'archive'])
   const canView = useHasPermission('finance', 'view')
   const canCreate = useHasPermission('finance', 'create')
   const canEdit = useHasPermission('finance', 'edit')
@@ -1271,6 +1544,7 @@ export default function Finance() {
           <TabsTrigger value="payments">{t('finance.tabs.payments')}</TabsTrigger>
           <TabsTrigger value="hosters">{t('finance.tabs.hosters')}</TabsTrigger>
           <TabsTrigger value="rates">{t('finance.tabs.rates')}</TabsTrigger>
+          <TabsTrigger value="archive">{t('finance.tabs.archive')}</TabsTrigger>
         </TabsList>
         <TabsContent value="overview"><OverviewTab /></TabsContent>
         <TabsContent value="items">
@@ -1283,6 +1557,7 @@ export default function Finance() {
             onAddItem={(id) => { setPrefillProvider(id); setTab('items') }} />
         </TabsContent>
         <TabsContent value="rates"><RatesTab canEdit={canEdit} /></TabsContent>
+        <TabsContent value="archive"><ArchiveTab canEdit={canEdit} canDelete={canDelete} /></TabsContent>
       </Tabs>
 
       {/* Импорт из панели: панельные суммы безвалютные — выбираем валюту */}
