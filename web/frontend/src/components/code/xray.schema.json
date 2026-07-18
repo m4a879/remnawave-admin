@@ -91,7 +91,8 @@
             "warning",
             "error",
             "none"
-          ]
+          ],
+          "description": "debug/info/warning/error/none — warning для прода"
         },
         "dnsLog": {
           "type": "boolean"
@@ -179,7 +180,8 @@
                 }
               }
             ]
-          }
+          },
+          "description": "DNS-серверы: адрес, \"https://...\", \"fakedns\" и объекты с правилами"
         },
         "hosts": {
           "type": "object"
@@ -216,13 +218,15 @@
             "AsIs",
             "IPIfNonMatch",
             "IPOnDemand"
-          ]
+          ],
+          "description": "AsIs / IPIfNonMatch / IPOnDemand — как резолвить домены в правилах"
         },
         "rules": {
           "type": "array",
           "items": {
             "$ref": "#/definitions/RoutingRule"
-          }
+          },
+          "description": "Правила маршрутизации, применяются сверху вниз до первого совпадения"
         },
         "balancers": {
           "type": "array",
@@ -247,13 +251,15 @@
           "type": "array",
           "items": {
             "type": "string"
-          }
+          },
+          "description": "Домены: full:, domain:, regexp:, geosite:категория"
         },
         "ip": {
           "type": "array",
           "items": {
             "type": "string"
-          }
+          },
+          "description": "IP/CIDR или geoip:код (geoip:private — локальные сети)"
         },
         "port": {
           "type": "string"
@@ -286,7 +292,8 @@
           }
         },
         "outboundTag": {
-          "type": "string"
+          "type": "string",
+          "description": "Тег аутбаунда, куда уходит совпавший трафик"
         },
         "balancerTag": {
           "type": "string"
@@ -330,7 +337,8 @@
       "type": "object",
       "properties": {
         "tag": {
-          "type": "string"
+          "type": "string",
+          "description": "Уникальный тег инбаунда (используется в роутинге и панели)"
         },
         "port": {
           "anyOf": [
@@ -340,10 +348,12 @@
             {
               "type": "string"
             }
-          ]
+          ],
+          "description": "Порт: число, \"env:VAR\" или диапазон \"1000-2000\""
         },
         "listen": {
-          "type": "string"
+          "type": "string",
+          "description": "Адрес прослушивания: IP или unix domain socket"
         },
         "protocol": {
           "type": "string"
@@ -355,7 +365,8 @@
           "$ref": "#/definitions/StreamSettingsObject"
         },
         "sniffing": {
-          "type": "object"
+          "type": "object",
+          "description": "Определение целевого домена из трафика (для роутинга по доменам)"
         },
         "allocate": {
           "type": "object"
@@ -366,10 +377,12 @@
       "type": "object",
       "properties": {
         "tag": {
-          "type": "string"
+          "type": "string",
+          "description": "Уникальный тег аутбаунда (цель outboundTag в роутинге)"
         },
         "sendThrough": {
-          "type": "string"
+          "type": "string",
+          "description": "Исходящий IP при нескольких адресах на сервере"
         },
         "protocol": {
           "type": "string"
@@ -404,20 +417,132 @@
             "raw",
             "httpupgrade",
             "hysteria"
-          ]
+          ],
+          "description": "Транспорт: raw (бывш. tcp), ws, grpc, xhttp, httpupgrade, kcp, hysteria"
         },
         "security": {
           "enum": [
             "none",
             "tls",
             "reality"
-          ]
+          ],
+          "description": "Шифрование транспорта: none / tls / reality"
         },
         "tlsSettings": {
-          "type": "object"
+          "type": "object",
+          "description": "Классический TLS",
+          "properties": {
+            "serverName": {
+              "type": "string",
+              "description": "SNI"
+            },
+            "alpn": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "ALPN, напр. [\"h2\",\"http/1.1\"]"
+            },
+            "certificates": {
+              "type": "array",
+              "items": {
+                "type": "object"
+              },
+              "description": "Сертификаты: certificateFile/keyFile или inline"
+            },
+            "rejectUnknownSni": {
+              "type": "boolean",
+              "description": "Отклонять неизвестные SNI"
+            },
+            "allowInsecure": {
+              "type": "boolean",
+              "description": "Клиент: не проверять сертификат (небезопасно)"
+            },
+            "fingerprint": {
+              "type": "string",
+              "description": "Клиент: uTLS-отпечаток"
+            },
+            "minVersion": {
+              "type": "string",
+              "description": "Мин. версия TLS, напр. \"1.2\""
+            },
+            "maxVersion": {
+              "type": "string",
+              "description": "Макс. версия TLS"
+            }
+          }
         },
         "realitySettings": {
-          "type": "object"
+          "type": "object",
+          "description": "Reality: маскировка под настоящий TLS-сайт (target)",
+          "properties": {
+            "show": {
+              "type": "boolean",
+              "description": "Выводить отладочную информацию"
+            },
+            "target": {
+              "type": "string",
+              "description": "Куда проксировать TLS-рукопожатие (бывш. dest): \"host:port\""
+            },
+            "dest": {
+              "type": "string",
+              "description": "Устаревшее имя target (совместимость)"
+            },
+            "xver": {
+              "type": "number",
+              "description": "PROXY protocol версия к target (0 = выключен)"
+            },
+            "serverNames": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Разрешённые SNI клиентов (домен маскировки)"
+            },
+            "privateKey": {
+              "type": "string",
+              "description": "Приватный ключ x25519 сервера (кнопка «Ключи Reality»)"
+            },
+            "shortIds": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Список shortId клиентов (hex, допустима пустая строка)"
+            },
+            "minClientVer": {
+              "type": "string",
+              "description": "Минимальная версия клиента Xray"
+            },
+            "maxClientVer": {
+              "type": "string",
+              "description": "Максимальная версия клиента Xray"
+            },
+            "maxTimeDiff": {
+              "type": "number",
+              "description": "Допустимое расхождение времени, мс"
+            },
+            "fingerprint": {
+              "type": "string",
+              "description": "Клиент: uTLS-отпечаток (chrome/firefox/safari/random...)"
+            },
+            "serverName": {
+              "type": "string",
+              "description": "Клиент: SNI из serverNames сервера"
+            },
+            "publicKey": {
+              "type": "string",
+              "description": "Клиент: публичный ключ сервера (pbk)"
+            },
+            "shortId": {
+              "type": "string",
+              "description": "Клиент: shortId из списка сервера"
+            },
+            "spiderX": {
+              "type": "string",
+              "description": "Клиент: путь «паука» (обычно /)"
+            }
+          }
         },
         "tcpSettings": {
           "type": "object"
@@ -426,7 +551,26 @@
           "type": "object"
         },
         "wsSettings": {
-          "type": "object"
+          "type": "object",
+          "description": "WebSocket",
+          "properties": {
+            "path": {
+              "type": "string",
+              "description": "Путь, напр. \"/ws\""
+            },
+            "host": {
+              "type": "string",
+              "description": "Значение Host (маскировка/CDN)"
+            },
+            "headers": {
+              "type": "object",
+              "description": "Дополнительные HTTP-заголовки"
+            },
+            "heartbeatPeriod": {
+              "type": "number",
+              "description": "Период пинга, сек"
+            }
+          }
         },
         "httpSettings": {
           "type": "object"
@@ -435,19 +579,74 @@
           "type": "object"
         },
         "grpcSettings": {
-          "type": "object"
+          "type": "object",
+          "description": "gRPC",
+          "properties": {
+            "serviceName": {
+              "type": "string",
+              "description": "Имя сервиса (аналог пути)"
+            },
+            "authority": {
+              "type": "string",
+              "description": "Значение :authority"
+            },
+            "multiMode": {
+              "type": "boolean",
+              "description": "Мульти-режим (экспериментальный)"
+            }
+          }
         },
         "xhttpSettings": {
-          "type": "object"
+          "type": "object",
+          "description": "XHTTP (SplitHTTP): H2/H3 транспорт, дружит с CDN",
+          "properties": {
+            "path": {
+              "type": "string",
+              "description": "Путь, напр. \"/xh\""
+            },
+            "host": {
+              "type": "string",
+              "description": "Значение Host"
+            },
+            "mode": {
+              "enum": [
+                "auto",
+                "packet-up",
+                "stream-up",
+                "stream-one"
+              ],
+              "description": "Режим передачи"
+            },
+            "extra": {
+              "type": "object",
+              "description": "Тонкие настройки (xPaddingBytes, scMaxEachPostBytes...)"
+            }
+          }
         },
         "httpupgradeSettings": {
-          "type": "object"
+          "type": "object",
+          "description": "HTTPUpgrade: WS-подобный без WebSocket-фреймов",
+          "properties": {
+            "path": {
+              "type": "string",
+              "description": "Путь"
+            },
+            "host": {
+              "type": "string",
+              "description": "Значение Host"
+            },
+            "headers": {
+              "type": "object",
+              "description": "Дополнительные HTTP-заголовки"
+            }
+          }
         },
         "hysteriaSettings": {
           "type": "object"
         },
         "sockopt": {
-          "$ref": "#/definitions/SockoptObject"
+          "$ref": "#/definitions/SockoptObject",
+          "description": "Низкоуровневые опции сокета (mark, tcpFastOpen, domainStrategy...)"
         },
         "finalmask": {
           "$ref": "#/definitions/FinalmaskObject"

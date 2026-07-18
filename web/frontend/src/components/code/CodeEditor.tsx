@@ -13,7 +13,7 @@ import {
 import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands'
 import {
   indentOnInput, bracketMatching, foldGutter, foldKeymap,
-  syntaxHighlighting, defaultHighlightStyle,
+  syntaxHighlighting, defaultHighlightStyle, syntaxTree,
 } from '@codemirror/language'
 import { searchKeymap, highlightSelectionMatches } from '@codemirror/search'
 import {
@@ -112,41 +112,136 @@ function makeLinter(validate: ValidateFunction | null) {
   })
 }
 
-/** Автокомплит: ключи из схемы по контексту + официальные протоколы. */
+/**
+ * Контекстный автокомплит по JSON-схеме xray.
+ *
+ * Путь курсора определяется по синтаксическому дереву (Property/Array вверх),
+ * затем резолвится в узел схемы: в позиции ключа — свойства ЭТОЙ секции
+ * (с описаниями, без уже существующих соседей), в позиции значения —
+ * enum-варианты / true/false / официальные протоколы.
+ */
 function makeCompletion(schema: object | null): Extension | null {
   if (!schema) return null
   const definitions: Record<string, any> = (schema as any).definitions || {}
-  const keysOf = (s: any): string[] => {
-    if (!s) return []
-    if (s.$ref) return keysOf(definitions[String(s.$ref).split('/').pop() || ''])
-    if (s.properties) return Object.keys(s.properties)
-    if (s.items) return keysOf(s.items)
-    return []
+  const deref = (s: any): any => {
+    let node = s
+    for (let i = 0; i < 5 && node?.$ref; i++) {
+      node = definitions[String(node.$ref).split('/').pop() || '']
+    }
+    return node
   }
-  const rootKeys = keysOf(schema)
+
+  /** Путь контейнера курсора: имена родительских свойств, массивы — '*'. */
+  const pathAt = (context: CompletionContext): string[] => {
+    const path: string[] = []
+    try {
+      let node: any = syntaxTree(context.state).resolveInner(context.pos, -1)
+      while (node) {
+        if (node.name === 'Property') {
+          const nameNode = node.getChild('PropertyName')
+          // свойство входит в путь, только если курсор ЗА его именем (в значении)
+          if (nameNode && context.pos > nameNode.to) {
+            path.unshift(context.state.sliceDoc(nameNode.from + 1, nameNode.to - 1))
+          }
+        } else if (node.name === 'Array') {
+          path.unshift('*')
+        }
+        node = node.parent
+      }
+    } catch { /* частично невалидный JSON — вернём что собрали */ }
+    return path
+  }
+
+  const schemaNodeAt = (path: string[]): any => {
+    let node: any = deref(schema)
+    for (const seg of path) {
+      node = deref(node)
+      if (!node) return null
+      node = seg === '*' ? deref(node.items) : deref((node.properties || {})[seg])
+    }
+    return deref(node)
+  }
+
+  /** Уже существующие ключи объекта вокруг курсора — их не предлагаем. */
+  const siblingKeys = (context: CompletionContext): Set<string> => {
+    const keys = new Set<string>()
+    try {
+      let node: any = syntaxTree(context.state).resolveInner(context.pos, -1)
+      while (node && node.name !== 'Object') node = node.parent
+      if (node) {
+        for (let ch = node.firstChild; ch; ch = ch.nextSibling) {
+          if (ch.name === 'Property') {
+            const nameNode = ch.getChild('PropertyName')
+            if (nameNode) keys.add(context.state.sliceDoc(nameNode.from + 1, nameNode.to - 1))
+          }
+        }
+      }
+    } catch { /* ignore */ }
+    return keys
+  }
+
+  const typeLabel = (s: any): string => {
+    if (!s) return ''
+    if (s.enum) return s.enum.slice(0, 4).join('|') + (s.enum.length > 4 ? '|…' : '')
+    if (s.$ref) return String(s.$ref).split('/').pop() || ''
+    if (s.type === 'array') return `${typeLabel(s.items) || 'array'}[]`
+    return s.type || ''
+  }
 
   return jsonLanguage.data.of({
     autocomplete: (context: CompletionContext): CompletionResult | null => {
-      const word = context.matchBefore(/[\w"-]*/)
+      const word = context.matchBefore(/[\w"./-]*/)
       if (!word || (word.from === word.to && !context.explicit)) return null
-      const before = context.state.doc.sliceString(0, context.pos)
-      const line = before.split('\n').pop() || ''
+      const line = context.state.doc.lineAt(context.pos)
+      const beforeCursor = context.state.sliceDoc(line.from, context.pos)
+      const inValue = /:\s*"?[\w./-]*$/.test(beforeCursor)
+      const path = pathAt(context)
 
-      // значения protocol — по официальному списку (in/out по контексту выше)
-      if (line.includes('"protocol"')) {
-        const upper = before.lastIndexOf('"inbounds"') > before.lastIndexOf('"outbounds"')
-          ? INBOUND_PROTOCOLS : OUTBOUND_PROTOCOLS
-        return {
-          from: word.from,
-          options: upper.map((p) => ({ label: `"${p}"`, type: 'keyword', detail: 'protocol' })),
+      if (inValue) {
+        // значение: имя поля = последний сегмент пути
+        const field = path[path.length - 1]
+        if (field === 'protocol') {
+          const list = path.includes('inbounds') ? INBOUND_PROTOCOLS : OUTBOUND_PROTOCOLS
+          return {
+            from: word.from,
+            options: list.map((p) => ({ label: `"${p}"`, type: 'keyword', detail: 'protocol' })),
+          }
         }
+        const fieldSchema = schemaNodeAt(path)
+        if (fieldSchema?.enum) {
+          return {
+            from: word.from,
+            options: fieldSchema.enum.map((v: unknown) => ({
+              label: typeof v === 'string' ? `"${v}"` : String(v), type: 'keyword', detail: 'enum',
+            })),
+          }
+        }
+        if (fieldSchema?.type === 'boolean') {
+          return {
+            from: word.from,
+            options: [{ label: 'true', type: 'keyword' }, { label: 'false', type: 'keyword' }],
+          }
+        }
+        return null
       }
 
+      // ключ: свойства секции, в которой стоит курсор
+      const container = schemaNodeAt(path)
+      const props: Record<string, any> = container?.properties || {}
+      const names = Object.keys(props)
+      if (!names.length) return null
+      const existing = siblingKeys(context)
       return {
         from: word.from,
-        options: rootKeys.map((k) => ({
-          label: `"${k}"`, type: 'property', apply: `"${k}": `, detail: 'xray',
-        })),
+        options: names
+          .filter((k) => !existing.has(k))
+          .map((k) => ({
+            label: `"${k}"`,
+            type: 'property',
+            apply: `"${k}": `,
+            detail: typeLabel(props[k]),
+            info: props[k]?.description,
+          })),
       }
     },
   })
