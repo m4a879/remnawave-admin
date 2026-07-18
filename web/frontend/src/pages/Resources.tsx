@@ -1,5 +1,4 @@
 import { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useTabParam } from '@/lib/useTabParam'
 import { useTranslation } from 'react-i18next'
@@ -17,6 +16,8 @@ import {
   FileJson,
 } from '@/components/brand/icons'
 import { resourcesApi, Template, Snippet, ConfigProfile } from '../api/resources'
+import { ProfileEditorDialog } from '@/components/code/ProfileEditorDialog'
+import { CodeEditor } from '@/components/code/CodeEditor'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
@@ -56,7 +57,6 @@ export default function Resources({ embedded }: { embedded?: boolean } = {}) {
   const { t } = useTranslation()
   const { formatDate } = useFormatters()
   const queryClient = useQueryClient()
-  const navigate = useNavigate()
 
   // Permissions
   const canCreate = useHasPermission('resources', 'create')
@@ -286,6 +286,8 @@ export default function Resources({ embedded }: { embedded?: boolean } = {}) {
   // ── Config Profiles ─────────────────────────────────────────────
   const [viewConfigDialogOpen, setViewConfigDialogOpen] = useState(false)
   const [viewingProfile, setViewingProfile] = useState<ConfigProfile | null>(null)
+  // встроенный редактор профиля (вместо перехода на /resources/xray)
+  const [editingProfile, setEditingProfile] = useState<ConfigProfile | null>(null)
   const [computedConfig, setComputedConfig] = useState<unknown>(null)
 
   const { data: configProfiles = [], isLoading: profilesLoading, isError: isProfilesError, refetch: refetchProfiles } = useQuery({
@@ -631,7 +633,7 @@ export default function Resources({ embedded }: { embedded?: boolean } = {}) {
                           title={t('resources.profiles.openInEditor')}
                           onClick={(e) => {
                             e.stopPropagation()
-                            navigate(`/resources/xray?profile=${profile.uuid}`)
+                            setEditingProfile(profile)
                           }}
                         >
                           <FileJson className="w-3.5 h-3.5 mr-1" />
@@ -653,6 +655,9 @@ export default function Resources({ embedded }: { embedded?: boolean } = {}) {
       </Tabs>
 
       {/* ── Dialogs ────────────────────────────────────────────── */}
+
+      {/* Встроенный редактор профиля xray */}
+      <ProfileEditorDialog profile={editingProfile} onClose={() => setEditingProfile(null)} />
 
       {/* Create Token Dialog */}
       <Dialog open={tokenDialogOpen} onOpenChange={setTokenDialogOpen}>
@@ -798,13 +803,13 @@ export default function Resources({ embedded }: { embedded?: boolean } = {}) {
             </div>
             <div>
               <Label htmlFor="editTemplateJson">{t('resources.templates.jsonLabel')}</Label>
-              <textarea
-                id="editTemplateJson"
-                value={editTemplateForm.templateJson}
-                onChange={(e) => setEditTemplateForm({ ...editTemplateForm, templateJson: e.target.value })}
-                className="mt-1 w-full h-64 px-3 py-2 bg-[var(--glass-bg)] border border-[var(--glass-border)] rounded-md text-sm font-mono text-dark-50 focus:outline-none focus:ring-2 focus:ring-primary-500"
-                placeholder="{}"
-              />
+              <div className="mt-1 h-72">
+                <CodeEditor
+                  value={editTemplateForm.templateJson}
+                  onChange={(v) => setEditTemplateForm({ ...editTemplateForm, templateJson: v })}
+                  schema="json"
+                />
+              </div>
             </div>
           </div>
           <DialogFooter>
@@ -851,13 +856,13 @@ export default function Resources({ embedded }: { embedded?: boolean } = {}) {
             </div>
             <div>
               <Label htmlFor="snippetJson">{t('resources.snippets.jsonLabel')}</Label>
-              <textarea
-                id="snippetJson"
-                value={snippetFormData.snippet}
-                onChange={(e) => setSnippetFormData({ ...snippetFormData, snippet: e.target.value })}
-                className="mt-1 w-full h-64 px-3 py-2 bg-[var(--glass-bg)] border border-[var(--glass-border)] rounded-md text-sm font-mono text-dark-50 focus:outline-none focus:ring-2 focus:ring-primary-500"
-                placeholder="{}"
-              />
+              <div className="mt-1 h-72">
+                <CodeEditor
+                  value={snippetFormData.snippet}
+                  onChange={(v) => setSnippetFormData({ ...snippetFormData, snippet: v })}
+                  schema="json"
+                />
+              </div>
             </div>
           </div>
           <DialogFooter>
@@ -893,13 +898,13 @@ export default function Resources({ embedded }: { embedded?: boolean } = {}) {
             </div>
             <div>
               <Label htmlFor="editSnippetJson">{t('resources.snippets.jsonLabel')}</Label>
-              <textarea
-                id="editSnippetJson"
-                value={editSnippetForm.snippet}
-                onChange={(e) => setEditSnippetForm({ ...editSnippetForm, snippet: e.target.value })}
-                className="mt-1 w-full h-64 px-3 py-2 bg-[var(--glass-bg)] border border-[var(--glass-border)] rounded-md text-sm font-mono text-dark-50 focus:outline-none focus:ring-2 focus:ring-primary-500"
-                placeholder="{}"
-              />
+              <div className="mt-1 h-72">
+                <CodeEditor
+                  value={editSnippetForm.snippet}
+                  onChange={(v) => setEditSnippetForm({ ...editSnippetForm, snippet: v })}
+                  schema="json"
+                />
+              </div>
             </div>
           </div>
           <DialogFooter>

@@ -102,4 +102,24 @@ export const resourcesApi = {
     const { data } = await client.get(`/config-profiles/${uuid}/computed-config`)
     return data
   },
+  updateConfigProfile: async (uuid: string, config: Record<string, unknown>) => {
+    const { data } = await client.patch(`/config-profiles/${uuid}`, config)
+    return data
+  },
+  getProfileVersions: async (uuid: string): Promise<{ items: ConfigVersion[] }> => {
+    const { data } = await client.get(`/config-profiles/${uuid}/versions`)
+    return data
+  },
+  getProfileVersion: async (id: number): Promise<ConfigVersion & { content: string }> => {
+    const { data } = await client.get(`/config-profiles/versions/${id}`)
+    return data
+  },
+}
+
+export interface ConfigVersion {
+  id: number
+  entity_name: string | null
+  created_by: string | null
+  created_at: string | null
+  size_bytes?: number
 }

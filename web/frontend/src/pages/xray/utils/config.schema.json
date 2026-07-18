@@ -57,6 +57,21 @@
         },
         "burstObservatory": {
           "$ref": "#/definitions/BurstObservatoryObject"
+        },
+        "env": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "Environment variables for the Xray process (Xray 25.x+)"
+        },
+        "geodata": {
+          "type": "object",
+          "description": "Geodata files management (Xray 25.x+)"
+        },
+        "version": {
+          "type": "string",
+          "description": "Minimal required Xray version constraint (Xray 25.x+)"
         }
       }
     },
@@ -442,22 +457,65 @@
     "SockoptObject": {
       "type": "object",
       "properties": {
-        "mark": { "type": "integer" },
-        "tcpFastOpen": { "type": "boolean" },
-        "tproxy": { "enum": ["off", "tproxy", "redirect"] },
-        "v6only": { "type": "boolean" },
-        "acceptProxyProtocol": { "type": "boolean" },
-        "interface": { "type": "string" },
-        "dialerProxy": { "type": "string" },
-        "domainStrategy": { "enum": ["AsIs", "UseIP", "UseIPv4", "UseIPv6", "UseIPv4v6", "UseIPv6v4"] },
-        "tcpKeepAliveIdle": { "type": "integer" },
-        "tcpKeepAliveInterval": { "type": "integer" },
-        "tcpUserTimeout": { "type": "integer" },
-        "tcpMaxSeg": { "type": "integer" },
-        "tcpCongestion": { "type": "string" },
-        "tcpWindowClamp": { "type": "integer" },
-        "tcpMptcp": { "type": "boolean" },
-        "tcpNoDelay": { "type": "boolean" }
+        "mark": {
+          "type": "integer"
+        },
+        "tcpFastOpen": {
+          "type": "boolean"
+        },
+        "tproxy": {
+          "enum": [
+            "off",
+            "tproxy",
+            "redirect"
+          ]
+        },
+        "v6only": {
+          "type": "boolean"
+        },
+        "acceptProxyProtocol": {
+          "type": "boolean"
+        },
+        "interface": {
+          "type": "string"
+        },
+        "dialerProxy": {
+          "type": "string"
+        },
+        "domainStrategy": {
+          "enum": [
+            "AsIs",
+            "UseIP",
+            "UseIPv4",
+            "UseIPv6",
+            "UseIPv4v6",
+            "UseIPv6v4"
+          ]
+        },
+        "tcpKeepAliveIdle": {
+          "type": "integer"
+        },
+        "tcpKeepAliveInterval": {
+          "type": "integer"
+        },
+        "tcpUserTimeout": {
+          "type": "integer"
+        },
+        "tcpMaxSeg": {
+          "type": "integer"
+        },
+        "tcpCongestion": {
+          "type": "string"
+        },
+        "tcpWindowClamp": {
+          "type": "integer"
+        },
+        "tcpMptcp": {
+          "type": "boolean"
+        },
+        "tcpNoDelay": {
+          "type": "boolean"
+        }
       }
     },
     "FinalmaskObject": {
@@ -483,7 +541,11 @@
     "FinalmaskNoiseItem": {
       "type": "object",
       "properties": {
-        "type": { "enum": ["noise"] },
+        "type": {
+          "enum": [
+            "noise"
+          ]
+        },
         "settings": {
           "type": "object",
           "properties": {
@@ -492,10 +554,21 @@
               "items": {
                 "type": "object",
                 "properties": {
-                  "type": { "enum": ["hex", "rand"] },
-                  "packet": { "type": "string" },
-                  "rand": { "type": "string" },
-                  "delay": { "type": "string" }
+                  "type": {
+                    "enum": [
+                      "hex",
+                      "rand"
+                    ]
+                  },
+                  "packet": {
+                    "type": "string"
+                  },
+                  "rand": {
+                    "type": "string"
+                  },
+                  "delay": {
+                    "type": "string"
+                  }
                 }
               }
             }

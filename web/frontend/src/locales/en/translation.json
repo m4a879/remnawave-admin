@@ -3913,6 +3913,24 @@
       "viewDescription": "Full expanded configuration for this profile",
       "openInEditor": "Open in editor"
     },
+    "editor": {
+      "valid": "Valid",
+      "errors": "Errors: {{count}}",
+      "usedByNodes": "Nodes: {{count}}",
+      "nodesHint": "Used by: {{nodes}}",
+      "format": "Format",
+      "history": "History",
+      "noVersions": "No versions yet — they appear after the first save",
+      "versionLoaded": "Version from {{date}} loaded into the editor — review and save",
+      "invalidJson": "Invalid JSON — fix the errors",
+      "reviewAndSave": "Review changes & save",
+      "diffTitle": "Config changes (before → after)",
+      "diffHint": "Review the changes before writing to the panel",
+      "diffWarnNodes": "⚠️ Profile is active on {{count}} nodes — the panel will apply the new config after saving",
+      "confirmSave": "Save to panel",
+      "saved": "Config saved to panel",
+      "saveError": "Failed to save config"
+    },
     "position": "Position:",
     "uuid": "UUID:"
   },
