@@ -45,6 +45,7 @@ import {
 import { toast } from 'sonner'
 import client from '@/api/client'
 import { advancedAnalyticsApi } from '@/api/advancedAnalytics'
+import { InteractiveChart } from '@/components/charts/InteractiveChart'
 import type { GeoCity, GeoCityUser, TopUser, NodeFleetItem, RetentionCohort, NodeMetricsHistoryItem, NodeMetricsTimeseriesPoint, GeoBalanceNode, GeoBalanceRecommendation, IpExportItem } from '@/api/advancedAnalytics'
 import { ExportDropdown } from '@/components/ExportDropdown'
 import { exportCSV, exportJSON, formatBytesForExport } from '@/lib/export'
@@ -977,7 +978,6 @@ function TrendsCard() {
   const setCompare = (v: boolean) => setCompareRaw(v ? '1' : '')
   const [trendDateFrom, setTrendDateFrom] = useUrlParam('trend_from', '')
   const [trendDateTo, setTrendDateTo] = useUrlParam('trend_to', '')
-  const chart = useChartTheme()
 
   const hasCustomDates = Boolean(trendDateFrom)
   const apiDateFrom = hasCustomDates ? new Date(trendDateFrom).toISOString() : undefined
@@ -1134,63 +1134,23 @@ function TrendsCard() {
             {t('analytics.trends.noData')}
           </div>
         ) : (
-          <div className="h-64">
-            <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={chartData}>
-                <defs>
-                  <linearGradient id="trendGradient" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor={chart.accentColor} stopOpacity={0.3} />
-                    <stop offset="95%" stopColor={chart.accentColor} stopOpacity={0} />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid
-                  strokeDasharray="3 3"
-                  stroke={chart.grid}
-                  vertical={false}
-                />
-                <XAxis
-                  dataKey="date"
-                  tick={{ fill: chart.tick, fontSize: 11 }}
-                  axisLine={false}
-                  tickLine={false}
-                />
-                <YAxis
-                  tick={{ fill: chart.tick, fontSize: 11 }}
-                  axisLine={false}
-                  tickLine={false}
-                  width={50}
-                  tickFormatter={(v: number) =>
-                    metric === 'traffic' ? formatBytesShort(v) : v.toLocaleString()
-                  }
-                />
-                <RechartsTooltip
-                  content={<TrendTooltip metric={metric} />}
-                  cursor={{ stroke: `${chart.accentColor}4D` }}
-                />
-                <Area
-                  type="monotone"
-                  dataKey="value"
-                  stroke={chart.accentColor}
-                  strokeWidth={2}
-                  fill="url(#trendGradient)"
-                  dot={false}
-                  activeDot={{ r: 4, fill: chart.accentColor }}
-                />
-                {compare && !isTraffic && (
-                  <Area
-                    type="monotone"
-                    dataKey="prevValue"
-                    stroke={chart.accentColor}
-                    strokeWidth={1.5}
-                    strokeDasharray="5 5"
-                    strokeOpacity={0.5}
-                    fill="none"
-                    dot={false}
-                  />
-                )}
-              </AreaChart>
-            </ResponsiveContainer>
-          </div>
+          <InteractiveChart
+            data={chartData}
+            xKey="date"
+            height={256}
+            brush
+            exportName={`trend-${metric}-${period}`}
+            yFormatter={(v) => (metric === 'traffic' ? formatBytesShort(v) : v.toLocaleString())}
+            tooltip={<TrendTooltip metric={metric} />}
+            series={
+              compare && !isTraffic
+                ? [
+                    { key: 'value', name: t(`analytics.trends.metric.${metric}`) },
+                    { key: 'prevValue', name: t('analytics.trends.compare', { defaultValue: 'Compare' }), dashed: true },
+                  ]
+                : [{ key: 'value', name: t(`analytics.trends.metric.${metric}`) }]
+            }
+          />
         )}
       </CardContent>
     </Card>

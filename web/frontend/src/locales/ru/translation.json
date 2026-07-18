@@ -5196,5 +5196,13 @@
       "warning": "WARNING",
       "error": "ОШИБКА"
     }
+  },
+  "charts": {
+    "type": {
+      "area": "Область",
+      "line": "Линия",
+      "bar": "Столбцы"
+    },
+    "exportCsv": "Экспорт CSV"
   }
 }

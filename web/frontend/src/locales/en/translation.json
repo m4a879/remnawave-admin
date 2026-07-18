@@ -5196,5 +5196,13 @@
       "warning": "WARNING",
       "error": "ERROR"
     }
+  },
+  "charts": {
+    "type": {
+      "area": "Area",
+      "line": "Line",
+      "bar": "Bars"
+    },
+    "exportCsv": "Export CSV"
   }
 }
