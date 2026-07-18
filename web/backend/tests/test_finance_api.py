@@ -157,27 +157,76 @@ class TestRatesUpdate:
         ])
         db.upsert_finance_rate = AsyncMock()
         with patch("shared.database.db_service", db), \
-             patch.object(rates_mod, "fetch_cbr_rates", AsyncMock(return_value={"USD": 92.5, "EUR": 100.1})):
+             patch.object(rates_mod, "fetch_cbr_rates", AsyncMock(return_value={"USD": 92.5, "EUR": 100.1})), \
+             patch.object(rates_mod, "fetch_crypto_rates", AsyncMock(return_value={"USDT": 92.4})):
             updated = await rates_mod.update_rates()
-        assert updated == 2
+        assert updated == 3  # USD + EUR + USDT (из коробки)
         currencies = {c.args[0] for c in db.upsert_finance_rate.await_args_list}
-        assert currencies == {"USD", "EUR"}  # TRY ручной — не трогаем, RUB не нужен
+        assert currencies == {"USD", "EUR", "USDT"}  # TRY ручной — не трогаем, RUB не нужен
 
     @pytest.mark.asyncio
     async def test_fallback_to_erapi(self):
+        """Фиат, которого нет у ЦБ, добирается через er-api."""
         from web.backend.core.finance import rates as rates_mod
 
         db = AsyncMock()
         db.is_connected = True
-        db.finance_currencies_in_use = AsyncMock(return_value=["USDT"])
+        db.finance_currencies_in_use = AsyncMock(return_value=["KZT"])
         db.get_finance_rates = AsyncMock(return_value=[])
         db.upsert_finance_rate = AsyncMock()
         with patch("shared.database.db_service", db), \
              patch.object(rates_mod, "fetch_cbr_rates", AsyncMock(return_value={"USD": 92.5})), \
-             patch.object(rates_mod, "fetch_erapi_rates", AsyncMock(return_value={"USDT": 92.4})):
+             patch.object(rates_mod, "fetch_erapi_rates", AsyncMock(return_value={"KZT": 0.18})), \
+             patch.object(rates_mod, "fetch_crypto_rates", AsyncMock(return_value={})):
             updated = await rates_mod.update_rates()
-        assert updated >= 1
-        assert any(c.args[0] == "USDT" for c in db.upsert_finance_rate.await_args_list)
+        assert any(c.args[0] == "KZT" for c in db.upsert_finance_rate.await_args_list)
+
+    @pytest.mark.asyncio
+    async def test_crypto_via_coingecko(self):
+        """Крипта идёт через CoinGecko, а не через фиатные источники."""
+        from web.backend.core.finance import rates as rates_mod
+
+        db = AsyncMock()
+        db.is_connected = True
+        db.finance_currencies_in_use = AsyncMock(return_value=["BTC", "TON"])
+        db.get_finance_rates = AsyncMock(return_value=[])
+        db.upsert_finance_rate = AsyncMock()
+        crypto_mock = AsyncMock(return_value={"BTC": 9500000.0, "TON": 550.0, "USDT": 92.0})
+        with patch("shared.database.db_service", db), \
+             patch.object(rates_mod, "fetch_cbr_rates", AsyncMock(return_value={"USD": 92.5, "EUR": 100.0})), \
+             patch.object(rates_mod, "fetch_crypto_rates", crypto_mock):
+            updated = await rates_mod.update_rates()
+        # крипто-фетчу передали только крипту (BTC/TON/USDT), без USD/EUR
+        asked = set(crypto_mock.await_args.args[0])
+        assert asked == {"BTC", "TON", "USDT"}
+        currencies = {c.args[0] for c in db.upsert_finance_rate.await_args_list}
+        assert {"BTC", "TON", "USDT", "USD", "EUR"} <= currencies
+
+    def test_fetch_crypto_rates_parsing(self):
+        """Парсинг ответа CoinGecko (simple/price)."""
+        import asyncio as aio
+        import httpx as hx
+        from web.backend.core.finance import rates as rates_mod
+
+        def handler(request: hx.Request) -> hx.Response:
+            assert "tether" in request.url.params["ids"]
+            return hx.Response(200, json={
+                "tether": {"rub": 92.35},
+                "the-open-network": {"rub": 548.1},
+                "bitcoin": {},  # нет rub -> пропускаем
+            })
+
+        transport = hx.MockTransport(handler)
+        real_client = hx.AsyncClient
+
+        class _Client(real_client):
+            def __init__(self, *a, **kw):
+                kw["transport"] = transport
+                super().__init__(*a, **kw)
+
+        with patch("httpx.AsyncClient", _Client):
+            out = aio.run(rates_mod.fetch_crypto_rates(["USDT", "TON", "BTC"]))
+        assert out == {"USDT": 92.35, "TON": 548.1}
 
 
 # ── Напоминания ──────────────────────────────────────────────────

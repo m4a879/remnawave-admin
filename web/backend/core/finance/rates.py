@@ -1,9 +1,10 @@
 """Курсы валют для финансового модуля.
 
-Источник — ЦБ РФ (XML_daily), fallback — open.er-api.com. Все курсы хранятся
-как rate_rub (сколько рублей за единицу валюты); конвертация между любыми
-валютами идёт кросс-курсом через RUB. Курсы, поправленные вручную
-(is_manual), автообновлением не перезаписываются.
+Фиат — ЦБ РФ (XML_daily), fallback open.er-api.com; крипта — CoinGecko
+(simple/price в RUB, без ключа). Все курсы хранятся как rate_rub (сколько
+рублей за единицу валюты); конвертация между любыми валютами идёт
+кросс-курсом через RUB. Курсы, поправленные вручную (is_manual),
+автообновлением не перезаписываются.
 """
 import asyncio
 import logging
@@ -16,7 +17,23 @@ logger = logging.getLogger(__name__)
 
 CBR_URL = "https://www.cbr.ru/scripts/XML_daily.asp"
 ERAPI_URL = "https://open.er-api.com/v6/latest/RUB"
+COINGECKO_URL = "https://api.coingecko.com/api/v3/simple/price"
 UPDATE_INTERVAL_SECONDS = 24 * 3600
+
+#: поддерживаемые крипто-тикеры -> id CoinGecko
+CRYPTO_IDS = {
+    "USDT": "tether",
+    "USDC": "usd-coin",
+    "BTC": "bitcoin",
+    "ETH": "ethereum",
+    "TON": "the-open-network",
+    "LTC": "litecoin",
+    "TRX": "tron",
+    "SOL": "solana",
+    "BNB": "binancecoin",
+    "XMR": "monero",
+    "DOGE": "dogecoin",
+}
 
 
 async def fetch_cbr_rates() -> Dict[str, float]:
@@ -52,10 +69,34 @@ async def fetch_erapi_rates() -> Dict[str, float]:
     return out
 
 
+async def fetch_crypto_rates(codes: Iterable[str]) -> Dict[str, float]:
+    """CoinGecko simple/price: {"USDT": 79.8, ...} — рублей за монету."""
+    ids = sorted({CRYPTO_IDS[c] for c in codes if c in CRYPTO_IDS})
+    if not ids:
+        return {}
+    async with httpx.AsyncClient(timeout=15) as client:
+        resp = await client.get(COINGECKO_URL, params={
+            "ids": ",".join(ids), "vs_currencies": "rub",
+        })
+        resp.raise_for_status()
+        data = resp.json()
+    id_to_code = {v: k for k, v in CRYPTO_IDS.items()}
+    out: Dict[str, float] = {}
+    for cid, prices in (data or {}).items():
+        code = id_to_code.get(cid)
+        try:
+            rub = float((prices or {}).get("rub") or 0)
+        except (TypeError, ValueError):
+            continue
+        if code and rub > 0:
+            out[code] = rub
+    return out
+
+
 async def update_rates(currencies: Optional[Iterable[str]] = None) -> int:
     """Обновить курсы нужных валют в БД. Возвращает число обновлённых.
 
-    currencies=None -> валюты активных записей + базовая + USD/EUR.
+    currencies=None -> валюты активных записей + базовая + USD/EUR/USDT.
     """
     from shared.database import db_service
     from shared.config_service import config_service
@@ -66,7 +107,8 @@ async def update_rates(currencies: Optional[Iterable[str]] = None) -> int:
     base = str(config_service.get("finance_base_currency", "RUB") or "RUB").upper()
     if currencies is None:
         in_use = await db_service.finance_currencies_in_use()
-        currencies = set(in_use) | {base, "USD", "EUR"}
+        # USDT из коробки — крипто-платежи обычная практика
+        currencies = set(in_use) | {base, "USD", "EUR", "USDT"}
     wanted = {c.upper() for c in currencies if c and c.upper() != "RUB"}
     if not wanted:
         return 0
@@ -78,20 +120,29 @@ async def update_rates(currencies: Optional[Iterable[str]] = None) -> int:
     if not wanted:
         return 0
 
+    crypto_wanted = {c for c in wanted if c in CRYPTO_IDS}
+    fiat_wanted = wanted - crypto_wanted
+
     rates: Dict[str, float] = {}
-    try:
-        rates = await fetch_cbr_rates()
-    except Exception as e:
-        logger.warning("CBR rates fetch failed: %s", e)
-    missing = wanted - set(rates)
-    if missing:
+    if fiat_wanted:
         try:
-            fallback = await fetch_erapi_rates()
-            for code in missing:
-                if code in fallback:
-                    rates[code] = fallback[code]
+            rates = await fetch_cbr_rates()
         except Exception as e:
-            logger.warning("er-api rates fetch failed: %s", e)
+            logger.warning("CBR rates fetch failed: %s", e)
+        missing = fiat_wanted - set(rates)
+        if missing:
+            try:
+                fallback = await fetch_erapi_rates()
+                for code in missing:
+                    if code in fallback:
+                        rates[code] = fallback[code]
+            except Exception as e:
+                logger.warning("er-api rates fetch failed: %s", e)
+    if crypto_wanted:
+        try:
+            rates.update(await fetch_crypto_rates(crypto_wanted))
+        except Exception as e:
+            logger.warning("CoinGecko rates fetch failed: %s", e)
 
     updated = 0
     for code in sorted(wanted):
