@@ -44,6 +44,55 @@ class TestProfileCrud:
         assert r.json()["keypairs"][0]["privateKey"] == "S"
 
 
+class TestTemplateVersions:
+    @pytest.mark.asyncio
+    async def test_patch_template_snapshots_version(self, client):
+        db = AsyncMock()
+        db.list_config_versions = AsyncMock(return_value=[{"id": 1}])  # бейзлайн есть
+        db.save_config_version = AsyncMock(return_value=2)
+        api = AsyncMock()
+        api.update_template = AsyncMock(return_value={"response": {"ok": True}})
+        with patch("shared.database.db_service", db), \
+             patch("shared.api_client.api_client", api):
+            r = await client.patch("/api/v2/templates/t-1", json={"templateJson": {"dns": {}}})
+        assert r.status_code == 200
+        # снапшот версии шаблона записан (entity_type='template')
+        assert db.save_config_version.await_count == 1
+        assert db.save_config_version.await_args.args[:2] == ("template", "t-1")
+        # контент — pretty JSON
+        assert '"dns"' in db.save_config_version.await_args.args[2]
+
+    @pytest.mark.asyncio
+    async def test_template_versions_endpoints(self, client):
+        db = AsyncMock()
+        db.list_config_versions = AsyncMock(return_value=[{"id": 3, "created_by": "admin"}])
+        db.get_config_version = AsyncMock(return_value={"id": 3, "content": "{}"})
+        with patch("shared.database.db_service", db):
+            lst = await client.get("/api/v2/templates/t-1/versions")
+            one = await client.get("/api/v2/templates/versions/3")
+        assert lst.status_code == 200 and lst.json()["items"][0]["id"] == 3
+        assert one.status_code == 200 and one.json()["content"] == "{}"
+
+    @pytest.mark.asyncio
+    async def test_patch_template_yaml_baseline(self, client):
+        """YAML-шаблон: бейзлайн декодирует encodedTemplateYaml в текст."""
+        import base64
+        db = AsyncMock()
+        db.list_config_versions = AsyncMock(return_value=[])  # версий нет
+        db.save_config_version = AsyncMock(return_value=1)
+        api = AsyncMock()
+        yaml_b64 = base64.b64encode(b"proxies: []\n").decode()
+        api.get_template = AsyncMock(return_value={"response": {"name": "M", "encodedTemplateYaml": yaml_b64}})
+        api.update_template = AsyncMock(return_value={"response": {"ok": True}})
+        with patch("shared.database.db_service", db), \
+             patch("shared.api_client.api_client", api):
+            r = await client.patch("/api/v2/templates/t-2", json={"encodedTemplateYaml": yaml_b64})
+        assert r.status_code == 200
+        # два снапшота: бейзлайн (декодированный YAML) + новая версия
+        assert db.save_config_version.await_count == 2
+        assert "proxies:" in db.save_config_version.await_args_list[0].args[2]
+
+
 class TestConfigVersions:
     @pytest.mark.asyncio
     async def test_list_versions(self, client):

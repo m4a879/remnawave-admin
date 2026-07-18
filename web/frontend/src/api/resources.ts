@@ -47,6 +47,14 @@ export const resourcesApi = {
     const { data } = await client.patch(`/templates/${uuid}`, updates)
     return data
   },
+  getTemplateVersions: async (uuid: string): Promise<{ items: ConfigVersion[] }> => {
+    const { data } = await client.get(`/templates/${uuid}/versions`)
+    return data
+  },
+  getTemplateVersion: async (id: number): Promise<ConfigVersion & { content: string }> => {
+    const { data } = await client.get(`/templates/versions/${id}`)
+    return data
+  },
   deleteTemplate: async (uuid: string) => {
     await client.delete(`/templates/${uuid}`)
   },

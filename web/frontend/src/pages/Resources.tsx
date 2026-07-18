@@ -13,6 +13,7 @@ import {
 } from '@/components/brand/icons'
 import { resourcesApi, Template, Snippet, ConfigProfile } from '../api/resources'
 import { ProfileEditorDialog } from '@/components/code/ProfileEditorDialog'
+import { TemplateEditorDialog } from '@/components/code/TemplateEditorDialog'
 import { CodeEditor } from '@/components/code/CodeEditor'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -28,7 +29,6 @@ import { QueryError } from '@/components/QueryError'
 import { useHasPermission } from '@/components/PermissionGate'
 import { cn } from '@/lib/utils'
 import { useFormatters } from '@/lib/useFormatters'
-import { b64DecodeUtf8, b64EncodeUtf8 } from '@/lib/base64'
 
 // Template type options
 const TEMPLATE_TYPES = [
@@ -65,13 +65,9 @@ export default function Resources({ embedded }: { embedded?: boolean } = {}) {
 
   // ── Templates ───────────────────────────────────────────────────
   const [templateDialogOpen, setTemplateDialogOpen] = useState(false)
-  const [editTemplateDialogOpen, setEditTemplateDialogOpen] = useState(false)
   const [templateFormData, setTemplateFormData] = useState({ name: '', templateType: 'XRAY_JSON' })
+  // редактирование шаблона — вынесено во встроенный редактор (секции/дифф/история)
   const [editingTemplate, setEditingTemplate] = useState<Template | null>(null)
-  // isYaml: MIHOMO/CLASH/STASH хранят YAML (encodedTemplateYaml, base64), не JSON
-  const [editTemplateForm, setEditTemplateForm] = useState({ name: '', templateJson: '', isYaml: false })
-  const [editTemplateLoading, setEditTemplateLoading] = useState(false)
-  const [editTemplateErrors, setEditTemplateErrors] = useState(0)
   const [deleteTemplateConfirm, setDeleteTemplateConfirm] = useState<string | null>(null)
 
   const { data: templates = [], isLoading: templatesLoading, isError: isTemplatesError, refetch: refetchTemplates } = useQuery({
@@ -93,22 +89,6 @@ export default function Resources({ embedded }: { embedded?: boolean } = {}) {
     },
   })
 
-  const updateTemplateMutation = useMutation({
-    mutationFn: (data: { uuid: string; name?: string; templateJson?: Record<string, unknown>; encodedTemplateYaml?: string }) =>
-      resourcesApi.updateTemplate(data.uuid, {
-        name: data.name, templateJson: data.templateJson, encodedTemplateYaml: data.encodedTemplateYaml,
-      }),
-    onSuccess: () => {
-      setEditTemplateDialogOpen(false)
-      setEditingTemplate(null)
-      queryClient.invalidateQueries({ queryKey: ['templates'] })
-      toast.success(t('resources.templates.updated'))
-    },
-    onError: () => {
-      toast.error(t('resources.templates.updateError'))
-    },
-  })
-
   const deleteTemplateMutation = useMutation({
     mutationFn: (uuid: string) => resourcesApi.deleteTemplate(uuid),
     onSuccess: () => {
@@ -120,67 +100,6 @@ export default function Resources({ embedded }: { embedded?: boolean } = {}) {
       toast.error(t('resources.templates.deleteError'))
     },
   })
-
-  const openEditTemplate = async (template: Template) => {
-    // список шаблонов не содержит контента (templateJson/encodedTemplateYaml) —
-    // грузим полный шаблон по uuid
-    setEditingTemplate(template)
-    const yamlTypes = ['MIHOMO', 'CLASH', 'STASH']
-    const isYamlType = yamlTypes.includes(template.templateType)
-    setEditTemplateForm({ name: template.name, templateJson: '', isYaml: isYamlType })
-    setEditTemplateErrors(0)
-    setEditTemplateLoading(true)
-    setEditTemplateDialogOpen(true)
-    try {
-      const full = await resourcesApi.getTemplate(template.uuid)
-      const isYaml = !!full.encodedTemplateYaml || isYamlType
-      setEditTemplateForm({
-        name: full.name,
-        templateJson: full.encodedTemplateYaml
-          ? b64DecodeUtf8(full.encodedTemplateYaml)
-          : JSON.stringify(full.templateJson ?? {}, null, 2),
-        isYaml,
-      })
-    } catch {
-      toast.error(t('common.error'))
-    } finally {
-      setEditTemplateLoading(false)
-    }
-  }
-
-  const formatEditTemplate = () => {
-    if (editTemplateForm.isYaml) return
-    try {
-      setEditTemplateForm({
-        ...editTemplateForm,
-        templateJson: JSON.stringify(JSON.parse(editTemplateForm.templateJson), null, 2),
-      })
-    } catch {
-      toast.error(t('resources.templates.invalidJson'))
-    }
-  }
-
-  const handleUpdateTemplate = () => {
-    if (!editingTemplate) return
-    if (editTemplateForm.isYaml) {
-      updateTemplateMutation.mutate({
-        uuid: editingTemplate.uuid,
-        name: editTemplateForm.name,
-        encodedTemplateYaml: b64EncodeUtf8(editTemplateForm.templateJson),
-      })
-      return
-    }
-    try {
-      const json = JSON.parse(editTemplateForm.templateJson)
-      updateTemplateMutation.mutate({
-        uuid: editingTemplate.uuid,
-        name: editTemplateForm.name,
-        templateJson: json,
-      })
-    } catch {
-      toast.error(t('resources.templates.invalidJson'))
-    }
-  }
 
   // ── Snippets ────────────────────────────────────────────────────
   const [snippetDialogOpen, setSnippetDialogOpen] = useState(false)
@@ -396,7 +315,7 @@ export default function Resources({ embedded }: { embedded?: boolean } = {}) {
                 <Card
                   key={template.uuid}
                   className="border-[var(--glass-border)] bg-[var(--glass-bg)] hover:border-[var(--glass-border)] transition-colors cursor-pointer"
-                  onClick={() => canUpdate && openEditTemplate(template)}
+                  onClick={() => canUpdate && setEditingTemplate(template)}
                 >
                   <CardContent className="p-4">
                     <div className="space-y-3">
@@ -595,6 +514,9 @@ export default function Resources({ embedded }: { embedded?: boolean } = {}) {
       {/* Встроенный редактор профиля xray */}
       <ProfileEditorDialog profile={editingProfile} onClose={() => setEditingProfile(null)} />
 
+      {/* Встроенный редактор шаблона (секции/дифф/история) */}
+      <TemplateEditorDialog template={editingTemplate} onClose={() => setEditingTemplate(null)} />
+
       {/* Создание профиля */}
       <Dialog open={createProfileOpen} onOpenChange={setCreateProfileOpen}>
         <DialogContent className="sm:max-w-md">
@@ -703,68 +625,6 @@ export default function Resources({ embedded }: { embedded?: boolean } = {}) {
         </DialogContent>
       </Dialog>
 
-      {/* Edit Template Dialog */}
-      <Dialog open={editTemplateDialogOpen} onOpenChange={setEditTemplateDialogOpen}>
-        <DialogContent className="w-[97vw] max-w-[1100px] h-[88vh] flex flex-col gap-3 p-4 sm:p-5">
-          <DialogHeader className="shrink-0">
-            <div className="flex items-center gap-2 flex-wrap pr-8">
-              <DialogTitle>{t('resources.templates.editTitle')}</DialogTitle>
-              <Badge variant="outline" className="text-[10px]">
-                {editingTemplate?.templateType}{editTemplateForm.isYaml ? ' · YAML' : ' · JSON'}
-              </Badge>
-              {!editTemplateForm.isYaml && !editTemplateLoading && (
-                editTemplateErrors > 0 ? (
-                  <Badge className="bg-red-500/20 text-red-300 text-[10px]">
-                    {t('resources.editor.errors', { count: editTemplateErrors })}
-                  </Badge>
-                ) : (
-                  <Badge className="bg-green-500/20 text-green-300 text-[10px]">{t('resources.editor.valid')}</Badge>
-                )
-              )}
-            </div>
-          </DialogHeader>
-          <div className="shrink-0">
-            <Label htmlFor="editTemplateName">{t('resources.templates.nameLabel')}</Label>
-            <Input
-              id="editTemplateName"
-              value={editTemplateForm.name}
-              onChange={(e) => setEditTemplateForm({ ...editTemplateForm, name: e.target.value })}
-              className="mt-1"
-            />
-          </div>
-          <div className="flex-1 min-h-0">
-            {editTemplateLoading ? (
-              <Skeleton className="h-full w-full" />
-            ) : (
-              <CodeEditor
-                key={`${editingTemplate?.uuid}-${editTemplateForm.isYaml ? 'yaml' : 'json'}`}
-                value={editTemplateForm.templateJson}
-                onChange={(v) => setEditTemplateForm({ ...editTemplateForm, templateJson: v })}
-                schema={editTemplateForm.isYaml ? 'yaml' : 'json'}
-                onDiagnostics={setEditTemplateErrors}
-              />
-            )}
-          </div>
-          <DialogFooter className="shrink-0 flex-wrap gap-2 sm:justify-between">
-            {!editTemplateForm.isYaml ? (
-              <Button variant="outline" size="sm" onClick={formatEditTemplate}>
-                {t('resources.editor.format')}
-              </Button>
-            ) : <span />}
-            <div className="flex items-center gap-2">
-              <Button variant="outline" onClick={() => setEditTemplateDialogOpen(false)}>
-                {t('common.cancel')}
-              </Button>
-              <Button
-                onClick={handleUpdateTemplate}
-                disabled={!editTemplateForm.name.trim() || editTemplateLoading || updateTemplateMutation.isPending || (!editTemplateForm.isYaml && editTemplateErrors > 0)}
-              >
-                {updateTemplateMutation.isPending ? t('common.saving') : t('common.save')}
-              </Button>
-            </div>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
 
       {/* Delete Template Confirm */}
       <ConfirmDialog
