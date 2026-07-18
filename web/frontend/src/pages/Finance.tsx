@@ -30,7 +30,7 @@ import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip,
   ResponsiveContainer, PieChart, Pie, Cell, Legend, LineChart, Line,
 } from 'recharts'
-import { financeApi, FinanceItem, ItemPayload, FinanceProvider, FinanceAccount, AccountTestResult } from '../api/finance'
+import { financeApi, FinanceItem, ItemPayload, FinanceProvider, FinanceAccount, FinanceService, AccountTestResult } from '../api/finance'
 import client from '../api/client'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -949,8 +949,10 @@ function HostersTab({ canCreate, canEdit, canDelete, onAddItem }: {
     if (period === 'monthly') return t('finance.period.monthly')
     if (period === 'yearly') return t('finance.period.yearly')
     if (period === 'once') return t('finance.period.once')
-    const m = /^days:(\d+)$/.exec(period)
-    if (m) return t('finance.period.days', { count: Number(m[1]) })
+    const d = /^days:(\d+)$/.exec(period)
+    if (d) return t('finance.period.days', { count: Number(d[1]) })
+    const m = /^months:(\d+)$/.exec(period)
+    if (m) return t('finance.period.months', { count: Number(m[1]) })
     return period
   }
   const editingAccount = dialogProvider ? accountByProvider.get(dialogProvider.id) : undefined
@@ -1078,6 +1080,39 @@ function HostersTab({ canCreate, canEdit, canDelete, onAddItem }: {
             if (!b.next_due_at) return -1
             return a.next_due_at.localeCompare(b.next_due_at)
           })
+          // API-услуга и запись про один сервер — объединяем в одну строку
+          // (данные из API + кнопки записи). Матч: (1) одна нода;
+          // (2) уникальная цена внутри провайдера (1 услуга ↔ 1 запись).
+          const itemByNode = new Map<string, FinanceItem>()
+          for (const it of provItems) {
+            if (it.node_uuid && !itemByNode.has(it.node_uuid)) itemByNode.set(it.node_uuid, it)
+          }
+          const mergedItemIds = new Set<number>()
+          const svcRows: { s: FinanceService; linked?: FinanceItem }[] = sortedServices.map((s) => {
+            const linked = s.node_uuid ? itemByNode.get(s.node_uuid) : undefined
+            if (linked) mergedItemIds.add(linked.id)
+            return { s, linked }
+          })
+          const itemsByPrice = new Map<number, FinanceItem[]>()
+          for (const it of provItems) {
+            if (mergedItemIds.has(it.id) || !(it.amount > 0)) continue
+            const arr = itemsByPrice.get(it.amount) || []
+            arr.push(it)
+            itemsByPrice.set(it.amount, arr)
+          }
+          const svcPriceCount = new Map<number, number>()
+          for (const r of svcRows) {
+            if (!r.linked && r.s.price != null) svcPriceCount.set(r.s.price, (svcPriceCount.get(r.s.price) || 0) + 1)
+          }
+          for (const r of svcRows) {
+            if (r.linked || r.s.price == null) continue
+            const cands = itemsByPrice.get(r.s.price) || []
+            if (cands.length === 1 && svcPriceCount.get(r.s.price) === 1) {
+              r.linked = cands[0]
+              mergedItemIds.add(cands[0].id)
+            }
+          }
+          const standaloneItems = provItems.filter((it) => !mergedItemIds.has(it.id))
           return (
             <Card key={p.id}>
               <CardContent className="py-3">
@@ -1169,11 +1204,11 @@ function HostersTab({ canCreate, canEdit, canDelete, onAddItem }: {
               </CardContent>
               {isOpen && (
                 <div className="border-t border-white/5 max-h-96 overflow-y-auto">
-                  {hasServices && provItems.length > 0 && (
+                  {hasServices && standaloneItems.length > 0 && (
                     <div className="px-4 pt-2 text-[10px] uppercase tracking-wider text-muted-foreground">{t('finance.hoster.fromApi')}</div>
                   )}
                   <div className="divide-y divide-white/5">
-                    {sortedServices.map((s, i) => (
+                    {svcRows.map(({ s, linked }, i) => (
                       <div key={s.external_id || `${p.id}-${i}`} className="px-4 py-2.5 flex items-center gap-3">
                         <div className="min-w-0 flex-1">
                           <div className="flex items-center gap-1.5 min-w-0">
@@ -1201,16 +1236,32 @@ function HostersTab({ canCreate, canEdit, canDelete, onAddItem }: {
                             </div>
                           )}
                         </div>
+                        {linked && (canEdit || canDelete) && (
+                          <div className="flex items-center shrink-0 -mr-2" title={t('finance.hoster.linkedItem', { name: linked.name })}>
+                            {canEdit && (
+                              <Button size="sm" variant="ghost" className="h-7 px-1.5" title={t('finance.archive.itemArchive')}
+                                onClick={() => archiveItemMut.mutate(linked.id)} disabled={archiveItemMut.isPending}>
+                                <Archive className="w-3.5 h-3.5" />
+                              </Button>
+                            )}
+                            {canDelete && (
+                              <Button size="sm" variant="ghost" className="h-7 px-1.5 text-red-400 hover:text-red-300" title={t('common.delete')}
+                                onClick={() => setDeleteItemId(linked.id)}>
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </Button>
+                            )}
+                          </div>
+                        )}
                       </div>
                     ))}
                   </div>
-                  {provItems.length > 0 && (
+                  {standaloneItems.length > 0 && (
                     <>
                       {hasServices && (
                         <div className="px-4 pt-2 text-[10px] uppercase tracking-wider text-muted-foreground border-t border-white/5">{t('finance.hoster.manualItems')}</div>
                       )}
                       <div className="divide-y divide-white/5">
-                        {provItems.map((it) => (
+                        {standaloneItems.map((it) => (
                           <div key={`it-${it.id}`} className="px-4 py-2.5 flex items-center gap-3">
                             <div className="min-w-0 flex-1">
                               <div className="flex items-center gap-1.5 min-w-0">

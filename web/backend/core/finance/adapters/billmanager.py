@@ -69,6 +69,25 @@ def _rows(doc: Dict[str, Any]) -> List[Dict[str, Any]]:
     return []
 
 
+def _normalize_period(v: Optional[str]) -> Optional[str]:
+    """BILLmanager отдаёт period ЧИСЛОМ месяцев ('1','3','12') — нормализуем
+    в формат фронта: monthly / yearly / months:<n>."""
+    if not v:
+        return None
+    s = str(v).strip().lower()
+    if s in ("monthly", "yearly", "once") or s.startswith(("days:", "months:")):
+        return s
+    try:
+        months = int(s)
+    except ValueError:
+        return s
+    if months == 1:
+        return "monthly"
+    if months == 12:
+        return "yearly"
+    return f"months:{months}" if months > 0 else None
+
+
 def _normalize_date(v: Optional[str]) -> Optional[str]:
     """BILLmanager отдаёт даты как YYYY-MM-DD; берём только дату."""
     if not v:
@@ -290,7 +309,7 @@ class BillmanagerAdapter(HosterAdapter):
                 status=_STATUS.get(status_raw or "", status_raw),
                 price=_num(cost) if cost is not None else None,
                 currency=None,
-                period=_field(rec, "period"),
+                period=_normalize_period(_field(rec, "period")),
                 next_due_at=_normalize_date(_field(rec, "expiredate", "expire")),
                 external_id=_field(rec, "id"),
                 specs=" · ".join(specs_parts) or None,

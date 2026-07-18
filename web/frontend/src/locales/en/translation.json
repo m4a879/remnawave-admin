@@ -4099,6 +4099,7 @@
       "servicesCount": "servers: {{count}}",
       "renewsAt": "Renews",
       "nodeBadge": "Panel node",
+      "linkedItem": "Linked item: {{name}}",
       "fromApi": "From API",
       "manualItems": "Items",
       "addServer": "Add server"
@@ -4107,7 +4108,8 @@
       "monthly": "/mo",
       "yearly": "/yr",
       "once": "one-time",
-      "days": "/{{count}}d"
+      "days": "/{{count}}d",
+      "months": "/{{count}}mo"
     }
   },
   "reports": {

@@ -4099,6 +4099,7 @@
       "servicesCount": "серверов: {{count}}",
       "renewsAt": "Продление",
       "nodeBadge": "Нода панели",
+      "linkedItem": "Связанная запись: {{name}}",
       "fromApi": "Из API",
       "manualItems": "Записи",
       "addServer": "Добавить сервер"
@@ -4107,7 +4108,8 @@
       "monthly": "в месяц",
       "yearly": "в год",
       "once": "разово",
-      "days": "за {{count}} дн."
+      "days": "за {{count}} дн.",
+      "months": "за {{count}} мес."
     }
   },
   "reports": {
