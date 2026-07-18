@@ -136,14 +136,24 @@ function OverviewTab() {
     [summary],
   )
 
-  // Факт текущего месяца из P&L (все источники: пополнения Bedolaga, халтурки,
-  // ручные доходы/расходы, проведённые разовые записи).
+  // Текущий месяц: фактические платежи + предстоящие списания активных записей
+  // до конца месяца (иначе расходы = 0, пока продления хостеров впереди).
   const thisMonth = useMemo(() => {
+    const tm = summary?.this_month
+    if (tm) return tm
     const now = new Date()
     const key = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
     const b = (summary?.monthly || []).find((m) => m.month === key)
-    return { income: b?.income ?? 0, expense: b?.expense ?? 0, net: b?.net ?? 0 }
+    return {
+      income: b?.income ?? 0, expense: b?.expense ?? 0, net: b?.net ?? 0,
+      expense_actual: b?.expense ?? 0, income_actual: b?.income ?? 0,
+      expense_upcoming: 0, income_upcoming: 0,
+    }
   }, [summary])
+  const kpiHint = (actual: number, upcoming: number) =>
+    upcoming > 0
+      ? t('finance.factPlusUpcoming', { actual: fmtMoney(actual, base), upcoming: fmtMoney(upcoming, base) })
+      : t('finance.thisMonth')
 
   if (isError) return <QueryError onRetry={refetch} />
 
@@ -159,14 +169,14 @@ function OverviewTab() {
               icon={<TrendingDown className="w-5 h-5 text-red-400" />}
               label={t('finance.monthExpense')}
               value={fmtMoney(thisMonth.expense, base)}
-              hint={t('finance.thisMonth')}
+              hint={kpiHint(thisMonth.expense_actual, thisMonth.expense_upcoming)}
               tone="red"
             />
             <KpiCard
               icon={<TrendingUp className="w-5 h-5 text-green-400" />}
               label={t('finance.monthIncome')}
               value={fmtMoney(thisMonth.income, base)}
-              hint={t('finance.thisMonth')}
+              hint={kpiHint(thisMonth.income_actual, thisMonth.income_upcoming)}
               tone="green"
             />
             <KpiCard
@@ -910,84 +920,94 @@ function HostersTab({ canCreate, canEdit, canDelete }: { canCreate: boolean; can
           })
           return (
             <Card key={p.id}>
-              <CardContent className="py-3 flex items-center gap-3 flex-wrap">
-                {hasServices ? (
-                  <button type="button" onClick={() => toggleExpand(p.id)}
-                    className="shrink-0 text-primary-400 hover:text-primary-300 transition-colors"
-                    title={t(isOpen ? 'finance.hoster.hideServices' : 'finance.hoster.showServices')}>
-                    <ChevronDown className={cn('w-5 h-5 transition-transform', isOpen && 'rotate-180')} />
-                  </button>
-                ) : (
-                  <Server className="w-5 h-5 text-primary-400 shrink-0" />
-                )}
-                <div className="min-w-0">
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm font-medium text-white truncate">{p.name}</span>
-                    {acc && (
-                      acc.last_sync_status === 'error' ? (
-                        <Badge className="bg-red-500/20 text-red-300 text-[10px]" title={acc.last_sync_error || ''}>
-                          {t('finance.syncFailed')}
-                        </Badge>
-                      ) : (
-                        <Badge className="bg-green-500/20 text-green-300 text-[10px]">API</Badge>
-                      )
+              <CardContent className="py-3">
+                <div className="flex items-center gap-2.5 sm:gap-3">
+                  {hasServices ? (
+                    <button type="button" onClick={() => toggleExpand(p.id)}
+                      className="shrink-0 text-primary-400 hover:text-primary-300 transition-colors"
+                      title={t(isOpen ? 'finance.hoster.hideServices' : 'finance.hoster.showServices')}>
+                      <ChevronDown className={cn('w-5 h-5 transition-transform', isOpen && 'rotate-180')} />
+                    </button>
+                  ) : (
+                    <Server className="w-5 h-5 text-primary-400 shrink-0" />
+                  )}
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-medium text-white truncate">{p.name}</span>
+                      {acc && (
+                        acc.last_sync_status === 'error' ? (
+                          <Badge className="bg-red-500/20 text-red-300 text-[10px] shrink-0" title={acc.last_sync_error || ''}>
+                            {t('finance.syncFailed')}
+                          </Badge>
+                        ) : (
+                          <Badge className="bg-green-500/20 text-green-300 text-[10px] shrink-0">API</Badge>
+                        )
+                      )}
+                    </div>
+                    <div className="text-xs text-muted-foreground truncate">
+                      {p.url && <a href={p.url} target="_blank" rel="noreferrer" className="hover:text-primary-400">{p.url.replace(/^https?:\/\//, '').replace(/\/.*$/, '')}</a>}
+                      {p.url ? ' · ' : ''}{t('finance.itemsCount', { count: p.items_count || 0 })}
+                      {hasServices && (
+                        <button type="button" onClick={() => toggleExpand(p.id)} className="hover:text-primary-400">
+                          {' · '}{t('finance.hoster.servicesCount', { count: services.length })}
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                  <div className="text-right shrink-0">
+                    {acc?.balance != null && (
+                      <>
+                        <div className={cn('text-sm font-mono font-bold', low ? 'text-red-400' : 'text-white')}>
+                          {fmtMoney(acc.balance, acc.balance_currency || '')}
+                        </div>
+                        {low ? (
+                          <div className="text-[11px] text-red-400">{t('finance.lowBalance')}</div>
+                        ) : acc.last_sync_at && (
+                          <div className="text-[10px] text-muted-foreground">
+                            {t('finance.lastSync')} {acc.last_sync_at.slice(5, 16).replace('T', ' ')}
+                          </div>
+                        )}
+                      </>
                     )}
                   </div>
-                  <div className="text-xs text-muted-foreground flex items-center gap-2 flex-wrap">
-                    {p.url && <a href={p.url} target="_blank" rel="noreferrer" className="hover:text-primary-400 truncate max-w-[220px]">{p.url.replace(/^https?:\/\//, '')}</a>}
-                    <span>· {t('finance.itemsCount', { count: p.items_count || 0 })}</span>
-                    {hasServices && (
-                      <button type="button" onClick={() => toggleExpand(p.id)} className="hover:text-primary-400">
-                        · {t('finance.hoster.servicesCount', { count: services.length })}
-                      </button>
+                  <div className="flex items-center gap-0.5 shrink-0">
+                    {acc && canEdit && (
+                      <Button size="sm" variant="ghost" className="h-8 px-2" title={t('finance.syncNow')}
+                        onClick={() => syncMut.mutate(acc.id)} disabled={syncMut.isPending}>
+                        <RefreshCw className={cn('w-4 h-4', syncMut.isPending && 'animate-spin')} />
+                      </Button>
                     )}
-                    {acc?.last_sync_at && <span>· {t('finance.lastSync')}: {acc.last_sync_at.slice(0, 16).replace('T', ' ')}</span>}
+                    {(acc ? canEdit : canCreate) && (
+                      <Button size="sm" variant={acc ? 'ghost' : 'outline'} className="h-8 px-2 sm:px-3 gap-1.5"
+                        title={acc ? undefined : t('finance.connectApi')} onClick={() => openDialog(p)}>
+                        {acc ? <Settings2 className="w-4 h-4" /> : <><Zap className="w-4 h-4" /><span className="hidden sm:inline">{t('finance.connectApi')}</span></>}
+                      </Button>
+                    )}
                   </div>
-                </div>
-                <div className="ml-auto text-right">
-                  {acc?.balance != null && (
-                    <>
-                      <div className={cn('text-sm font-mono font-bold', low ? 'text-red-400' : 'text-white')}>
-                        {fmtMoney(acc.balance, acc.balance_currency || '')}
-                      </div>
-                      {low && <div className="text-[11px] text-red-400">{t('finance.lowBalance')}</div>}
-                    </>
-                  )}
-                </div>
-                <div className="flex items-center gap-1">
-                  {acc && canEdit && (
-                    <Button size="sm" variant="ghost" className="h-8 px-2" title={t('finance.syncNow')}
-                      onClick={() => syncMut.mutate(acc.id)} disabled={syncMut.isPending}>
-                      <RefreshCw className={cn('w-4 h-4', syncMut.isPending && 'animate-spin')} />
-                    </Button>
-                  )}
-                  {(acc ? canEdit : canCreate) && (
-                    <Button size="sm" variant={acc ? 'ghost' : 'outline'} className="h-8 gap-1.5" onClick={() => openDialog(p)}>
-                      {acc ? <Settings2 className="w-4 h-4" /> : <><Zap className="w-4 h-4" /> {t('finance.connectApi')}</>}
-                    </Button>
-                  )}
                 </div>
               </CardContent>
               {isOpen && hasServices && (
                 <div className="border-t border-white/5 divide-y divide-white/5 max-h-80 overflow-y-auto">
                   {sortedServices.map((s, i) => (
-                    <div key={s.external_id || `${p.id}-${i}`} className="px-4 py-2 flex items-center gap-3">
+                    <div key={s.external_id || `${p.id}-${i}`} className="px-4 py-2.5 flex items-center gap-3">
                       <div className="min-w-0 flex-1">
                         <div className="text-sm text-white truncate">{s.name}</div>
                         {s.specs && <div className="text-xs text-muted-foreground truncate">{s.specs}</div>}
                       </div>
-                      {s.next_due_at && (
-                        <div className="text-xs text-muted-foreground text-right shrink-0 hidden sm:block">
-                          {t('finance.hoster.renewsAt')}<br />{s.next_due_at.slice(0, 10)}
+                      <div className="text-right shrink-0">
+                        <div>
+                          {s.price != null ? (
+                            <span className="text-sm font-mono text-white">{fmtMoney(s.price, s.currency || acc?.balance_currency || '')}</span>
+                          ) : (
+                            <span className="text-sm text-muted-foreground">—</span>
+                          )}
+                          {s.period && <span className="text-[10px] text-muted-foreground ml-1">{fmtPeriod(s.period)}</span>}
                         </div>
-                      )}
-                      <div className="text-right shrink-0 w-24">
-                        {s.price != null ? (
-                          <span className="text-sm font-mono text-white">{fmtMoney(s.price, s.currency || acc?.balance_currency || '')}</span>
-                        ) : (
-                          <span className="text-sm text-muted-foreground">—</span>
+                        {s.next_due_at && (
+                          <div className="text-[11px] text-muted-foreground">
+                            {t('finance.hoster.renewsAt')} {s.next_due_at.slice(0, 10)}
+                          </div>
                         )}
-                        {s.period && <div className="text-[10px] text-muted-foreground">{fmtPeriod(s.period)}</div>}
                       </div>
                     </div>
                   ))}
