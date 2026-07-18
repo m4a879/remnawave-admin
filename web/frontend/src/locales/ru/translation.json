@@ -4033,6 +4033,16 @@
     "bedolagaToday": "сегодня",
     "bedolagaByMethod": "По способам оплаты",
     "factPlusUpcoming": "факт {{actual}} + предстоит {{upcoming}}",
+    "pm": {
+      "unknown": "Не указан",
+      "balance": "С баланса",
+      "manual": "Вручную (админ)",
+      "telegram_stars": "Telegram Stars",
+      "tribute": "Tribute",
+      "cryptobot": "CryptoBot",
+      "yookassa": "ЮKassa",
+      "platega": "Platega"
+    },
     "archive": {
       "archiveProvider": "В архив",
       "deleteProvider": "Удалить хостера",

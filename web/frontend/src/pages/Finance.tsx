@@ -160,6 +160,9 @@ function OverviewTab() {
     upcoming > 0
       ? t('finance.factPlusUpcoming', { actual: fmtMoney(actual, base), upcoming: fmtMoney(upcoming, base) })
       : t('finance.thisMonth')
+  // человекочитаемые названия способов оплаты; неизвестные бренды — капитализация слага
+  const pmLabel = (m: string) =>
+    t(`finance.pm.${m}`, { defaultValue: m.charAt(0).toUpperCase() + m.slice(1).replace(/_/g, ' ') })
 
   if (isError) return <QueryError onRetry={refetch} />
 
@@ -279,7 +282,9 @@ function OverviewTab() {
               <div className="flex items-center gap-2 flex-wrap mt-3">
                 <span className="text-xs text-muted-foreground">{t('finance.bedolagaByMethod')}:</span>
                 {Object.entries(bedolaga.by_payment_method).map(([m, amt]) => (
-                  <Badge key={m} variant="outline" className="text-[10px]">{m}: {fmtMoney(amt, 'RUB')}</Badge>
+                  <Badge key={m} variant="outline" className="text-[10px]">
+                    {pmLabel(m)}: {fmtMoney(amt, 'RUB')}
+                  </Badge>
                 ))}
               </div>
             )}

@@ -83,7 +83,16 @@ async def fetch_income_overview() -> Dict[str, Any]:
             "deposit_income": _rub(today, "income"),
             "transactions_count": today.get("transactions_count") or 0,
         },
-        "by_payment_method": {m: _pm_amount(v) for m, v in raw_pm.items()},
+        # None/пустой метод -> "unknown" (легаси-транзакции без метода);
+        # сортировка по убыванию суммы — крупные способы первыми
+        "by_payment_method": dict(sorted(
+            (
+                (str(m).lower() if m not in (None, "", "None", "null") else "unknown",
+                 _pm_amount(v))
+                for m, v in raw_pm.items()
+            ),
+            key=lambda kv: -kv[1],
+        )),
     }
 
 

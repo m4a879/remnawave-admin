@@ -190,7 +190,14 @@ class BillmanagerAdapter(HosterAdapter):
         except AdapterError as e:
             logger.info("BILLmanager func=%s недоступна (%s)", func, e)
             return []
-        return _rows(doc)
+        rows = _rows(doc)
+        if rows:
+            logger.info("BILLmanager func=%s: услуг %d", func, len(rows))
+        else:
+            # функция отвечает, но список пуст — сырой ответ поможет понять,
+            # в каком поле инстанс держит услуги (не doc.elem)
+            logger.info("BILLmanager func=%s: пусто, doc=%s", func, str(doc)[:300])
+        return rows
 
     @staticmethod
     def _services_from_rows(rows: List[Dict[str, Any]]) -> List[Service]:

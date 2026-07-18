@@ -4033,6 +4033,16 @@
     "bedolagaToday": "today",
     "bedolagaByMethod": "By payment method",
     "factPlusUpcoming": "actual {{actual}} + upcoming {{upcoming}}",
+    "pm": {
+      "unknown": "Not specified",
+      "balance": "From balance",
+      "manual": "Manual (admin)",
+      "telegram_stars": "Telegram Stars",
+      "tribute": "Tribute",
+      "cryptobot": "CryptoBot",
+      "yookassa": "YooKassa",
+      "platega": "Platega"
+    },
     "archive": {
       "archiveProvider": "Archive",
       "deleteProvider": "Delete hoster",
