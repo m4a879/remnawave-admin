@@ -43,6 +43,7 @@ import {
 import { SortableSection } from '@/components/SortableSection'
 import { useOrderPreference } from '@/lib/useOrderPreference'
 import { useWidgetVisibility } from '@/lib/useWidgetVisibility'
+import { FinanceWidget, BedolagaWidget, ViolationsWidget, BackupWidget, NodeCostsWidget } from '@/components/dashboard/ExtraWidgets'
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuTrigger, DropdownMenuItem,
   DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuCheckboxItem,
@@ -1893,8 +1894,19 @@ export default function Dashboard() {
   const canViewFleet = hasPermission('fleet', 'view')
   const canViewBackups = hasPermission('backups', 'view')
 
-  // Widget ordering (DnD reorder, persists to localStorage)
-  const DASHBOARD_WIDGETS = ['stats', 'traffic', 'connections', 'load', 'activity', 'system'] as const
+  // Реестр виджетов: базовые (всегда) + из других модулей (permission + скрыты по умолчанию)
+  const WIDGET_REGISTRY: { id: string; perm?: [string, string]; defaultHidden?: boolean }[] = [
+    { id: 'stats' }, { id: 'traffic' }, { id: 'connections' },
+    { id: 'load' }, { id: 'activity' }, { id: 'system' },
+    { id: 'finance', perm: ['finance', 'view'], defaultHidden: true },
+    { id: 'bedolaga', perm: ['bedolaga', 'view'], defaultHidden: true },
+    { id: 'violations', perm: ['violations', 'view'], defaultHidden: true },
+    { id: 'backups', perm: ['backups', 'view'], defaultHidden: true },
+    { id: 'nodecosts', perm: ['finance', 'view'], defaultHidden: true },
+  ]
+  const availableWidgets = WIDGET_REGISTRY.filter((w) => !w.perm || hasPermission(w.perm[0], w.perm[1]))
+  const DASHBOARD_WIDGETS = availableWidgets.map((w) => w.id)
+  const defaultHiddenWidgets = availableWidgets.filter((w) => w.defaultHidden).map((w) => w.id)
   const order = useOrderPreference('dashboard-widget-order-v1')
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
@@ -1902,7 +1914,7 @@ export default function Dashboard() {
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   )
   const orderedWidgetIds = order.applyOrder([...DASHBOARD_WIDGETS])
-  const visibility = useWidgetVisibility('dashboard-widget-hidden-v1')
+  const visibility = useWidgetVisibility('dashboard-widget-hidden-v1', defaultHiddenWidgets)
   // рендерим только видимые; drag работает в пределах видимых
   const widgetIds = orderedWidgetIds.filter((w) => visibility.isVisible(w))
   const handleWidgetDragEnd = (event: DragEndEvent) => {
@@ -2516,6 +2528,16 @@ export default function Dashboard() {
                       </div>
                     </SortableSection>
                   )
+                case 'finance':
+                  return <SortableSection key="finance" id="finance"><FinanceWidget /></SortableSection>
+                case 'bedolaga':
+                  return <SortableSection key="bedolaga" id="bedolaga"><BedolagaWidget /></SortableSection>
+                case 'violations':
+                  return <SortableSection key="violations" id="violations"><ViolationsWidget /></SortableSection>
+                case 'backups':
+                  return <SortableSection key="backups" id="backups"><BackupWidget /></SortableSection>
+                case 'nodecosts':
+                  return <SortableSection key="nodecosts" id="nodecosts"><NodeCostsWidget /></SortableSection>
                 default:
                   return null
               }

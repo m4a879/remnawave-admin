@@ -466,10 +466,22 @@
       "connections": "Подключения",
       "load": "Нагрузка",
       "activity": "Активность",
-      "system": "Система"
+      "system": "Система",
+      "finance": "Финансы",
+      "bedolaga": "Bedolaga",
+      "violations": "Нарушения",
+      "backups": "Бэкапы",
+      "nodecosts": "Себестоимость нод"
     },
     "customize": "Настроить",
-    "widgets": "Виджеты"
+    "widgets": "Виджеты",
+    "widgetData": {
+      "upcomingSoon": "Ближайших списаний: {{count}}",
+      "violationsToday": "за сегодня",
+      "lastBackup": "Последний бэкап",
+      "backupFiles": "Файлов",
+      "noNodeCosts": "Нет данных — привяжи записи к нодам и проставь цены"
+    }
   },
   "users": {
     "title": "Пользователи",

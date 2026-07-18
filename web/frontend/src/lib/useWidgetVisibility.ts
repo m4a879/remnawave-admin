@@ -4,15 +4,16 @@ import { useCallback, useState } from 'react'
  * Хранит скрытые виджеты дашборда в localStorage (по умолчанию все видимы).
  * Возвращает helpers для проверки/переключения видимости.
  */
-export function useWidgetVisibility(storageKey: string) {
+export function useWidgetVisibility(storageKey: string, defaultHidden: string[] = []) {
   const [hidden, setHiddenState] = useState<Set<string>>(() => {
     try {
       const raw = localStorage.getItem(storageKey)
-      if (!raw) return new Set()
+      // нет сохранённого выбора -> дефолтно-скрытые (напр. новые виджеты)
+      if (!raw) return new Set(defaultHidden)
       const parsed = JSON.parse(raw)
       return new Set(Array.isArray(parsed) ? parsed.filter((x): x is string => typeof x === 'string') : [])
     } catch {
-      return new Set()
+      return new Set(defaultHidden)
     }
   })
 

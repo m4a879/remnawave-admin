@@ -466,10 +466,22 @@
       "connections": "Connections",
       "load": "Load",
       "activity": "Activity",
-      "system": "System"
+      "system": "System",
+      "finance": "Finance",
+      "bedolaga": "Bedolaga",
+      "violations": "Violations",
+      "backups": "Backups",
+      "nodecosts": "Node costs"
     },
     "customize": "Customize",
-    "widgets": "Widgets"
+    "widgets": "Widgets",
+    "widgetData": {
+      "upcomingSoon": "Upcoming charges: {{count}}",
+      "violationsToday": "today",
+      "lastBackup": "Last backup",
+      "backupFiles": "Files",
+      "noNodeCosts": "No data — link items to nodes and set prices"
+    }
   },
   "users": {
     "title": "Users",
