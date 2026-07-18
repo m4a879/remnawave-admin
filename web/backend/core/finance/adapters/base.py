@@ -8,10 +8,44 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Type
 
 import logging
+import re
 
 logger = logging.getLogger(__name__)
 
 DEFAULT_TIMEOUT = 20.0
+
+_IPV4_RE = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b")
+#: мусорные адреса, которые не идентифицируют сервер
+_IP_DENY_PREFIXES = ("0.", "127.", "255.")
+
+
+def extract_ips(value: Any, limit: int = 5) -> List[str]:
+    """Собрать валидные IPv4 из ответа хостера (рекурсивно, без знания схемы).
+
+    Нужны для автосопоставления услуг с нодами панели по адресу.
+    """
+    found: List[str] = []
+
+    def walk(v: Any) -> None:
+        if len(found) >= limit:
+            return
+        if isinstance(v, str):
+            for m in _IPV4_RE.findall(v):
+                parts = m.split(".")
+                if all(int(p) <= 255 for p in parts) and not m.startswith(_IP_DENY_PREFIXES) \
+                        and m not in found:
+                    found.append(m)
+                    if len(found) >= limit:
+                        return
+        elif isinstance(v, dict):
+            for x in v.values():
+                walk(x)
+        elif isinstance(v, (list, tuple)):
+            for x in v:
+                walk(x)
+
+    walk(value)
+    return found
 
 
 class AdapterError(Exception):
@@ -46,13 +80,14 @@ class Service:
     next_due_at: Optional[str] = None     # ISO date
     external_id: Optional[str] = None
     specs: Optional[str] = None           # краткие характеристики: CPU/RAM/диск/локация
+    ips: Optional[List[str]] = None       # IP сервера — для сопоставления с нодами панели
 
     def to_dict(self) -> Dict[str, Any]:
         return {
             "name": self.name, "status": self.status, "price": self.price,
             "currency": self.currency, "period": self.period,
             "next_due_at": self.next_due_at, "external_id": self.external_id,
-            "specs": self.specs,
+            "specs": self.specs, "ips": self.ips,
         }
 
 

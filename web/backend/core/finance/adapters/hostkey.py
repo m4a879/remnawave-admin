@@ -15,7 +15,7 @@ import httpx
 
 from web.backend.core.finance.adapters.base import (
     DEFAULT_TIMEOUT, AdapterError, AdapterField, HosterAdapter, Service, SyncResult,
-    register_adapter,
+    extract_ips, register_adapter,
 )
 
 logger = logging.getLogger(__name__)
@@ -275,6 +275,7 @@ class HostkeyAdapter(HosterAdapter):
         next_due = base_svc.next_due_at if base_svc else None
         currency = base_svc.currency if base_svc else None
         specs = base_svc.specs if base_svc else None
+        ips = list(base_svc.ips) if base_svc and base_svc.ips else []
 
         try:
             det = await self._call(client, base, "show", token,
@@ -284,6 +285,9 @@ class HostkeyAdapter(HosterAdapter):
                 name = name or _pick_str(rec, "name", "hostname", "server_name", "title")
                 status = status or (str(rec.get("status") or "").lower() or None)
                 specs = specs or _hwconfig_specs(rec)
+                for ip in extract_ips(rec):
+                    if ip not in ips:
+                        ips.append(ip)
         except AdapterError as e:
             logger.info("Hostkey eq.php show id=%s: %s", sid, e)
 
@@ -314,6 +318,7 @@ class HostkeyAdapter(HosterAdapter):
             name=str(name or f"#{sid}"), status=status, price=price,
             currency=(str(currency).upper() if currency else None),
             period=period, next_due_at=next_due, external_id=str(sid), specs=specs,
+            ips=ips or None,
         )
 
 
@@ -393,6 +398,7 @@ def _service_from_row(r: Dict[str, Any]) -> Service:
         ),
         external_id=str(sid) if sid is not None else None,
         specs=_hwconfig_specs(r),
+        ips=extract_ips(r) or None,
     )
 
 

@@ -524,7 +524,44 @@ async def list_hoster_adapters(admin: AdminUser = Depends(require_permission("fi
 
 @router.get("/accounts")
 async def list_accounts(admin: AdminUser = Depends(require_permission("finance", "view"))):
-    return {"items": await db_service.list_finance_accounts()}
+    items = await db_service.list_finance_accounts()
+    await _attach_nodes_to_services(items)
+    return {"items": items}
+
+
+async def _attach_nodes_to_services(accounts: list) -> None:
+    """Автосопоставление услуг хостера с нодами панели.
+
+    Приоритет — совпадение IP услуги (adapters собирают их в Service.ips)
+    с адресом ноды; фолбэк — точное совпадение имени. Ничего не храним:
+    матчинг на чтении, всегда актуален.
+    """
+    try:
+        nodes = await db_service.get_all_nodes()
+    except Exception:
+        return
+    if not nodes:
+        return
+    by_ip: dict = {}
+    by_name: dict = {}
+    for n in nodes:
+        uuid, name = n.get("uuid"), n.get("name")
+        if not uuid:
+            continue
+        addr = str(n.get("address") or "").strip()
+        if addr:
+            by_ip[addr] = (uuid, name)
+        if name:
+            by_name[str(name).strip().lower()] = (uuid, name)
+    for acc in accounts:
+        for svc in acc.get("services") or []:
+            if not isinstance(svc, dict):
+                continue
+            hit = next((by_ip[ip] for ip in (svc.get("ips") or []) if ip in by_ip), None)
+            if not hit:
+                hit = by_name.get(str(svc.get("name") or "").strip().lower())
+            if hit:
+                svc["node_uuid"], svc["node_name"] = hit
 
 
 @router.post("/accounts")

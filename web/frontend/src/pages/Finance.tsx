@@ -31,6 +31,7 @@ import {
   ResponsiveContainer, PieChart, Pie, Cell, Legend, LineChart, Line,
 } from 'recharts'
 import { financeApi, FinanceItem, ItemPayload, FinanceProvider, FinanceAccount, AccountTestResult } from '../api/finance'
+import client from '../api/client'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
@@ -439,7 +440,7 @@ function KpiCard({ icon, label, value, hint, tone }: {
 // ── Items tab ────────────────────────────────────────────────────
 
 const EMPTY_FORM: ItemPayload = {
-  name: '', kind: 'expense', category_id: null, provider_id: null,
+  name: '', kind: 'expense', category_id: null, provider_id: null, node_uuid: null,
   currency: 'RUB', amount: 0, billing_cycle: 'monthly', cycle_days: 30,
   next_due_at: null, url: null, notes: null,
 }
@@ -473,6 +474,14 @@ function ItemsTab({ canCreate, canEdit, canDelete, prefillProvider, onPrefillCon
   })
   const { data: cats } = useQuery({ queryKey: ['finance-cats'], queryFn: financeApi.listCategories, staleTime: 300_000 })
   const { data: provs } = useQuery({ queryKey: ['finance-provs'], queryFn: financeApi.listProviders, staleTime: 300_000 })
+  const { data: nodesList } = useQuery({
+    queryKey: ['nodes-brief'],
+    queryFn: async () => {
+      const { data } = await client.get('/nodes', { params: { per_page: 500 } })
+      return (data.items || data) as { uuid: string; name: string }[]
+    },
+    staleTime: 300_000,
+  })
 
   const invalidate = () => {
     qc.invalidateQueries({ queryKey: ['finance-items'] })
@@ -505,8 +514,9 @@ function ItemsTab({ canCreate, canEdit, canDelete, prefillProvider, onPrefillCon
     setEditing(it)
     setForm({
       name: it.name, kind: it.kind, category_id: it.category_id, provider_id: it.provider_id,
-      currency: it.currency, amount: it.amount, billing_cycle: it.billing_cycle,
-      cycle_days: it.cycle_days ?? 30, next_due_at: it.next_due_at, url: it.url, notes: it.notes,
+      node_uuid: it.node_uuid, currency: it.currency, amount: it.amount,
+      billing_cycle: it.billing_cycle, cycle_days: it.cycle_days ?? 30,
+      next_due_at: it.next_due_at, url: it.url, notes: it.notes,
     })
     setDialogOpen(true)
   }
@@ -656,16 +666,29 @@ function ItemsTab({ canCreate, canEdit, canDelete, prefillProvider, onPrefillCon
                   onChange={(e) => setForm({ ...form, cycle_days: Number(e.target.value) })} />
               </div>
             )}
-            <div>
-              <Label>{t('finance.field.provider')}</Label>
-              <Select value={form.provider_id ? String(form.provider_id) : 'none'}
-                onValueChange={(v) => setForm({ ...form, provider_id: v === 'none' ? null : Number(v) })}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">—</SelectItem>
-                  {(provs?.items || []).map((p) => <SelectItem key={p.id} value={String(p.id)}>{p.name}</SelectItem>)}
-                </SelectContent>
-              </Select>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label>{t('finance.field.provider')}</Label>
+                <Select value={form.provider_id ? String(form.provider_id) : 'none'}
+                  onValueChange={(v) => setForm({ ...form, provider_id: v === 'none' ? null : Number(v) })}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">—</SelectItem>
+                    {(provs?.items || []).map((p) => <SelectItem key={p.id} value={String(p.id)}>{p.name}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label>{t('finance.field.node')}</Label>
+                <Select value={form.node_uuid || 'none'}
+                  onValueChange={(v) => setForm({ ...form, node_uuid: v === 'none' ? null : v })}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">—</SelectItem>
+                    {(nodesList || []).map((n) => <SelectItem key={n.uuid} value={n.uuid}>{n.name}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
             <div>
               <Label>{form.billing_cycle === 'once' ? t('finance.field.paymentDate') : t('finance.field.nextDue')}</Label>
@@ -1096,7 +1119,14 @@ function HostersTab({ canCreate, canEdit, canDelete, onAddItem }: {
                     {sortedServices.map((s, i) => (
                       <div key={s.external_id || `${p.id}-${i}`} className="px-4 py-2.5 flex items-center gap-3">
                         <div className="min-w-0 flex-1">
-                          <div className="text-sm text-white truncate">{s.name}</div>
+                          <div className="flex items-center gap-1.5 min-w-0">
+                            <span className="text-sm text-white truncate">{s.name}</span>
+                            {s.node_name && (
+                              <Badge variant="outline" className="text-[9px] text-primary-300 shrink-0" title={t('finance.hoster.nodeBadge')}>
+                                {s.node_name}
+                              </Badge>
+                            )}
+                          </div>
                           {s.specs && <div className="text-xs text-muted-foreground truncate">{s.specs}</div>}
                         </div>
                         <div className="text-right shrink-0">
@@ -1126,7 +1156,14 @@ function HostersTab({ canCreate, canEdit, canDelete, onAddItem }: {
                         {provItems.map((it) => (
                           <div key={`it-${it.id}`} className="px-4 py-2.5 flex items-center gap-3">
                             <div className="min-w-0 flex-1">
-                              <div className="text-sm text-white truncate">{it.name}</div>
+                              <div className="flex items-center gap-1.5 min-w-0">
+                                <span className="text-sm text-white truncate">{it.name}</span>
+                                {it.node_name && (
+                                  <Badge variant="outline" className="text-[9px] text-primary-300 shrink-0" title={t('finance.hoster.nodeBadge')}>
+                                    {it.node_name}
+                                  </Badge>
+                                )}
+                              </div>
                               {it.notes && <div className="text-xs text-muted-foreground truncate">{it.notes}</div>}
                             </div>
                             <div className="text-right shrink-0">

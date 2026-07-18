@@ -89,6 +89,7 @@ export interface ItemPayload {
   kind: string
   category_id?: number | null
   provider_id?: number | null
+  node_uuid?: string | null
   currency: string
   amount: number
   billing_cycle: string
@@ -125,6 +126,10 @@ export interface FinanceService {
   next_due_at: string | null
   external_id: string | null
   specs: string | null
+  ips?: string[] | null
+  // автосопоставление с нодой панели (по IP/имени, считается на бэке)
+  node_uuid?: string | null
+  node_name?: string | null
 }
 
 export interface FinanceAccount {

@@ -3948,6 +3948,7 @@
       "cycle": "Цикл оплаты",
       "cycleDays": "Дней в цикле",
       "provider": "Провайдер",
+      "node": "Нода",
       "nextDue": "Следующее списание",
       "paymentDate": "Дата платежа",
       "url": "Ссылка на кабинет"
@@ -4086,6 +4087,7 @@
       "hideServices": "Свернуть услуги",
       "servicesCount": "серверов: {{count}}",
       "renewsAt": "Продление",
+      "nodeBadge": "Нода панели",
       "fromApi": "Из API",
       "manualItems": "Записи",
       "addServer": "Добавить сервер"

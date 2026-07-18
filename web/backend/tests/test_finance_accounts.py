@@ -369,6 +369,51 @@ class TestHostkeyAdapter:
         assert svc.currency is None                # валюты нет -> фолбэк на баланс в UI
 
 
+# ── Сопоставление услуг с нодами ─────────────────────────────────
+
+
+class TestNodeMatching:
+    def test_extract_ips(self):
+        from web.backend.core.finance.adapters.base import extract_ips
+
+        rec = {
+            "ip": "89.19.223.46",
+            "nested": {"iplist": ["10.0.5.7", "89.19.223.46"]},  # дедуп
+            "deny": ["0.0.0.0", "127.0.0.1", "255.255.255.0"],
+            "text": "srv 103.214.69.124:443",
+        }
+        ips = extract_ips(rec)
+        assert ips.count("89.19.223.46") == 1
+        assert "103.214.69.124" in ips
+        assert "10.0.5.7" in ips
+        assert not any(ip.startswith(("0.", "127.", "255.")) for ip in ips)
+
+    @pytest.mark.asyncio
+    async def test_attach_nodes_to_services(self):
+        from web.backend.api.v2 import finance as fin_api
+
+        accounts = [{
+            "id": 1,
+            "services": [
+                {"name": "pl-vmv2-nano", "ips": ["82.38.65.201"]},  # матч по IP
+                {"name": "Germany W", "ips": None},                  # матч по имени
+                {"name": "other", "ips": ["9.9.9.9"]},               # без матча
+            ],
+        }]
+        nodes = [
+            {"uuid": "u1", "name": "RWPanel", "address": "82.38.65.201"},
+            {"uuid": "u2", "name": "Germany W", "address": "de.example.com"},
+        ]
+        db = AsyncMock()
+        db.get_all_nodes = AsyncMock(return_value=nodes)
+        with patch.object(fin_api, "db_service", db):
+            await fin_api._attach_nodes_to_services(accounts)
+        svcs = accounts[0]["services"]
+        assert svcs[0]["node_uuid"] == "u1" and svcs[0]["node_name"] == "RWPanel"
+        assert svcs[1]["node_uuid"] == "u2"
+        assert "node_uuid" not in svcs[2]
+
+
 # ── Автосинк ─────────────────────────────────────────────────────
 
 

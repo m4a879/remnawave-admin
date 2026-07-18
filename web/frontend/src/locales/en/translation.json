@@ -3948,6 +3948,7 @@
       "cycle": "Billing cycle",
       "cycleDays": "Days per cycle",
       "provider": "Provider",
+      "node": "Node",
       "nextDue": "Next payment",
       "paymentDate": "Payment date",
       "url": "Dashboard URL"
@@ -4086,6 +4087,7 @@
       "hideServices": "Collapse services",
       "servicesCount": "servers: {{count}}",
       "renewsAt": "Renews",
+      "nodeBadge": "Panel node",
       "fromApi": "From API",
       "manualItems": "Items",
       "addServer": "Add server"

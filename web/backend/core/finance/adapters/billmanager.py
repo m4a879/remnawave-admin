@@ -15,7 +15,7 @@ import httpx
 
 from web.backend.core.finance.adapters.base import (
     DEFAULT_TIMEOUT, AdapterError, AdapterField, HosterAdapter, Service, SyncResult,
-    register_adapter,
+    extract_ips, register_adapter,
 )
 
 logger = logging.getLogger(__name__)
@@ -294,5 +294,6 @@ class BillmanagerAdapter(HosterAdapter):
                 next_due_at=_normalize_date(_field(rec, "expiredate", "expire")),
                 external_id=_field(rec, "id"),
                 specs=" · ".join(specs_parts) or None,
+                ips=extract_ips(rec) or None,
             ))
         return out
