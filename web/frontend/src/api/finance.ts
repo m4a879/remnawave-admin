@@ -113,6 +113,7 @@ export interface FinanceService {
   period: string | null
   next_due_at: string | null
   external_id: string | null
+  specs: string | null
 }
 
 export interface FinanceAccount {

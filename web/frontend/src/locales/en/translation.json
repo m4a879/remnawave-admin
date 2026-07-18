@@ -4030,7 +4030,18 @@
     "bedolagaDeposits": "Balance top-ups",
     "bedolagaProfit": "Profit (per bot)",
     "bedolagaToday": "today",
-    "bedolagaByMethod": "By payment method"
+    "bedolagaByMethod": "By payment method",
+    "hoster": {
+      "showServices": "Show services",
+      "hideServices": "Collapse services",
+      "servicesCount": "servers: {{count}}",
+      "renewsAt": "Renews"
+    },
+    "period": {
+      "monthly": "/mo",
+      "yearly": "/yr",
+      "days": "/{{count}}d"
+    }
   },
   "reports": {
     "title": "Reports",

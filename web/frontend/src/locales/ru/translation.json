@@ -4030,7 +4030,18 @@
     "bedolagaDeposits": "Пополнения баланса",
     "bedolagaProfit": "Профит (по данным бота)",
     "bedolagaToday": "сегодня",
-    "bedolagaByMethod": "По способам оплаты"
+    "bedolagaByMethod": "По способам оплаты",
+    "hoster": {
+      "showServices": "Показать услуги",
+      "hideServices": "Свернуть услуги",
+      "servicesCount": "серверов: {{count}}",
+      "renewsAt": "Продление"
+    },
+    "period": {
+      "monthly": "в месяц",
+      "yearly": "в год",
+      "days": "за {{count}} дн."
+    }
   },
   "reports": {
     "title": "Отчёты",

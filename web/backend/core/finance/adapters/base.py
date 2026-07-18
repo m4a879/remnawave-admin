@@ -45,12 +45,14 @@ class Service:
     period: Optional[str] = None          # monthly | yearly | days:<n> | raw-строка хостера
     next_due_at: Optional[str] = None     # ISO date
     external_id: Optional[str] = None
+    specs: Optional[str] = None           # краткие характеристики: CPU/RAM/диск/локация
 
     def to_dict(self) -> Dict[str, Any]:
         return {
             "name": self.name, "status": self.status, "price": self.price,
             "currency": self.currency, "period": self.period,
             "next_due_at": self.next_due_at, "external_id": self.external_id,
+            "specs": self.specs,
         }
 
 

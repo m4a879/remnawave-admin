@@ -201,6 +201,11 @@ class BillmanagerAdapter(HosterAdapter):
                 continue
             status_raw = _field(rec, "status")
             cost = _field(rec, "cost", "item_cost")
+            # краткие характеристики: тариф + датацентр/локация, если есть и не дублируют имя
+            specs_parts: List[str] = []
+            for extra in (_field(rec, "pricelist"), _field(rec, "datacenter", "dc", "location")):
+                if extra and extra != name and extra not in specs_parts:
+                    specs_parts.append(extra)
             out.append(Service(
                 name=name,
                 status=_STATUS.get(status_raw or "", status_raw),
@@ -209,5 +214,6 @@ class BillmanagerAdapter(HosterAdapter):
                 period=_field(rec, "period"),
                 next_due_at=_normalize_date(_field(rec, "expiredate", "expire")),
                 external_id=_field(rec, "id"),
+                specs=" · ".join(specs_parts) or None,
             ))
         return out

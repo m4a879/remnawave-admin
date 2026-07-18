@@ -18,6 +18,7 @@ import {
   Server,
   Settings2,
   Zap,
+  ChevronDown,
 } from '@/components/brand/icons'
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip,
@@ -798,6 +799,20 @@ function HostersTab({ canCreate, canEdit, canDelete }: { canCreate: boolean; can
   const [form, setForm] = useState(EMPTY_ACCOUNT_FORM)
   const [testResult, setTestResult] = useState<AccountTestResult | null>(null)
   const [deleteAccountId, setDeleteAccountId] = useState<number | null>(null)
+  const [expanded, setExpanded] = useState<Set<number>>(new Set())
+  const toggleExpand = (id: number) => setExpanded((prev) => {
+    const next = new Set(prev)
+    if (next.has(id)) next.delete(id)
+    else next.add(id)
+    return next
+  })
+  const fmtPeriod = (period: string) => {
+    if (period === 'monthly') return t('finance.period.monthly')
+    if (period === 'yearly') return t('finance.period.yearly')
+    const m = /^days:(\d+)$/.exec(period)
+    if (m) return t('finance.period.days', { count: Number(m[1]) })
+    return period
+  }
   const editingAccount = dialogProvider ? accountByProvider.get(dialogProvider.id) : undefined
   const selectedAdapter = (adapters?.items || []).find((a) => a.slug === form.adapter)
 
@@ -885,10 +900,26 @@ function HostersTab({ canCreate, canEdit, canDelete }: { canCreate: boolean; can
         {provs.items.map((p) => {
           const acc = accountByProvider.get(p.id)
           const low = acc?.balance != null && acc.low_balance_threshold != null && acc.balance < acc.low_balance_threshold
+          const services = acc?.services || []
+          const hasServices = services.length > 0
+          const isOpen = expanded.has(p.id)
+          const sortedServices = [...services].sort((a, b) => {
+            if (!a.next_due_at) return 1
+            if (!b.next_due_at) return -1
+            return a.next_due_at.localeCompare(b.next_due_at)
+          })
           return (
             <Card key={p.id}>
               <CardContent className="py-3 flex items-center gap-3 flex-wrap">
-                <Server className="w-5 h-5 text-primary-400 shrink-0" />
+                {hasServices ? (
+                  <button type="button" onClick={() => toggleExpand(p.id)}
+                    className="shrink-0 text-primary-400 hover:text-primary-300 transition-colors"
+                    title={t(isOpen ? 'finance.hoster.hideServices' : 'finance.hoster.showServices')}>
+                    <ChevronDown className={cn('w-5 h-5 transition-transform', isOpen && 'rotate-180')} />
+                  </button>
+                ) : (
+                  <Server className="w-5 h-5 text-primary-400 shrink-0" />
+                )}
                 <div className="min-w-0">
                   <div className="flex items-center gap-2">
                     <span className="text-sm font-medium text-white truncate">{p.name}</span>
@@ -905,6 +936,11 @@ function HostersTab({ canCreate, canEdit, canDelete }: { canCreate: boolean; can
                   <div className="text-xs text-muted-foreground flex items-center gap-2 flex-wrap">
                     {p.url && <a href={p.url} target="_blank" rel="noreferrer" className="hover:text-primary-400 truncate max-w-[220px]">{p.url.replace(/^https?:\/\//, '')}</a>}
                     <span>· {t('finance.itemsCount', { count: p.items_count || 0 })}</span>
+                    {hasServices && (
+                      <button type="button" onClick={() => toggleExpand(p.id)} className="hover:text-primary-400">
+                        · {t('finance.hoster.servicesCount', { count: services.length })}
+                      </button>
+                    )}
                     {acc?.last_sync_at && <span>· {t('finance.lastSync')}: {acc.last_sync_at.slice(0, 16).replace('T', ' ')}</span>}
                   </div>
                 </div>
@@ -932,6 +968,31 @@ function HostersTab({ canCreate, canEdit, canDelete }: { canCreate: boolean; can
                   )}
                 </div>
               </CardContent>
+              {isOpen && hasServices && (
+                <div className="border-t border-white/5 divide-y divide-white/5 max-h-80 overflow-y-auto">
+                  {sortedServices.map((s, i) => (
+                    <div key={s.external_id || `${p.id}-${i}`} className="px-4 py-2 flex items-center gap-3">
+                      <div className="min-w-0 flex-1">
+                        <div className="text-sm text-white truncate">{s.name}</div>
+                        {s.specs && <div className="text-xs text-muted-foreground truncate">{s.specs}</div>}
+                      </div>
+                      {s.next_due_at && (
+                        <div className="text-xs text-muted-foreground text-right shrink-0 hidden sm:block">
+                          {t('finance.hoster.renewsAt')}<br />{s.next_due_at.slice(0, 10)}
+                        </div>
+                      )}
+                      <div className="text-right shrink-0 w-24">
+                        {s.price != null ? (
+                          <span className="text-sm font-mono text-white">{fmtMoney(s.price, s.currency || acc?.balance_currency || '')}</span>
+                        ) : (
+                          <span className="text-sm text-muted-foreground">—</span>
+                        )}
+                        {s.period && <div className="text-[10px] text-muted-foreground">{fmtPeriod(s.period)}</div>}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </Card>
           )
         })}
