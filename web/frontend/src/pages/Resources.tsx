@@ -119,17 +119,28 @@ export default function Resources({ embedded }: { embedded?: boolean } = {}) {
     },
   })
 
-  const openEditTemplate = (template: Template) => {
+  const openEditTemplate = async (template: Template) => {
+    // список шаблонов не содержит контента (templateJson/encodedTemplateYaml) —
+    // грузим полный шаблон по uuid
     setEditingTemplate(template)
-    const isYaml = !!template.encodedTemplateYaml
-    setEditTemplateForm({
-      name: template.name,
-      templateJson: isYaml
-        ? b64DecodeUtf8(template.encodedTemplateYaml!)
-        : JSON.stringify(template.templateJson, null, 2),
-      isYaml,
-    })
+    // тип YAML определяем сразу по метаданным списка, чтобы не мигал редактор
+    const yamlTypes = ['MIHOMO', 'CLASH', 'STASH']
+    const isYamlType = yamlTypes.includes(template.templateType)
+    setEditTemplateForm({ name: template.name, templateJson: '', isYaml: isYamlType })
     setEditTemplateDialogOpen(true)
+    try {
+      const full = await resourcesApi.getTemplate(template.uuid)
+      const isYaml = !!full.encodedTemplateYaml || isYamlType
+      setEditTemplateForm({
+        name: full.name,
+        templateJson: full.encodedTemplateYaml
+          ? b64DecodeUtf8(full.encodedTemplateYaml)
+          : JSON.stringify(full.templateJson ?? {}, null, 2),
+        isYaml,
+      })
+    } catch {
+      toast.error(t('common.error'))
+    }
   }
 
   const handleUpdateTemplate = () => {
