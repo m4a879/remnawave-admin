@@ -265,7 +265,8 @@ class TestHostkeyAdapter:
 
     @pytest.mark.asyncio
     async def test_fetch_services_enriches_bare_ids(self):
-        """Реальный Hostkey: list отдаёт голые id -> детали по show + get_billing_data."""
+        """Реальный Hostkey: list -> голые id, детали по show (server_data) +
+        get_billing_data (плоский, billing_reccuring/billing_cycle/next_due_date/IP)."""
         from urllib.parse import parse_qs
         from web.backend.core.finance.adapters.hostkey import HostkeyAdapter
 
@@ -281,9 +282,13 @@ class TestHostkeyAdapter:
                         "credits": {"credit": [{"id": 1, "amount": "100.00"}]}}})
                 if action == "get_billing_data":
                     assert (body.get("id") or [""])[0] == "55054"
-                    return httpx.Response(200, json={"result": "OK", "message": {
-                        "recurringamount": "89.00", "billingcycle": "monthly",
-                        "nextduedate": "2026-08-15", "currencycode": "EUR"}})
+                    # реальный ответ: плоский, без конверта result
+                    return httpx.Response(200, json={
+                        "IP": "pl-vmv2-nano", "client_id": 77412, "order_id": 173904,
+                        "billing_setupfee": "830.00", "billing_status": "Active",
+                        "reg_date": "2026-05-25", "billing_cycle": "Monthly",
+                        "next_due_date": "2026-08-25", "billing_reccuring": "830.00",
+                        "billing_name": "Услуги по предоставлению вычислительных мощностей (Instant server PL)"})
             if path.endswith("/eq.php"):
                 if action == "list":
                     # голые id на верхнем уровне (как на реальном инстансе)
@@ -291,10 +296,10 @@ class TestHostkeyAdapter:
                         "result": "OK", "module": "eq", "servers": [55054]})
                 if action == "show":
                     assert (body.get("id") or [""])[0] == "55054"
-                    return httpx.Response(200, json={"result": "OK", "message": {
-                        "name": "DE-Falkenstein-1", "status": "active",
-                        "hwconfig": {"cpu": "Xeon E-2288G", "ram": "32GB", "disk": "2x512 NVMe"},
-                        "location": "Falkenstein"}})
+                    # реальный ответ: запись под server_data, чистого имени нет
+                    return httpx.Response(200, json={"result": "OK", "server_data": {
+                        "id": 55054, "ref_tableName": "VPS", "account_id": 175709,
+                        "limit_traffic": 3, "limit_bands": 1000}})
             return httpx.Response(404)
 
         adapter = HostkeyAdapter()
@@ -303,13 +308,14 @@ class TestHostkeyAdapter:
 
         assert len(result.services) == 1
         svc = result.services[0]
-        assert svc.name == "DE-Falkenstein-1"
+        assert svc.name == "pl-vmv2-nano"          # из поля IP
         assert svc.external_id == "55054"
-        assert svc.price == 89.0
-        assert svc.currency == "EUR"
-        assert svc.period == "monthly"
-        assert svc.next_due_at == "2026-08-15"
-        assert svc.specs and "Xeon E-2288G" in svc.specs and "Falkenstein" in svc.specs
+        assert svc.price == 830.0                  # billing_reccuring
+        assert svc.period == "monthly"             # Monthly -> нормализация
+        assert svc.next_due_at == "2026-08-25"     # next_due_date
+        assert svc.status == "active"              # billing_status
+        assert svc.specs == "Instant server PL"    # из скобок billing_name
+        assert svc.currency is None                # валюты нет -> фолбэк на баланс в UI
 
 
 # ── Автосинк ─────────────────────────────────────────────────────

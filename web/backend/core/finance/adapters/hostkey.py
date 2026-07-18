@@ -293,12 +293,20 @@ class HostkeyAdapter(HosterAdapter):
             brec = _detail_rec(bill)
             if brec:
                 if price is None:
-                    price = _first_num(brec, "recurringamount", "amount", "cost",
-                                       "price", "total", "firstpaymentamount")
-                period = period or (str(brec.get("billingcycle") or brec.get("period") or "") or None)
+                    # Hostkey отдаёт цену в billing_reccuring (sic, с опечаткой)
+                    price = _first_num(brec, "billing_reccuring", "billing_recurring",
+                                       "recurringamount", "amount", "cost", "price", "total")
+                period = period or _norm_cycle(
+                    brec.get("billing_cycle") or brec.get("billingcycle") or brec.get("period"))
                 next_due = next_due or _iso_date(
-                    brec.get("nextduedate") or brec.get("duedate") or brec.get("expiredate"))
+                    brec.get("next_due_date") or brec.get("nextduedate")
+                    or brec.get("duedate") or brec.get("expiredate"))
                 currency = currency or brec.get("currencycode") or brec.get("currency")
+                status = status or (str(brec.get("billing_status") or "").lower() or None)
+                # имя/характеристики из биллинга, если из show не пришли:
+                # IP тут — человекочитаемый лейбл сервера (напр. pl-vmv2-nano)
+                name = name or _pick_str(brec, "server_name", "hostname", "IP", "billing_name")
+                specs = specs or _plan_from_billing_name(brec.get("billing_name"))
         except AdapterError as e:
             logger.info("Hostkey whmcs get_billing_data id=%s: %s", sid, e)
 
@@ -394,7 +402,7 @@ def _detail_rec(payload: Any) -> Optional[Dict[str, Any]]:
     if isinstance(node, dict) and isinstance(node.get("message"), dict):
         node = node["message"]
     if isinstance(node, dict):
-        for k in ("server", "eq", "data", "info", "product", "service", "billing"):
+        for k in ("server_data", "server", "eq", "data", "info", "product", "service", "billing"):
             if isinstance(node.get(k), dict):
                 return node[k]
         return node
@@ -403,6 +411,30 @@ def _detail_rec(payload: Any) -> Optional[Dict[str, Any]]:
             if isinstance(x, dict):
                 return x
     return None
+
+
+def _norm_cycle(v: Any) -> Optional[str]:
+    """WHMCS billing cycle -> ключ периода фронта (monthly/yearly), прочее — как есть."""
+    if not v:
+        return None
+    s = str(v).strip().lower()
+    if s in ("monthly", "month"):
+        return "monthly"
+    if s in ("annually", "yearly", "annual", "year"):
+        return "yearly"
+    return s or None
+
+
+def _plan_from_billing_name(v: Any) -> Optional[str]:
+    """billing_name «Услуги… (Instant server PL)» -> «Instant server PL»."""
+    s = str(v or "").strip()
+    if not s:
+        return None
+    if s.endswith(")") and "(" in s:
+        inner = s[s.rfind("(") + 1:-1].strip()
+        if inner:
+            return inner[:200]
+    return s[:200]
 
 
 def _hwconfig_specs(rec: Dict[str, Any]) -> Optional[str]:
