@@ -533,7 +533,9 @@ async def _attach_nodes_to_services(accounts: list) -> None:
     """Автосопоставление услуг хостера с нодами панели.
 
     Приоритет — совпадение IP услуги (adapters собирают их в Service.ips)
-    с адресом ноды; фолбэк — точное совпадение имени. Ничего не храним:
+    с адресом ноды ИЛИ с agent_ip (реальный публичный IP по коллектор-батчам —
+    работает и когда нода подключена через оверлей типа NetBird и address
+    туннельный); фолбэк — точное совпадение имени. Ничего не храним:
     матчинг на чтении, всегда актуален.
     """
     try:
@@ -548,9 +550,10 @@ async def _attach_nodes_to_services(accounts: list) -> None:
         uuid, name = n.get("uuid"), n.get("name")
         if not uuid:
             continue
-        addr = str(n.get("address") or "").strip()
-        if addr:
-            by_ip[addr] = (uuid, name)
+        for addr_key in ("address", "agent_ip"):
+            addr = str(n.get(addr_key) or "").strip()
+            if addr:
+                by_ip.setdefault(addr, (uuid, name))
         if name:
             by_name[str(name).strip().lower()] = (uuid, name)
     for acc in accounts:

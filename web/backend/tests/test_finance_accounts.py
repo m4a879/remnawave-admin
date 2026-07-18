@@ -395,14 +395,17 @@ class TestNodeMatching:
         accounts = [{
             "id": 1,
             "services": [
-                {"name": "pl-vmv2-nano", "ips": ["82.38.65.201"]},  # матч по IP
+                {"name": "pl-vmv2-nano", "ips": ["82.38.65.201"]},  # матч по address
                 {"name": "Germany W", "ips": None},                  # матч по имени
                 {"name": "other", "ips": ["9.9.9.9"]},               # без матча
+                {"name": "waicore-fi", "ips": ["65.109.1.2"]},       # матч по agent_ip (NetBird)
             ],
         }]
         nodes = [
             {"uuid": "u1", "name": "RWPanel", "address": "82.38.65.201"},
             {"uuid": "u2", "name": "Germany W", "address": "de.example.com"},
+            # за NetBird: address — туннельный, публичный IP пришёл с коллектора
+            {"uuid": "u3", "name": "Finland", "address": "100.101.2.3", "agent_ip": "65.109.1.2"},
         ]
         db = AsyncMock()
         db.get_all_nodes = AsyncMock(return_value=nodes)
@@ -412,6 +415,7 @@ class TestNodeMatching:
         assert svcs[0]["node_uuid"] == "u1" and svcs[0]["node_name"] == "RWPanel"
         assert svcs[1]["node_uuid"] == "u2"
         assert "node_uuid" not in svcs[2]
+        assert svcs[3]["node_uuid"] == "u3" and svcs[3]["node_name"] == "Finland"
 
 
 # ── Автосинк ─────────────────────────────────────────────────────

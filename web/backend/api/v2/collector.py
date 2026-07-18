@@ -12,7 +12,7 @@ import logging
 import os
 import time
 from datetime import datetime, timedelta
-from typing import Optional
+from typing import Dict, Optional
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Header, Request
@@ -299,7 +299,32 @@ async def verify_agent_token(
         raise HTTPException(status_code=403, detail="Invalid or expired token")
 
     logger.debug("Agent token verified for node: %s from %s", node_uuid, client_ip)
+    await _remember_agent_ip(node_uuid, client_ip)
     return node_uuid
+
+
+# Последний записанный agent_ip по нодам — чтобы не долбить UPDATE каждым батчем
+_agent_ip_cache: Dict[str, str] = {}
+
+
+async def _remember_agent_ip(node_uuid: str, client_ip: str) -> None:
+    """Публичный IP ноды по source-IP батча (nodes.agent_ip).
+
+    За оверлеем (NetBird) nodes.address — туннельный, а хостерские API отдают
+    публичные адреса; agent_ip — мост для сопоставления серверов с нодами.
+    """
+    if not client_ip or _agent_ip_cache.get(node_uuid) == client_ip:
+        return
+    _agent_ip_cache[node_uuid] = client_ip
+    try:
+        async with db_service.acquire() as conn:
+            await conn.execute(
+                f"UPDATE {NODES_TABLE} SET agent_ip = $2 WHERE uuid = $1::uuid",
+                node_uuid, client_ip,
+            )
+    except Exception as e:
+        _agent_ip_cache.pop(node_uuid, None)
+        logger.debug("Failed to store agent_ip for %s: %s", node_uuid, e)
 
 
 # ── Endpoints ────────────────────────────────────────────────────
