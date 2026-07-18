@@ -24,7 +24,7 @@ import { lintKeymap, linter, lintGutter, forEachDiagnostic, Diagnostic } from '@
 import { json, jsonLanguage, jsonParseLinter } from '@codemirror/lang-json'
 import { oneDark } from '@codemirror/theme-one-dark'
 import Ajv, { ValidateFunction } from 'ajv'
-import xraySchema from '@/pages/xray/utils/config.schema.json'
+import xraySchema from './xray.schema.json'
 
 const ajv = new Ajv({ allErrors: true, strict: false })
 

@@ -36,7 +36,6 @@ import {
   Share2,
   ShieldBan,
   Package,
-  FileJson,
   Wallet,
   FileText,
   Boxes,
@@ -103,7 +102,6 @@ const navigation: NavigationEntry[] = [
   { name: 'nav.fleet', href: '/fleet', icon: Activity, permission: { resource: 'fleet', action: 'view' } },
   { name: 'nav.hosts', href: '/hosts', icon: Globe, permission: { resource: 'hosts', action: 'view' } },
   { name: 'nav.finance', href: '/finance', icon: Wallet, permission: { resource: 'finance', action: 'view' } },
-  { name: 'nav.xrayEditor', href: '/resources/xray', icon: FileJson, permission: { resource: 'resources', action: 'view' } },
   { name: 'nav.resources', href: '/resources', icon: Boxes, permission: { resource: 'resources', action: 'view' } },
   // Security — «защищаюсь»
   { type: 'section', name: 'nav.sections.security' },
