@@ -229,6 +229,33 @@ class TestReminders:
         notify.assert_not_awaited()
 
     @pytest.mark.asyncio
+    async def test_telegram_card_and_url_button(self):
+        """HTML-карточка в telegram_body (blockquote, экранирование) + кнопка кабинета."""
+        from web.backend.core.finance import reminders as rem
+
+        db = AsyncMock()
+        db.is_connected = True
+        item = _upcoming_item(days_left=1)
+        item["url"] = "https://my.hoster.com"
+        item["provider_name"] = "A&B <Host>"
+        db.upcoming_finance_payments = AsyncMock(return_value=[item])
+        db.update_finance_item = AsyncMock()
+        notify = AsyncMock()
+        with patch("shared.database.db_service", db), \
+             patch("web.backend.core.notification_service.create_notification", notify):
+            sent = await rem.check_and_send_reminders()
+        assert sent == 1
+        kw = notify.await_args.kwargs
+        tg = kw["telegram_body"]
+        assert tg.startswith("<blockquote>") and tg.endswith("</blockquote>")
+        assert "<b>5.00 EUR</b>" in tg
+        assert "завтра" in tg and "(20.07.2026)" in tg
+        assert "A&amp;B &lt;Host&gt;" in tg  # HTML экранируется
+        rows = kw["reply_markup"]["inline_keyboard"]
+        assert rows[0][0]["callback_data"] == "fin:paid:1"
+        assert rows[1][0]["url"] == "https://my.hoster.com"
+
+    @pytest.mark.asyncio
     async def test_overdue_always_reminds_daily(self):
         from web.backend.core.finance import reminders as rem
 
