@@ -109,7 +109,18 @@ class BaseHttpClient:
                     except (ValueError, KeyError):
                         raise ValidationError(f"Validation error on {path}") from exc
                 if status >= 500:
-                    raise ServerError(f"Server error {status} on {path}", status_code=status) from exc
+                    # Remnawave шлёт бизнес-ошибки (напр. невалидный конфиг) с 500
+                    # и телом {message, errorCode} — доносим текст, не глотаем
+                    msg = f"Server error {status} on {path}"
+                    try:
+                        error_data = exc.response.json()
+                        panel_msg = error_data.get("message") or error_data.get("detail")
+                        if panel_msg:
+                            code = error_data.get("errorCode")
+                            msg = str(panel_msg) + (f" [{code}]" if code else "")
+                    except ValueError:
+                        pass
+                    raise ServerError(msg, status_code=status) from exc
                 raise ApiClientError(f"API error {status}", code=f"ERR_API_{status}") from exc
 
             except httpx.ReadTimeout as exc:

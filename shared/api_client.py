@@ -884,7 +884,13 @@ class RemnawaveApiClient(BaseHttpClient):
         return await self._get("/api/tokens")
 
     async def create_token(self, token_name: str) -> dict:
-        return await self._post("/api/tokens", json={"tokenName": token_name})
+        # Панель 2.8.0+: {name, expiresInDays}; старые версии — {tokenName}
+        try:
+            return await self._post(
+                "/api/tokens", json={"name": token_name, "expiresInDays": 3650},
+            )
+        except ValidationError:
+            return await self._post("/api/tokens", json={"tokenName": token_name})
 
     async def delete_token(self, token_uuid: str) -> dict:
         return await self._delete(f"/api/tokens/{token_uuid}")

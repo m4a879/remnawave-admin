@@ -48,6 +48,24 @@ class TestConfigVersions:
         assert db.save_config_version.await_args.args[:2] == ("profile", "u-1")
 
     @pytest.mark.asyncio
+    async def test_patch_surfaces_panel_error(self, client):
+        """Бизнес-ошибка панели (500 + message) доносится текстом, а не generic 502."""
+        from shared.exceptions import ServerError
+
+        db = AsyncMock()
+        db.list_config_versions = AsyncMock(return_value=[{"id": 1}])
+        db.save_config_version = AsyncMock()
+        api = AsyncMock()
+        api.update_config_profile = AsyncMock(
+            side_effect=ServerError("All inbounds must have a unique tag. [A061]", status_code=500))
+        with patch("shared.database.db_service", db), \
+             patch("shared.api_client.api_client", api):
+            resp = await client.patch("/api/v2/config-profiles/u-1", json={"inbounds": []})
+        assert resp.status_code == 400
+        assert "unique tag" in resp.json()["detail"]
+        db.save_config_version.assert_not_awaited()  # версия при провале не пишется
+
+    @pytest.mark.asyncio
     async def test_patch_baseline_on_first_edit(self, client):
         """Перед первым нашим сохранением фиксируется исходный конфиг панели."""
         db = AsyncMock()

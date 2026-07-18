@@ -3919,6 +3919,7 @@
       "errors": "Errors: {{count}}",
       "usedByNodes": "Nodes: {{count}}",
       "nodesHint": "Used by: {{nodes}}",
+      "updatedAt": "updated {{date}}",
       "format": "Format",
       "history": "History",
       "noVersions": "No versions yet — they appear after the first save",

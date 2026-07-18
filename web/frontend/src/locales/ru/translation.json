@@ -3919,6 +3919,7 @@
       "errors": "Ошибок: {{count}}",
       "usedByNodes": "Нод: {{count}}",
       "nodesHint": "Профиль используют: {{nodes}}",
+      "updatedAt": "обновлён {{date}}",
       "format": "Формат",
       "history": "История",
       "noVersions": "Версий пока нет — появятся после первого сохранения",

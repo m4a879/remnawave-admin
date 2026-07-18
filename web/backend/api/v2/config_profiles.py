@@ -143,8 +143,16 @@ async def update_config_profile(
 
     try:
         from shared.api_client import api_client
+        from shared.exceptions import NotFoundError, ServerError, ValidationError
         # Panel expects the JSON payload `{ uuid, config }` to PATCH /api/config-profiles.
         result = await api_client.update_config_profile({"uuid": profile_uuid, "config": config})
+    except (ValidationError, ServerError) as e:
+        # бизнес-ошибка панели (напр. «All inbounds must have a unique tag») —
+        # редактор должен показать её текст, а не generic 502
+        logger.warning("Panel rejected config for %s: %s", profile_uuid, e)
+        raise HTTPException(status_code=400, detail=str(e))
+    except NotFoundError:
+        raise HTTPException(status_code=404, detail="Config profile not found")
     except Exception as e:
         logger.error("Failed to update config profile %s: %s", profile_uuid, e)
         raise HTTPException(status_code=502, detail="Service temporarily unavailable")

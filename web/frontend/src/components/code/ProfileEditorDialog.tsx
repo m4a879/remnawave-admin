@@ -12,7 +12,6 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import { resourcesApi, ConfigProfile, ConfigVersion } from '@/api/resources'
-import client from '@/api/client'
 import { CodeEditor } from './CodeEditor'
 import { CodeDiff } from './CodeDiff'
 import { Button } from '@/components/ui/button'
@@ -66,23 +65,13 @@ export function ProfileEditorDialog({ profile, onClose }: Props) {
     return JSON.stringify(cfg, null, 2)
   }, [computedData])
 
-  // ноды, сидящие на профиле (интеграция с ремнёй)
-  const { data: nodes } = useQuery({
-    queryKey: ['nodes-brief-profiles'],
-    queryFn: async () => {
-      const { data } = await client.get('/nodes', { params: { per_page: 500 } })
-      return (data.items || data) as Record<string, any>[]
-    },
-    enabled: !!profile,
-    staleTime: 60_000,
-  })
+  // ноды на профиле — панель отдаёт их прямо в ответе профиля (nodes[])
   const profileNodes = useMemo(() => {
-    if (!profile || !nodes) return []
-    return nodes.filter((n) => {
-      const uuid = n.configProfile?.activeConfigProfileUuid || n.activeConfigProfileUuid
-      return uuid === profile.uuid
-    }).map((n) => String(n.name || n.uuid))
-  }, [nodes, profile])
+    const arr = (profileData as Record<string, any> | undefined)?.nodes
+    if (!Array.isArray(arr)) return []
+    return arr.map((n: Record<string, any>) =>
+      n.countryCode ? `${n.name} (${n.countryCode})` : String(n.name || n.uuid))
+  }, [profileData])
 
   // история версий (наша БД)
   const { data: versions, refetch: refetchVersions } = useQuery({
@@ -232,11 +221,11 @@ export function ProfileEditorDialog({ profile, onClose }: Props) {
                 </Badge>
               ) : null)}
             </div>
-            {profileNodes.length > 0 && (
-              <p className="text-[11px] text-muted-foreground">
-                {t('resources.editor.nodesHint', { nodes: profileNodes.join(', ') })}
-              </p>
-            )}
+            <p className="text-[11px] text-muted-foreground">
+              {profileNodes.length > 0 && `${t('resources.editor.nodesHint', { nodes: profileNodes.join(', ') })} · `}
+              {(profileData as Record<string, any> | undefined)?.updatedAt &&
+                t('resources.editor.updatedAt', { date: fmtDate((profileData as Record<string, any>).updatedAt) })}
+            </p>
           </DialogHeader>
 
           <div className="flex-1 min-h-0 flex gap-3">
