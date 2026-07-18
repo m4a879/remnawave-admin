@@ -284,11 +284,8 @@ export default function Resources({ embedded }: { embedded?: boolean } = {}) {
   }
 
   // ── Config Profiles ─────────────────────────────────────────────
-  const [viewConfigDialogOpen, setViewConfigDialogOpen] = useState(false)
-  const [viewingProfile, setViewingProfile] = useState<ConfigProfile | null>(null)
-  // встроенный редактор профиля (вместо перехода на /resources/xray)
+  // встроенный редактор профиля (исходник + вычисленный, история версий)
   const [editingProfile, setEditingProfile] = useState<ConfigProfile | null>(null)
-  const [computedConfig, setComputedConfig] = useState<unknown>(null)
 
   const { data: configProfiles = [], isLoading: profilesLoading, isError: isProfilesError, refetch: refetchProfiles } = useQuery({
     queryKey: ['config-profiles'],
@@ -297,17 +294,6 @@ export default function Resources({ embedded }: { embedded?: boolean } = {}) {
 
   const hasError = isTokensError || isTemplatesError || isSnippetsError || isProfilesError
   const handleRetry = () => { refetchTokens(); refetchTemplates(); refetchSnippets(); refetchProfiles() }
-
-  const viewComputedConfig = async (profile: ConfigProfile) => {
-    try {
-      const data = await resourcesApi.getComputedConfig(profile.uuid)
-      setViewingProfile(profile)
-      setComputedConfig(data)
-      setViewConfigDialogOpen(true)
-    } catch {
-      toast.error(t('resources.profiles.loadError'))
-    }
-  }
 
   if (hasError) {
     return (
@@ -620,7 +606,7 @@ export default function Resources({ embedded }: { embedded?: boolean } = {}) {
                 <Card
                   key={profile.uuid}
                   className="border-[var(--glass-border)] bg-[var(--glass-bg)] hover:border-[var(--glass-border)] transition-colors cursor-pointer"
-                  onClick={() => viewComputedConfig(profile)}
+                  onClick={() => setEditingProfile(profile)}
                 >
                   <CardContent className="p-4">
                     <div className="space-y-3">
@@ -931,32 +917,6 @@ export default function Resources({ embedded }: { embedded?: boolean } = {}) {
         onConfirm={() => deleteSnippetConfirm && deleteSnippetMutation.mutate(deleteSnippetConfirm)}
       />
 
-      {/* View Computed Config Dialog */}
-      <Dialog open={viewConfigDialogOpen} onOpenChange={setViewConfigDialogOpen}>
-        <DialogContent className="w-[95vw] max-w-3xl">
-          <DialogHeader>
-            <DialogTitle>
-              {t('resources.profiles.viewTitle')}: {viewingProfile?.name}
-            </DialogTitle>
-            <DialogDescription>{t('resources.profiles.viewDescription')}</DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4">
-            <pre className="w-full max-h-96 overflow-auto px-3 py-2 bg-[var(--glass-bg)] border border-[var(--glass-border)] rounded-md text-xs font-mono text-dark-50">
-              {JSON.stringify(computedConfig, null, 2)}
-            </pre>
-          </div>
-          <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => computedConfig && copyToClipboard(JSON.stringify(computedConfig, null, 2))}
-            >
-              <Copy className="w-4 h-4 mr-2" />
-              {t('common.copy')}
-            </Button>
-            <Button onClick={() => setViewConfigDialogOpen(false)}>{t('common.close')}</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </div>
   )
 }

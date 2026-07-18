@@ -42,6 +42,8 @@ export function ProfileEditorDialog({ profile, onClose }: Props) {
   const [original, setOriginal] = useState('')
   const [diffOpen, setDiffOpen] = useState(false)
   const [errorCount, setErrorCount] = useState(0)
+  // «Исходник» — редактируемый конфиг; «Вычисленный» — раскрытый панелью (read-only)
+  const [view, setView] = useState<'source' | 'computed'>('source')
 
   // конфиг профиля из панели
   const { data: profileData, isLoading } = useQuery({
@@ -50,6 +52,19 @@ export function ProfileEditorDialog({ profile, onClose }: Props) {
     enabled: !!profile,
     staleTime: 0,
   })
+
+  // вычисленный конфиг — лениво, при переключении вкладки
+  const { data: computedData, isLoading: computedLoading, isError: computedError } = useQuery({
+    queryKey: ['config-profile-computed', profile?.uuid],
+    queryFn: () => resourcesApi.getComputedConfig(profile!.uuid),
+    enabled: !!profile && view === 'computed',
+    staleTime: 30_000,
+  })
+  const computedText = useMemo(() => {
+    if (!computedData) return ''
+    const cfg = (computedData as any).config ?? computedData
+    return JSON.stringify(cfg, null, 2)
+  }, [computedData])
 
   // ноды, сидящие на профиле (интеграция с ремнёй)
   const { data: nodes } = useQuery({
@@ -86,12 +101,15 @@ export function ProfileEditorDialog({ profile, onClose }: Props) {
     const pretty = cfg ? JSON.stringify(cfg, null, 2) : ''
     setText(pretty)
     setOriginal(pretty)
+    setView('source')
   }, [profileData])
 
-  // секции конфига для навигации
+  const activeText = view === 'computed' ? computedText : text
+
+  // секции конфига для навигации (по активной вкладке)
   const sections = useMemo(() => {
     try {
-      const parsed = JSON.parse(text)
+      const parsed = JSON.parse(activeText)
       return Object.keys(parsed).map((k) => ({
         key: k,
         count: Array.isArray(parsed[k]) ? parsed[k].length : null,
@@ -99,18 +117,18 @@ export function ProfileEditorDialog({ profile, onClose }: Props) {
     } catch {
       return []
     }
-  }, [text])
+  }, [activeText])
 
   const cmRef = useRef<EditorView | null>(null)
   const jumpTo = (key: string) => {
-    const view = cmRef.current
-    const idx = text.indexOf(`"${key}"`)
-    if (!view || idx < 0) return
-    view.dispatch({
+    const cm = cmRef.current
+    const idx = activeText.indexOf(`"${key}"`)
+    if (!cm || idx < 0) return
+    cm.dispatch({
       selection: { anchor: idx },
       effects: EditorView.scrollIntoView(idx, { y: 'start', yMargin: 8 }),
     })
-    view.focus()
+    cm.focus()
   }
 
   const formatJson = () => {
@@ -142,13 +160,18 @@ export function ProfileEditorDialog({ profile, onClose }: Props) {
       setOriginal(text)
       qc.invalidateQueries({ queryKey: ['config-profiles'] })
       qc.invalidateQueries({ queryKey: ['config-profile', profile?.uuid] })
+      qc.invalidateQueries({ queryKey: ['config-profile-computed', profile?.uuid] })
       refetchVersions()
     },
-    onError: () => toast.error(t('resources.editor.saveError')),
+    // панель валидирует конфиг на своей стороне — показываем её ответ, не generic
+    onError: (e: { response?: { data?: { detail?: string; message?: string } } }) => {
+      const detail = e.response?.data?.detail || e.response?.data?.message
+      toast.error(detail || t('resources.editor.saveError'))
+    },
   })
 
   const dirty = text !== original
-  const canSave = dirty && errorCount === 0 && !!text.trim()
+  const canSave = dirty && errorCount === 0 && !!text.trim() && view === 'source'
 
   const openDiff = () => {
     try {
@@ -160,6 +183,20 @@ export function ProfileEditorDialog({ profile, onClose }: Props) {
     setDiffOpen(true)
   }
 
+  // Ctrl/Cmd+S — привычный жест: открыть просмотр изменений
+  useEffect(() => {
+    if (!profile) return
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
+        e.preventDefault()
+        if (canSave) openDiff()
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [profile, canSave, text])
+
   return (
     <>
       <Dialog open={profile !== null} onOpenChange={(o) => !o && onClose()}>
@@ -167,13 +204,25 @@ export function ProfileEditorDialog({ profile, onClose }: Props) {
           <DialogHeader className="shrink-0">
             <div className="flex items-center gap-2 flex-wrap pr-8">
               <DialogTitle className="text-base">{profile?.name}</DialogTitle>
+              {/* Исходник / Вычисленный (раскрытый панелью, read-only) */}
+              <div className="flex items-center rounded-lg border border-[var(--glass-border)] overflow-hidden">
+                {(['source', 'computed'] as const).map((v) => (
+                  <button key={v} type="button" onClick={() => setView(v)}
+                    className={cn(
+                      'px-2.5 py-1 text-xs transition-colors',
+                      view === v ? 'bg-primary-500/20 text-primary-300' : 'text-muted-foreground hover:text-white',
+                    )}>
+                    {t(`resources.editor.${v}Tab`)}
+                  </button>
+                ))}
+              </div>
               {profileNodes.length > 0 && (
                 <Badge variant="outline" className="text-[10px] text-primary-300 gap-1">
                   <Server className="w-3 h-3" />
                   {t('resources.editor.usedByNodes', { count: profileNodes.length })}
                 </Badge>
               )}
-              {errorCount > 0 ? (
+              {view === 'source' && (errorCount > 0 ? (
                 <Badge className="bg-red-500/20 text-red-300 text-[10px] gap-1">
                   <AlertTriangle className="w-3 h-3" /> {t('resources.editor.errors', { count: errorCount })}
                 </Badge>
@@ -181,7 +230,7 @@ export function ProfileEditorDialog({ profile, onClose }: Props) {
                 <Badge className="bg-green-500/20 text-green-300 text-[10px] gap-1">
                   <Check className="w-3 h-3" /> {t('resources.editor.valid')}
                 </Badge>
-              ) : null}
+              ) : null)}
             </div>
             {profileNodes.length > 0 && (
               <p className="text-[11px] text-muted-foreground">
@@ -203,9 +252,19 @@ export function ProfileEditorDialog({ profile, onClose }: Props) {
                 ))}
               </div>
             )}
-            {/* редактор */}
+            {/* редактор / вычисленный (read-only) */}
             <div className="flex-1 min-h-0">
-              {isLoading ? (
+              {view === 'computed' ? (
+                computedLoading ? (
+                  <Skeleton className="h-full w-full" />
+                ) : computedError ? (
+                  <div className="h-full flex items-center justify-center text-sm text-muted-foreground">
+                    {t('resources.profiles.loadError')}
+                  </div>
+                ) : (
+                  <CodeEditor value={computedText} onChange={() => {}} schema="json" readOnly viewRef={cmRef} />
+                )
+              ) : isLoading ? (
                 <Skeleton className="h-full w-full" />
               ) : (
                 <CodeEditor value={text} onChange={setText} schema="xray" onDiagnostics={setErrorCount} viewRef={cmRef} />
@@ -215,6 +274,15 @@ export function ProfileEditorDialog({ profile, onClose }: Props) {
 
           <DialogFooter className="shrink-0 flex-wrap gap-2 sm:justify-between">
             <div className="flex items-center gap-2">
+              {view === 'computed' ? (
+                <Button variant="outline" size="sm" onClick={() => {
+                  navigator.clipboard.writeText(computedText)
+                  toast.success(t('common.copied'))
+                }} disabled={!computedText}>
+                  {t('common.copy')}
+                </Button>
+              ) : (
+              <>
               <Button variant="outline" size="sm" onClick={formatJson}>
                 {t('resources.editor.format')}
               </Button>
@@ -240,10 +308,12 @@ export function ProfileEditorDialog({ profile, onClose }: Props) {
                   ))}
                 </DropdownMenuContent>
               </DropdownMenu>
+              </>
+              )}
             </div>
             <div className="flex items-center gap-2">
               <Button variant="outline" onClick={onClose}>{t('common.cancel')}</Button>
-              <Button disabled={!canSave} onClick={openDiff}>
+              <Button disabled={!canSave} onClick={openDiff} title="Ctrl+S">
                 {t('resources.editor.reviewAndSave')}
               </Button>
             </div>

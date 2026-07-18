@@ -3913,6 +3913,8 @@
       "openInEditor": "Открыть в редакторе"
     },
     "editor": {
+      "sourceTab": "Исходник",
+      "computedTab": "Вычисленный",
       "valid": "Валиден",
       "errors": "Ошибок: {{count}}",
       "usedByNodes": "Нод: {{count}}",

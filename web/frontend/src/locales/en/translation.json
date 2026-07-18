@@ -3913,6 +3913,8 @@
       "openInEditor": "Open in editor"
     },
     "editor": {
+      "sourceTab": "Source",
+      "computedTab": "Computed",
       "valid": "Valid",
       "errors": "Errors: {{count}}",
       "usedByNodes": "Nodes: {{count}}",
