@@ -44,6 +44,7 @@ import {
 } from '@/components/brand/icons'
 import client from '../api/client'
 import { UserTimelineDialog } from '@/components/violations/UserTimelineDialog'
+import { DetectorTuningTab } from '@/components/violations/DetectorTuningTab'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -1576,7 +1577,7 @@ function ViolationSkeleton() {
 
 // ── Main page component ──────────────────────────────────────────
 
-type Tab = 'all' | 'pending' | 'top' | 'hwids' | 'reports'
+type Tab = 'all' | 'pending' | 'top' | 'hwids' | 'reports' | 'tuning'
 
 export default function Violations() {
   const { t } = useTranslation()
@@ -1591,7 +1592,7 @@ export default function Violations() {
   const getP = (k: string, d: string) => searchParams.get(k) ?? d
   const getN = (k: string, d: number) => { const v = searchParams.get(k); return v !== null ? (Number(v) || d) : d }
 
-  const validTabs: Tab[] = ['all', 'pending', 'top', 'hwids', 'reports']
+  const validTabs: Tab[] = ['all', 'pending', 'top', 'hwids', 'reports', 'tuning']
   const rawTab = getP('tab', 'all') as Tab
   const tab = validTabs.includes(rawTab) ? rawTab : 'all'
   const page = getN('page', 1)
@@ -2197,6 +2198,7 @@ export default function Violations() {
           { key: 'top' as Tab, label: t('violations.tabs.topViolators'), count: undefined },
           { key: 'hwids' as Tab, label: t('violations.tabs.hwids'), count: undefined },
           { key: 'reports' as Tab, label: t('violations.tabs.reports'), count: undefined },
+          { key: 'tuning' as Tab, label: t('violations.tabs.tuning'), count: undefined },
         ]).map((tabItem) => (
           <button
             key={tabItem.key}
@@ -2217,7 +2219,9 @@ export default function Violations() {
       </div>
 
       {/* Content based on tab */}
-      {tab === 'reports' ? (
+      {tab === 'tuning' ? (
+        <DetectorTuningTab />
+      ) : tab === 'reports' ? (
         <Reports embedded />
       ) : tab === 'hwids' ? (
         <SharedHwidsCard />

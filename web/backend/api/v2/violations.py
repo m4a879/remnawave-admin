@@ -585,6 +585,24 @@ async def get_user_violations(
     return items
 
 
+@router.get("/score-distribution")
+async def get_score_distribution(
+    days: int = Query(30, ge=1, le=365),
+    admin: AdminUser = Depends(require_permission("violations", "view")),
+    db: DatabaseService = Depends(get_db),
+):
+    """Гистограмма score нарушений + текущий порог min_score — для тюнинга."""
+    from shared.config_service import config_service
+    hist = await db.get_violation_score_histogram(days=days, bucket=5)
+    try:
+        min_score = float(config_service.get("violations_min_score", 50) or 50)
+    except (TypeError, ValueError):
+        min_score = 50.0
+    hist["min_score"] = min_score
+    hist["days"] = days
+    return hist
+
+
 @router.get("/user/{user_uuid}/timeline")
 async def get_user_timeline(
     user_uuid: str = Path(..., pattern=r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'),

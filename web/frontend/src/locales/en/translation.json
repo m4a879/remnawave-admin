@@ -1567,7 +1567,8 @@
       "pending": "Pending",
       "topViolators": "Top violators",
       "hwids": "Shared HWIDs",
-      "reports": "Reports & ASN"
+      "reports": "Reports & ASN",
+      "tuning": "Tuning"
     },
     "sharedHwids": {
       "title": "Shared HWID Devices",
@@ -1830,6 +1831,21 @@
       "hwid": "HWID device",
       "daysShort": "d",
       "empty": "No events for this period"
+    },
+    "tuning": {
+      "title": "Detector threshold tuning",
+      "hint": "Drag the threshold and see how many violations over the period would pass the filter and how many would be dropped. The threshold maps to the detector's min_score.",
+      "score": "score",
+      "threshold": "Threshold",
+      "caught": "Passed filter",
+      "suppressed": "Dropped",
+      "summary": "{{total}} violations over {{days}}d, average score {{avg}}.",
+      "wasValue": "was {{value}}",
+      "apply": "Apply threshold",
+      "applied": "Threshold applied: {{value}}",
+      "moreSettings": "Other settings",
+      "needSettingsEdit": "No permission to change settings — preview only.",
+      "noData": "No violations for this period — nothing to show."
     }
   },
   "admins": {
