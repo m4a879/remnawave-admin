@@ -418,6 +418,46 @@ class TestNodeMatching:
         assert svcs[3]["node_uuid"] == "u3" and svcs[3]["node_name"] == "Finland"
 
 
+# ── Себестоимость нод ────────────────────────────────────────────
+
+
+class TestNodeCosts:
+    def test_build_node_costs(self):
+        from shared.db.finance import FinanceMixin
+
+        item_rows = [
+            # нода A: 450 RUB/мес + 12 USD/мес (курс 80) = 450 + 960 = 1410
+            {"node_uuid": "a", "amount": 450, "billing_cycle": "monthly", "cycle_days": None, "currency": "RUB"},
+            {"node_uuid": "a", "amount": 12, "billing_cycle": "monthly", "cycle_days": None, "currency": "USD"},
+            # нода B: 3600 RUB/год = 300/мес
+            {"node_uuid": "b", "amount": 3600, "billing_cycle": "yearly", "cycle_days": None, "currency": "RUB"},
+            # без ноды: 500/мес -> unassigned
+            {"node_uuid": None, "amount": 500, "billing_cycle": "monthly", "cycle_days": None, "currency": "RUB"},
+        ]
+        gib = 1024 ** 3
+        result = FinanceMixin._build_node_costs(
+            item_rows, {"RUB": 1.0, "USD": 80.0},
+            traffic={"a": 100 * gib, "c": 50 * gib},   # у c трафик есть, расходов нет
+            users={"a": 47, "b": 10},
+            names={"a": "Germany W", "b": "Finland", "c": "RU Route"},
+            days=30,
+        )
+        assert result["unassigned_monthly_rub"] == 500.0
+        by_uuid = {i["node_uuid"]: i for i in result["items"]}
+        a, b, c = by_uuid["a"], by_uuid["b"], by_uuid["c"]
+        assert a["monthly_cost_rub"] == 1410.0
+        assert a["traffic_gb"] == 100.0
+        assert a["cost_per_gb_rub"] == round(1410 / 100, 2)
+        assert a["cost_per_user_rub"] == 30.0
+        assert b["monthly_cost_rub"] == 300.0
+        assert b["cost_per_gb_rub"] is None      # трафика нет
+        assert b["cost_per_user_rub"] == 30.0
+        assert c["monthly_cost_rub"] == 0.0      # нода без расходов, но с трафиком
+        assert c["cost_per_gb_rub"] is None
+        # сортировка по расходу: a, b, c
+        assert [i["node_uuid"] for i in result["items"]] == ["a", "b", "c"]
+
+
 # ── Автосинк ─────────────────────────────────────────────────────
 
 

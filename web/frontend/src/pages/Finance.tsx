@@ -121,6 +121,11 @@ function OverviewTab() {
     staleTime: 300_000,
     enabled: hasAccounts,
   })
+  const { data: nodeCosts } = useQuery({
+    queryKey: ['finance-node-costs'],
+    queryFn: () => financeApi.getNodeCosts(30),
+    staleTime: 300_000,
+  })
 
   const balanceTrend = useMemo(() => {
     const byDate = new Map<string, Record<string, number | string>>()
@@ -367,6 +372,58 @@ function OverviewTab() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Себестоимость нод: ₽/GB и ₽/юзер за 30 дней */}
+      {(nodeCosts?.items.length ?? 0) > 0 && (
+        <Card>
+          <CardHeader className="pb-2">
+            <div className="flex items-center gap-2">
+              <Server className="w-5 h-5 text-primary-400" />
+              <CardTitle className="text-base">{t('finance.nodeCosts.title')}</CardTitle>
+              <InfoTooltip text={t('finance.nodeCosts.tooltip')} side="right" />
+            </div>
+          </CardHeader>
+          <CardContent>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-xs text-muted-foreground text-left">
+                    <th className="pb-2 pr-3 font-normal">{t('finance.nodeCosts.node')}</th>
+                    <th className="pb-2 pr-3 font-normal text-right">{t('finance.nodeCosts.monthlyCost')}</th>
+                    <th className="pb-2 pr-3 font-normal text-right">{t('finance.nodeCosts.traffic', { days: nodeCosts!.days })}</th>
+                    <th className="pb-2 pr-3 font-normal text-right">{t('finance.nodeCosts.perGb')}</th>
+                    <th className="pb-2 pr-3 font-normal text-right">{t('finance.nodeCosts.users')}</th>
+                    <th className="pb-2 font-normal text-right">{t('finance.nodeCosts.perUser')}</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-white/5">
+                  {nodeCosts!.items.map((n) => (
+                    <tr key={n.node_uuid}>
+                      <td className="py-2 pr-3 text-white whitespace-nowrap">{n.node_name}</td>
+                      <td className="py-2 pr-3 text-right font-mono whitespace-nowrap">
+                        {n.monthly_cost > 0 ? fmtMoney(n.monthly_cost, base) : <span className="text-muted-foreground">—</span>}
+                      </td>
+                      <td className="py-2 pr-3 text-right font-mono whitespace-nowrap">{n.traffic_gb > 0 ? `${n.traffic_gb} GB` : '—'}</td>
+                      <td className="py-2 pr-3 text-right font-mono whitespace-nowrap">
+                        {n.cost_per_gb != null ? fmtMoney(n.cost_per_gb, base) : <span className="text-muted-foreground">—</span>}
+                      </td>
+                      <td className="py-2 pr-3 text-right font-mono">{n.users || '—'}</td>
+                      <td className="py-2 text-right font-mono whitespace-nowrap">
+                        {n.cost_per_user != null ? fmtMoney(n.cost_per_user, base) : <span className="text-muted-foreground">—</span>}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            {nodeCosts!.unassigned_monthly > 0 && (
+              <p className="text-[11px] text-muted-foreground mt-2">
+                {t('finance.nodeCosts.unassigned', { amount: fmtMoney(nodeCosts!.unassigned_monthly, base) })}
+              </p>
+            )}
+          </CardContent>
+        </Card>
+      )}
 
       {/* Ближайшие списания */}
       <Card>

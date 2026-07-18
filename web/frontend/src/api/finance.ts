@@ -157,6 +157,23 @@ export interface BalanceSnapshot {
   provider_name: string
 }
 
+export interface NodeCost {
+  node_uuid: string
+  node_name: string
+  monthly_cost: number
+  traffic_gb: number
+  cost_per_gb: number | null
+  users: number
+  cost_per_user: number | null
+}
+
+export interface NodeCosts {
+  base_currency: string
+  days: number
+  unassigned_monthly: number
+  items: NodeCost[]
+}
+
 export interface AccountTestResult {
   status: 'ok' | 'error'
   error?: string
@@ -226,6 +243,9 @@ export const financeApi = {
   deleteProvider: async (id: number): Promise<void> => {
     await client.delete(`/finance/providers/${id}`)
   },
+
+  getNodeCosts: async (days = 30): Promise<NodeCosts> =>
+    (await client.get('/finance/node-costs', { params: { days } })).data,
 
   listRates: async (): Promise<{ items: FinanceRate[]; base_currency: string }> =>
     (await client.get('/finance/rates')).data,

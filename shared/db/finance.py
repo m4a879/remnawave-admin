@@ -13,6 +13,7 @@ from shared.logger import logger
 from shared.db_schema import (
     FINANCE_CATEGORIES_TABLE, FINANCE_PROVIDERS_TABLE, FINANCE_ITEMS_TABLE,
     FINANCE_PAYMENTS_TABLE, FINANCE_RATES_TABLE, NODES_TABLE,
+    NODE_TRAFFIC_SNAPSHOTS_TABLE, USER_CONNECTIONS_TABLE,
 )
 
 BILLING_CYCLES = ("monthly", "yearly", "once", "days")
@@ -551,6 +552,116 @@ class FinanceMixin:
                 for k, v in sorted(by_currency.items())
             ],
             "recurring": recurring,
+        }
+
+    # ==================== Node costs (себестоимость) ====================
+
+    async def finance_node_costs(self, days: int = 30) -> Dict[str, Any]:
+        """Себестоимость нод: расход/мес + трафик и юзеры за окно days.
+
+        - расход — месячный эквивалент активных expense-записей с node_uuid;
+        - трафик — сумма положительных дневных дельт lifetime-счётчика ноды
+          (устойчиво к ресетам при перезагрузках; снапшоты хранятся 31 день);
+        - юзеры — DISTINCT user_uuid по коннектам окна.
+        Всё в RUB; конвертацию в базовую валюту делает API-слой.
+        """
+        if not self.is_connected:
+            return {"items": [], "unassigned_monthly_rub": 0.0, "days": days}
+
+        async with self.acquire() as conn:
+            item_rows = await conn.fetch(
+                f"""SELECT i.node_uuid::text AS node_uuid, i.amount,
+                           i.billing_cycle, i.cycle_days, i.currency
+                    FROM {FINANCE_ITEMS_TABLE} i
+                    WHERE i.status = 'active' AND i.kind = 'expense'"""
+            )
+            rates = {r["currency"]: _num(r["rate_rub"]) for r in await conn.fetch(
+                f"SELECT currency, rate_rub FROM {FINANCE_RATES_TABLE}"
+            )}
+            traffic_rows = await conn.fetch(
+                f"""SELECT node_uuid::text AS node_uuid,
+                           SUM(GREATEST(delta, 0)) AS bytes
+                    FROM (
+                        SELECT node_uuid,
+                               per_day - LAG(per_day) OVER (
+                                   PARTITION BY node_uuid ORDER BY day) AS delta
+                        FROM (
+                            SELECT node_uuid,
+                                   DATE(created_at AT TIME ZONE 'UTC') AS day,
+                                   MAX(traffic_bytes) AS per_day
+                            FROM {NODE_TRAFFIC_SNAPSHOTS_TABLE}
+                            WHERE created_at >= NOW() - INTERVAL '1 day' * $1
+                            GROUP BY node_uuid, DATE(created_at AT TIME ZONE 'UTC')
+                        ) d
+                    ) t
+                    GROUP BY node_uuid""",
+                days,
+            )
+            user_rows = await conn.fetch(
+                f"""SELECT node_uuid::text AS node_uuid,
+                           COUNT(DISTINCT user_uuid) AS users
+                    FROM {USER_CONNECTIONS_TABLE}
+                    WHERE node_uuid IS NOT NULL
+                      AND connected_at >= NOW() - INTERVAL '1 day' * $1
+                    GROUP BY node_uuid""",
+                days,
+            )
+            name_rows = await conn.fetch(
+                f"SELECT uuid::text AS node_uuid, name FROM {NODES_TABLE}"
+            )
+
+        return self._build_node_costs(
+            [dict(r) for r in item_rows], rates,
+            {r["node_uuid"]: int(r["bytes"] or 0) for r in traffic_rows},
+            {r["node_uuid"]: int(r["users"] or 0) for r in user_rows},
+            {r["node_uuid"]: r["name"] for r in name_rows},
+            days,
+        )
+
+    @staticmethod
+    def _build_node_costs(
+        item_rows: List[Dict[str, Any]], rates: Dict[str, float],
+        traffic: Dict[str, int], users: Dict[str, int],
+        names: Dict[str, Optional[str]], days: int,
+    ) -> Dict[str, Any]:
+        """Чистая сборка метрик себестоимости из выборок (тестируемо без БД)."""
+        per_node: Dict[str, Dict[str, Any]] = {}
+        unassigned = 0.0
+        for r in item_rows:
+            me_rub = monthly_equivalent(
+                _num(r["amount"]), r["billing_cycle"], r["cycle_days"]
+            ) * rates.get(r["currency"], 1.0)
+            node_uuid = r.get("node_uuid")
+            if node_uuid:
+                node = per_node.setdefault(node_uuid, {"monthly_cost_rub": 0.0})
+                node["monthly_cost_rub"] += me_rub
+            else:
+                unassigned += me_rub
+
+        # ноды с трафиком/юзерами, но без расходов — тоже показываем (cost=0)
+        for node_uuid in set(traffic) | set(users):
+            per_node.setdefault(node_uuid, {"monthly_cost_rub": 0.0})
+
+        gib = float(1024 ** 3)
+        items = []
+        for node_uuid, node in per_node.items():
+            cost = round(node["monthly_cost_rub"], 2)
+            gb = round(traffic.get(node_uuid, 0) / gib, 2)
+            n_users = users.get(node_uuid, 0)
+            items.append({
+                "node_uuid": node_uuid,
+                "node_name": names.get(node_uuid) or node_uuid[:8],
+                "monthly_cost_rub": cost,
+                "traffic_gb": gb,
+                "cost_per_gb_rub": round(cost / gb, 2) if gb > 0 and cost > 0 else None,
+                "users": n_users,
+                "cost_per_user_rub": round(cost / n_users, 2) if n_users > 0 and cost > 0 else None,
+            })
+        items.sort(key=lambda x: -x["monthly_cost_rub"])
+        return {
+            "items": items,
+            "unassigned_monthly_rub": round(unassigned, 2),
+            "days": days,
         }
 
     # ==================== Rates ====================

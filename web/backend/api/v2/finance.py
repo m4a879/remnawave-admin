@@ -237,6 +237,38 @@ async def finance_summary(
     }
 
 
+@router.get("/node-costs")
+async def node_costs(
+    days: int = Query(30, ge=1, le=31),
+    admin: AdminUser = Depends(require_permission("finance", "view")),
+):
+    """Себестоимость нод: расход/мес, трафик и юзеры за окно, ₽/GB и ₽/юзер."""
+    data = await db_service.finance_node_costs(days=days)
+    base = _base_currency()
+    base_rate = await _base_rate()
+
+    def conv(v_rub):
+        return round((v_rub or 0) / base_rate, 2)
+
+    return {
+        "base_currency": base,
+        "days": data["days"],
+        "unassigned_monthly": conv(data["unassigned_monthly_rub"]),
+        "items": [
+            {
+                "node_uuid": it["node_uuid"],
+                "node_name": it["node_name"],
+                "monthly_cost": conv(it["monthly_cost_rub"]),
+                "traffic_gb": it["traffic_gb"],
+                "cost_per_gb": conv(it["cost_per_gb_rub"]) if it["cost_per_gb_rub"] is not None else None,
+                "users": it["users"],
+                "cost_per_user": conv(it["cost_per_user_rub"]) if it["cost_per_user_rub"] is not None else None,
+            }
+            for it in data["items"]
+        ],
+    }
+
+
 @router.get("/upcoming")
 async def finance_upcoming(
     days: int = Query(30, ge=1, le=365),
