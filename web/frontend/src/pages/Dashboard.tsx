@@ -1027,6 +1027,9 @@ function BillingSummaryCard({ loading }: { loading: boolean }) {
   const base = summary?.base_currency || 'RUB'
   const money = (v: number) => `${v.toLocaleString('ru-RU', { maximumFractionDigits: 0 })} ${base}`
   const nearest = upcoming?.items?.[0]
+  // факт месяца + обязательные (как в обзоре Финансов); recurring — доход давал
+  // 0, т.к. доходы идут платежами, а не регулярными income-записями
+  const fin = summary?.this_month ?? summary?.recurring
 
   return (
     <Card
@@ -1062,19 +1065,19 @@ function BillingSummaryCard({ loading }: { loading: boolean }) {
           <div className="space-y-3">
             <div>
               <p className="text-xs text-muted-foreground">{t('dashboard.financeNet')}</p>
-              <p className={cn('text-xl font-bold', summary.recurring.net >= 0 ? 'text-green-400' : 'text-red-400')}>
-                {money(summary.recurring.net)}<span className="text-xs text-muted-foreground font-normal">/{t('finance.moShort')}</span>
+              <p className={cn('text-xl font-bold', (fin?.net ?? 0) >= 0 ? 'text-green-400' : 'text-red-400')}>
+                {money(fin?.net ?? 0)}<span className="text-xs text-muted-foreground font-normal">/{t('finance.moShort')}</span>
               </p>
             </div>
             <Separator />
             <div className="space-y-1.5">
               <div className="flex items-center justify-between bg-[var(--glass-bg)] rounded-lg px-3 py-1.5 border border-[var(--glass-border)]">
                 <span className="text-xs text-muted-foreground">{t('dashboard.financeExpense')}</span>
-                <span className="text-xs text-red-400 font-mono">{money(summary.recurring.expense)}</span>
+                <span className="text-xs text-red-400 font-mono">{money(fin?.expense ?? 0)}</span>
               </div>
               <div className="flex items-center justify-between bg-[var(--glass-bg)] rounded-lg px-3 py-1.5 border border-[var(--glass-border)]">
                 <span className="text-xs text-muted-foreground">{t('dashboard.financeIncome')}</span>
-                <span className="text-xs text-green-400 font-mono">{money(summary.recurring.income)}</span>
+                <span className="text-xs text-green-400 font-mono">{money(fin?.income ?? 0)}</span>
               </div>
               {nearest && (
                 <div className="flex items-center justify-between bg-[var(--glass-bg)] rounded-lg px-3 py-1.5 border border-[var(--glass-border)]">
