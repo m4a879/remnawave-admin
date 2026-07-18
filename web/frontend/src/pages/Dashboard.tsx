@@ -16,7 +16,6 @@ import {
   Wifi,
   Database,
   Globe,
-  CreditCard,
   CalendarClock,
   ChevronDown,
   ChevronUp,
@@ -36,7 +35,7 @@ import {
 } from '@dnd-kit/core'
 import {
   SortableContext,
-  verticalListSortingStrategy,
+  rectSortingStrategy,
   arrayMove,
   sortableKeyboardCoordinates,
 } from '@dnd-kit/sortable'
@@ -44,6 +43,7 @@ import { SortableSection } from '@/components/SortableSection'
 import { useOrderPreference } from '@/lib/useOrderPreference'
 import { useWidgetVisibility } from '@/lib/useWidgetVisibility'
 import { FinanceWidget, BedolagaWidget, ViolationsWidget, BackupWidget, NodeCostsWidget } from '@/components/dashboard/ExtraWidgets'
+import { useWidgetSize, SIZE_SPAN } from '@/lib/useWidgetSize'
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuTrigger, DropdownMenuItem,
   DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuCheckboxItem,
@@ -61,7 +61,6 @@ import {
 } from 'recharts'
 import { InteractiveChart } from '@/components/charts/InteractiveChart'
 import client from '../api/client'
-import { financeApi } from '../api/finance'
 import { auditApi, type AuditLogEntry } from '../api/audit'
 import { usePermissionStore } from '../store/permissionStore'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -1002,108 +1001,6 @@ function SystemStatusCard({
   )
 }
 
-// ── BillingSummaryCard ───────────────────────────────────────────
-
-function BillingSummaryCard({ loading }: { loading: boolean }) {
-  const { t } = useTranslation()
-  const navigate = useNavigate()
-
-  const { data: summary, isLoading } = useQuery({
-    queryKey: ['finance-dashboard-summary'],
-    queryFn: () => financeApi.getSummary(1),
-    refetchInterval: 120000,
-    staleTime: 60_000,
-    retry: false,
-  })
-  const { data: upcoming } = useQuery({
-    queryKey: ['finance-dashboard-upcoming'],
-    queryFn: () => financeApi.getUpcoming(14),
-    refetchInterval: 120000,
-    staleTime: 60_000,
-    retry: false,
-  })
-
-  const isCardLoading = loading || isLoading
-  const base = summary?.base_currency || 'RUB'
-  const money = (v: number) => `${v.toLocaleString('ru-RU', { maximumFractionDigits: 0 })} ${base}`
-  const nearest = upcoming?.items?.[0]
-  // факт месяца + обязательные (как в обзоре Финансов); recurring — доход давал
-  // 0, т.к. доходы идут платежами, а не регулярными income-записями
-  const fin = summary?.this_month ?? summary?.recurring
-
-  return (
-    <Card
-      className="animate-fade-in-up cursor-pointer hover:shadow-glow-teal transition-shadow"
-      style={{ animationDelay: '0.35s' }}
-      onClick={() => navigate('/finance')}
-    >
-      <CardHeader className="pb-2">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <CardTitle className="text-base md:text-lg">{t('dashboard.finance')}</CardTitle>
-            <InfoTooltip text={t('dashboard.financeTooltip')} side="right" />
-          </div>
-          <div
-            className="p-2 rounded-lg"
-            style={{
-              background: 'rgba(var(--glow-rgb), 0.15)',
-              border: '1px solid rgba(var(--glow-rgb), 0.3)',
-            }}
-          >
-            <CreditCard className="w-5 h-5 text-primary-400" />
-          </div>
-        </div>
-      </CardHeader>
-      <CardContent>
-        {isCardLoading ? (
-          <div className="space-y-3">
-            <Skeleton className="h-8 w-24" />
-            <Skeleton className="h-4 w-full" />
-            <Skeleton className="h-4 w-3/4" />
-          </div>
-        ) : summary ? (
-          <div className="space-y-3">
-            <div>
-              <p className="text-xs text-muted-foreground">{t('dashboard.financeNet')}</p>
-              <p className={cn('text-xl font-bold', (fin?.net ?? 0) >= 0 ? 'text-green-400' : 'text-red-400')}>
-                {money(fin?.net ?? 0)}<span className="text-xs text-muted-foreground font-normal">/{t('finance.moShort')}</span>
-              </p>
-            </div>
-            <Separator />
-            <div className="space-y-1.5">
-              <div className="flex items-center justify-between bg-[var(--glass-bg)] rounded-lg px-3 py-1.5 border border-[var(--glass-border)]">
-                <span className="text-xs text-muted-foreground">{t('dashboard.financeExpense')}</span>
-                <span className="text-xs text-red-400 font-mono">{money(fin?.expense ?? 0)}</span>
-              </div>
-              <div className="flex items-center justify-between bg-[var(--glass-bg)] rounded-lg px-3 py-1.5 border border-[var(--glass-border)]">
-                <span className="text-xs text-muted-foreground">{t('dashboard.financeIncome')}</span>
-                <span className="text-xs text-green-400 font-mono">{money(fin?.income ?? 0)}</span>
-              </div>
-              {nearest && (
-                <div className="flex items-center justify-between bg-[var(--glass-bg)] rounded-lg px-3 py-1.5 border border-[var(--glass-border)]">
-                  <span className="text-xs text-muted-foreground flex items-center gap-1">
-                    <CalendarClock className="w-3 h-3" />
-                    {nearest.name}
-                  </span>
-                  <span className={cn('text-xs font-mono', nearest.is_overdue ? 'text-red-400' : 'text-primary-400')}>
-                    {nearest.next_due_at}
-                  </span>
-                </div>
-              )}
-            </div>
-            <Separator />
-            <span className="text-xs text-muted-foreground group-hover:text-primary-400 flex items-center gap-1 transition-colors duration-200">
-              {t('dashboard.details')} <ExternalLink className="w-3 h-3" />
-            </span>
-          </div>
-        ) : (
-          <p className="text-sm text-muted-foreground">{t('common.noData')}</p>
-        )}
-      </CardContent>
-    </Card>
-  )
-}
-
 // ── Constants ────────────────────────────────────────────────────
 
 const SEVERITY_COLORS: Record<string, string> = {
@@ -1918,6 +1815,10 @@ export default function Dashboard() {
   )
   const orderedWidgetIds = order.applyOrder([...DASHBOARD_WIDGETS])
   const visibility = useWidgetVisibility('dashboard-widget-hidden-v1', defaultHiddenWidgets)
+  // размеры только для компактных виджетов из других модулей
+  const RESIZABLE = new Set(['finance', 'bedolaga', 'violations', 'backups', 'nodecosts'])
+  const widgetSize = useWidgetSize('dashboard-widget-size-v1', 'md')
+  const spanClass = (id: string) => RESIZABLE.has(id) ? SIZE_SPAN[widgetSize.getSize(id)] : 'lg:col-span-6'
   // рендерим только видимые; drag работает в пределах видимых
   const widgetIds = orderedWidgetIds.filter((w) => visibility.isVisible(w))
   const handleWidgetDragEnd = (event: DragEndEvent) => {
@@ -2167,7 +2068,7 @@ export default function Dashboard() {
             <Button variant="ghost" size="sm" className="h-8 px-2 text-xs text-dark-200 hover:text-white gap-1.5">
               <LayoutGrid className="w-3.5 h-3.5" />
               {t('dashboard.customize', { defaultValue: 'Настроить' })}
-              {(visibility.isCustomized || order.isCustomized) && <span className="w-1.5 h-1.5 rounded-full bg-primary-400" />}
+              {(visibility.isCustomized || order.isCustomized || widgetSize.isCustomized) && <span className="w-1.5 h-1.5 rounded-full bg-primary-400" />}
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-56">
@@ -2182,10 +2083,10 @@ export default function Dashboard() {
                 {t(`dashboard.widget.${w}`, { defaultValue: w })}
               </DropdownMenuCheckboxItem>
             ))}
-            {(visibility.isCustomized || order.isCustomized) && (
+            {(visibility.isCustomized || order.isCustomized || widgetSize.isCustomized) && (
               <>
                 <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={() => { order.reset(); visibility.reset() }}>
+                <DropdownMenuItem onClick={() => { order.reset(); visibility.reset(); widgetSize.reset() }}>
                   <RotateCcw className="w-3.5 h-3.5 mr-2" />
                   {t('dashboard.resetLayout', { defaultValue: 'Сбросить настройки' })}
                 </DropdownMenuItem>
@@ -2200,13 +2101,13 @@ export default function Dashboard() {
 
       {/* ── Sortable widgets ────────────────────────────────────── */}
       <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleWidgetDragEnd}>
-        <SortableContext items={widgetIds} strategy={verticalListSortingStrategy}>
-          <div className="space-y-6">
+        <SortableContext items={widgetIds} strategy={rectSortingStrategy}>
+          <div className="grid grid-cols-1 lg:grid-cols-6 gap-6 items-start">
             {widgetIds.map((wid) => {
               switch (wid) {
                 case 'stats':
                   return (
-                    <SortableSection key="stats" id="stats">
+                    <SortableSection key="stats" id="stats" className={spanClass('stats')}>
                       {/* ── Stats grid (compact cards) ──────────────────────────── */}
                       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
         {canViewUsers && (
@@ -2286,7 +2187,7 @@ export default function Dashboard() {
                 case 'traffic':
                   if (!canViewAnalytics) return null
                   return (
-                    <SortableSection key="traffic" id="traffic">
+                    <SortableSection key="traffic" id="traffic" className={spanClass('traffic')}>
                       {/* ── Row 2: Traffic Chart + Growth Trends ────────────────── */}
                       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           <Card className="animate-fade-in-up" style={{ animationDelay: '0.1s', '--card-accent-rgb': '236, 72, 153' } as React.CSSProperties}>
@@ -2343,7 +2244,7 @@ export default function Dashboard() {
                   )
                 case 'connections':
                   return (
-                    <SortableSection key="connections" id="connections">
+                    <SortableSection key="connections" id="connections" className={spanClass('connections')}>
                       {/* ── Row 3: Connections by Node + Top Users by Traffic ─────── */}
                       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {canViewAnalytics && (
@@ -2398,7 +2299,7 @@ export default function Dashboard() {
                   )
                 case 'load':
                   return (
-                    <SortableSection key="load" id="load">
+                    <SortableSection key="load" id="load" className={spanClass('load')}>
                       {/* ── Row 4: Node Load + Expiry + Traffic Anomaly ───────── */}
                       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {canViewFleet && (
@@ -2415,7 +2316,7 @@ export default function Dashboard() {
                   )
                 case 'activity':
                   return (
-                    <SortableSection key="activity" id="activity">
+                    <SortableSection key="activity" id="activity" className={spanClass('activity')}>
                       {/* ── Row 5: Activity Feed + Violations + Top Violators ── */}
                       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {canViewAudit && (
@@ -2478,11 +2379,9 @@ export default function Dashboard() {
                   )
                 case 'system':
                   return (
-                    <SortableSection key="system" id="system">
-                      {/* ── Row 6: Billing + Collector + System Status + Updates ── */}
+                    <SortableSection key="system" id="system" className={spanClass('system')}>
+                      {/* ── Row 6: Collector + System Status + Updates ── */}
                       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {canViewBilling && <BillingSummaryCard loading={false} />}
-
         {canViewAnalytics && (
           <CollectorQueueCard stats={collectorStats} loading={collectorLoading} />
         )}
@@ -2532,15 +2431,15 @@ export default function Dashboard() {
                     </SortableSection>
                   )
                 case 'finance':
-                  return <SortableSection key="finance" id="finance"><FinanceWidget /></SortableSection>
+                  return <SortableSection key="finance" id="finance" className={spanClass('finance')}><FinanceWidget onResize={() => widgetSize.cycle('finance')} /></SortableSection>
                 case 'bedolaga':
-                  return <SortableSection key="bedolaga" id="bedolaga"><BedolagaWidget /></SortableSection>
+                  return <SortableSection key="bedolaga" id="bedolaga" className={spanClass('bedolaga')}><BedolagaWidget onResize={() => widgetSize.cycle('bedolaga')} /></SortableSection>
                 case 'violations':
-                  return <SortableSection key="violations" id="violations"><ViolationsWidget /></SortableSection>
+                  return <SortableSection key="violations" id="violations" className={spanClass('violations')}><ViolationsWidget onResize={() => widgetSize.cycle('violations')} /></SortableSection>
                 case 'backups':
-                  return <SortableSection key="backups" id="backups"><BackupWidget /></SortableSection>
+                  return <SortableSection key="backups" id="backups" className={spanClass('backups')}><BackupWidget onResize={() => widgetSize.cycle('backups')} /></SortableSection>
                 case 'nodecosts':
-                  return <SortableSection key="nodecosts" id="nodecosts"><NodeCostsWidget /></SortableSection>
+                  return <SortableSection key="nodecosts" id="nodecosts" className={spanClass('nodecosts')}><NodeCostsWidget onResize={() => widgetSize.cycle('nodecosts')} /></SortableSection>
                 default:
                   return null
               }

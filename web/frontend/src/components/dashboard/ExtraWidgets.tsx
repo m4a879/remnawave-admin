@@ -11,7 +11,7 @@ import { backupApi } from '@/api/backup'
 import client from '@/api/client'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
-import { Wallet, TrendingUp, ShieldAlert, HardDrive, Server } from '@/components/brand/icons'
+import { Wallet, TrendingUp, ShieldAlert, HardDrive, Server, Maximize2 } from '@/components/brand/icons'
 import { cn } from '@/lib/utils'
 
 function money(v: number, cur = 'RUB'): string {
@@ -19,19 +19,31 @@ function money(v: number, cur = 'RUB'): string {
     (cur ? ` ${cur}` : '')
 }
 
-function WidgetShell({ title, icon, to, children }: {
-  title: string; icon: React.ReactNode; to?: string; children: React.ReactNode
+// размер/ресайз прокидываются с дашборда в каждый виджет
+export interface WidgetSizeProps { onResize?: () => void }
+
+function WidgetShell({ title, icon, to, onResize, children }: {
+  title: string; icon: React.ReactNode; to?: string; onResize?: () => void; children: React.ReactNode
 }) {
   const head = (
-    <div className="flex items-center gap-2">
+    <div className="flex items-center gap-2 min-w-0">
       {icon}
-      <CardTitle className="text-base">{title}</CardTitle>
+      <CardTitle className="text-base truncate">{title}</CardTitle>
     </div>
   )
   return (
-    <Card>
+    <Card className="h-full">
       <CardHeader className="pb-2">
-        {to ? <Link to={to} className="hover:opacity-80 transition-opacity">{head}</Link> : head}
+        <div className="flex items-center justify-between gap-2">
+          {to ? <Link to={to} className="hover:opacity-80 transition-opacity min-w-0">{head}</Link> : head}
+          {onResize && (
+            <button type="button" onClick={onResize}
+              className="shrink-0 p-1 rounded-md text-muted-foreground hover:text-white hover:bg-white/5 transition-colors"
+              title="Изменить размер">
+              <Maximize2 className="w-3.5 h-3.5" />
+            </button>
+          )}
+        </div>
       </CardHeader>
       <CardContent>{children}</CardContent>
     </Card>
@@ -49,7 +61,7 @@ function Kpi({ label, value, tone }: { label: string; value: string; tone?: 'gre
 }
 
 // ── Финансы: KPI месяца + ближайшие списания ─────────────────────
-export function FinanceWidget() {
+export function FinanceWidget({ onResize }: WidgetSizeProps) {
   const { t } = useTranslation()
   const { data: summary, isLoading } = useQuery({
     queryKey: ['finance-summary'], queryFn: () => financeApi.getSummary(6), staleTime: 60_000,
@@ -60,7 +72,7 @@ export function FinanceWidget() {
   const tm = summary?.this_month
   const base = summary?.base_currency || 'RUB'
   return (
-    <WidgetShell title={t('finance.title')} to="/finance" icon={<Wallet className="w-5 h-5 text-primary-400" />}>
+    <WidgetShell title={t('finance.title')} to="/finance" onResize={onResize} icon={<Wallet className="w-5 h-5 text-primary-400" />}>
       {isLoading ? <Skeleton className="h-20 w-full" /> : (
         <>
           <div className="grid grid-cols-3 gap-2">
@@ -81,7 +93,7 @@ export function FinanceWidget() {
 }
 
 // ── Bedolaga: доход ──────────────────────────────────────────────
-export function BedolagaWidget() {
+export function BedolagaWidget({ onResize }: WidgetSizeProps) {
   const { t } = useTranslation()
   const { data, isLoading, isError } = useQuery({
     queryKey: ['finance-bedolaga-income'], queryFn: financeApi.getBedolagaIncome,
@@ -89,7 +101,7 @@ export function BedolagaWidget() {
   })
   if (isError) return null // бот не настроен (503) — прячем
   return (
-    <WidgetShell title={t('finance.bedolagaIncome')} to="/finance" icon={<TrendingUp className="w-5 h-5 text-green-400" />}>
+    <WidgetShell title={t('finance.bedolagaIncome')} to="/finance" onResize={onResize} icon={<TrendingUp className="w-5 h-5 text-green-400" />}>
       {isLoading ? <Skeleton className="h-20 w-full" /> : (
         <div className="grid grid-cols-3 gap-2">
           <Kpi label={t('finance.bedolagaSubscription')} value={money(data?.total.subscription_income ?? 0)} tone="green" />
@@ -105,7 +117,7 @@ export function BedolagaWidget() {
 // ── Нарушения: за сегодня + топ ──────────────────────────────────
 interface ViolationStatsResp { total?: number; today?: number; by_type?: Record<string, number> }
 interface TopViolator { username?: string; user_uuid?: string; count?: number; violations?: number }
-export function ViolationsWidget() {
+export function ViolationsWidget({ onResize }: WidgetSizeProps) {
   const { t } = useTranslation()
   const { data: stats, isLoading } = useQuery({
     queryKey: ['violations-stats', 1], staleTime: 60_000,
@@ -117,7 +129,7 @@ export function ViolationsWidget() {
   })
   const topList = Array.isArray(top) ? top : (top?.items || [])
   return (
-    <WidgetShell title={t('nav.violations', { defaultValue: 'Нарушения' })} to="/violations" icon={<ShieldAlert className="w-5 h-5 text-red-400" />}>
+    <WidgetShell title={t('nav.violations', { defaultValue: 'Нарушения' })} to="/violations" onResize={onResize} icon={<ShieldAlert className="w-5 h-5 text-red-400" />}>
       {isLoading ? <Skeleton className="h-20 w-full" /> : (
         <>
           <div className="flex items-baseline gap-2">
@@ -141,7 +153,7 @@ export function ViolationsWidget() {
 }
 
 // ── Бэкапы: последний + место ────────────────────────────────────
-export function BackupWidget() {
+export function BackupWidget({ onResize }: WidgetSizeProps) {
   const { t } = useTranslation()
   const { data, isLoading } = useQuery({
     queryKey: ['backup-status'], queryFn: backupApi.getStatus, staleTime: 120_000, retry: false,
@@ -150,7 +162,7 @@ export function BackupWidget() {
   const okDate = last?.created_at ? last.created_at.slice(0, 16).replace('T', ' ') : '—'
   const stale = last?.created_at ? (Date.now() - new Date(last.created_at).getTime()) > 36 * 3600_000 : true
   return (
-    <WidgetShell title={t('nav.backups', { defaultValue: 'Бэкапы' })} to="/backups" icon={<HardDrive className="w-5 h-5 text-primary-400" />}>
+    <WidgetShell title={t('nav.backups', { defaultValue: 'Бэкапы' })} to="/backups" onResize={onResize} icon={<HardDrive className="w-5 h-5 text-primary-400" />}>
       {isLoading ? <Skeleton className="h-16 w-full" /> : (
         <div className="space-y-1.5 text-sm">
           <div className="flex items-center justify-between">
@@ -168,7 +180,7 @@ export function BackupWidget() {
 }
 
 // ── Себестоимость: топ дорогих нод ₽/GB ──────────────────────────
-export function NodeCostsWidget() {
+export function NodeCostsWidget({ onResize }: WidgetSizeProps) {
   const { t } = useTranslation()
   const { data, isLoading } = useQuery({
     queryKey: ['finance-node-costs'], queryFn: () => financeApi.getNodeCosts(30), staleTime: 300_000,
@@ -177,7 +189,7 @@ export function NodeCostsWidget() {
   const top = (data?.items || []).filter((n) => n.cost_per_gb != null)
     .sort((a, b) => (b.cost_per_gb || 0) - (a.cost_per_gb || 0)).slice(0, 5)
   return (
-    <WidgetShell title={t('finance.nodeCosts.title')} to="/finance" icon={<Server className="w-5 h-5 text-primary-400" />}>
+    <WidgetShell title={t('finance.nodeCosts.title')} to="/finance" onResize={onResize} icon={<Server className="w-5 h-5 text-primary-400" />}>
       {isLoading ? <Skeleton className="h-20 w-full" /> : !top.length ? (
         <p className="text-xs text-muted-foreground">{t('dashboard.widgetData.noNodeCosts')}</p>
       ) : (
