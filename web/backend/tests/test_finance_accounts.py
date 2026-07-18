@@ -263,6 +263,54 @@ class TestHostkeyAdapter:
         assert result.services[0].next_due_at == "2026-08-10"
         assert result.services[0].price == 5.0
 
+    @pytest.mark.asyncio
+    async def test_fetch_services_enriches_bare_ids(self):
+        """Реальный Hostkey: list отдаёт голые id -> детали по show + get_billing_data."""
+        from urllib.parse import parse_qs
+        from web.backend.core.finance.adapters.hostkey import HostkeyAdapter
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            path = request.url.path
+            body = parse_qs(request.content.decode())
+            action = (body.get("action") or [""])[0]
+            if path.endswith("/auth.php"):
+                return httpx.Response(200, json={"result": {"token": "TKN"}})
+            if path.endswith("/whmcs.php"):
+                if action == "getcredits":
+                    return httpx.Response(200, json={"result": "OK", "message": {
+                        "credits": {"credit": [{"id": 1, "amount": "100.00"}]}}})
+                if action == "get_billing_data":
+                    assert (body.get("id") or [""])[0] == "55054"
+                    return httpx.Response(200, json={"result": "OK", "message": {
+                        "recurringamount": "89.00", "billingcycle": "monthly",
+                        "nextduedate": "2026-08-15", "currencycode": "EUR"}})
+            if path.endswith("/eq.php"):
+                if action == "list":
+                    # голые id на верхнем уровне (как на реальном инстансе)
+                    return httpx.Response(200, json={
+                        "result": "OK", "module": "eq", "servers": [55054]})
+                if action == "show":
+                    assert (body.get("id") or [""])[0] == "55054"
+                    return httpx.Response(200, json={"result": "OK", "message": {
+                        "name": "DE-Falkenstein-1", "status": "active",
+                        "hwconfig": {"cpu": "Xeon E-2288G", "ram": "32GB", "disk": "2x512 NVMe"},
+                        "location": "Falkenstein"}})
+            return httpx.Response(404)
+
+        adapter = HostkeyAdapter()
+        with patch("httpx.AsyncClient", _patched_client(handler)):
+            result = await adapter.fetch(None, {"api_key": "KEY"})
+
+        assert len(result.services) == 1
+        svc = result.services[0]
+        assert svc.name == "DE-Falkenstein-1"
+        assert svc.external_id == "55054"
+        assert svc.price == 89.0
+        assert svc.currency == "EUR"
+        assert svc.period == "monthly"
+        assert svc.next_due_at == "2026-08-15"
+        assert svc.specs and "Xeon E-2288G" in svc.specs and "Falkenstein" in svc.specs
+
 
 # ── Автосинк ─────────────────────────────────────────────────────
 

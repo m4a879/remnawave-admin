@@ -1,9 +1,10 @@
 """Hostkey Invapi — клиентский API (обёртка над WHMCS).
 
 База: https://invapi.hostkey.ru (RU) или .com. Поток:
-1. api_key -> сессионный токен (POST auth.php, api_key=...)
+1. api_key -> сессионный токен (POST auth.php, action=login&key=...)
 2. баланс: POST whmcs.php action=getcredits, token=... -> сумма кредитов
-3. услуги: POST whmcs.php action=getclientsproducts (WHMCS) -> продукты с nextduedate
+3. услуги: eq.php action=list -> id серверов, затем по каждому
+   eq.php action=show (железо/локация) + whmcs.php action=get_billing_data (цена/продление)
 
 API-ключ выписывается в панели (My Servers → Configuration → Ключи API).
 """
@@ -245,32 +246,67 @@ class HostkeyAdapter(HosterAdapter):
         return (round(total, 2) if found else None), currency
 
     async def _fetch_services(self, client, base, token) -> List[Service]:
-        # У Hostkey нет getclientsproducts (invalid command) — услуги/серверы
-        # отдаёт eq.php action=list.
+        # eq.php action=list отдаёт список серверов. На большинстве инстансов это
+        # ГОЛЫЕ id (servers:[55054]) — тогда детали тянем поштучно:
+        #   eq.php  action=show           id=<id> -> имя, hwconfig, локация
+        #   whmcs.php action=get_billing_data id=<id> -> цена, дата продления
+        # Если же list вернул полные записи — используем их без доп. запросов.
         try:
             data = await self._call(client, base, "list", token, endpoint="eq.php")
         except AdapterError as e:
             logger.info("Hostkey eq.php list недоступен (%s), услуги пропущены", e)
             return []
         services: List[Service] = []
-        for s in _server_rows(data):
-            name = (s.get("name") or s.get("hostname") or s.get("server_name")
-                    or s.get("domain") or s.get("ip") or s.get("title"))
-            if not name:
-                continue
-            services.append(Service(
-                name=str(name),
-                status=str(s.get("status") or "").lower() or None,
-                price=_first_num(s, "cost", "price", "monthly", "recurringamount", "amount"),
-                currency=None,
-                period=str(s.get("billingcycle") or s.get("period") or "") or None,
-                next_due_at=_iso_date(
-                    s.get("expiredate") or s.get("nextduedate") or s.get("paiddate")
-                    or s.get("payment_date") or s.get("paid_till") or s.get("expires")
-                ),
-                external_id=str(s.get("id")) if s.get("id") is not None else None,
-            ))
+        for sid, row in _server_entries(data)[:50]:  # cap: не долбим API при большом флоте
+            svc = _service_from_row(row) if row else None
+            if sid is not None and (svc is None or not svc.name or svc.price is None):
+                svc = await self._enrich_server(client, base, token, sid, svc)
+            if svc and svc.name:
+                services.append(svc)
         return services
+
+    async def _enrich_server(self, client, base, token, sid: str,
+                             base_svc: Optional[Service]) -> Service:
+        """Добрать имя/железо (eq.php show) и цену/продление (whmcs get_billing_data)."""
+        name = base_svc.name if base_svc else None
+        status = base_svc.status if base_svc else None
+        price = base_svc.price if base_svc else None
+        period = base_svc.period if base_svc else None
+        next_due = base_svc.next_due_at if base_svc else None
+        currency = base_svc.currency if base_svc else None
+        specs = base_svc.specs if base_svc else None
+
+        try:
+            det = await self._call(client, base, "show", token,
+                                   extra={"id": str(sid)}, endpoint="eq.php")
+            rec = _detail_rec(det)
+            if rec:
+                name = name or _pick_str(rec, "name", "hostname", "server_name", "title")
+                status = status or (str(rec.get("status") or "").lower() or None)
+                specs = specs or _hwconfig_specs(rec)
+        except AdapterError as e:
+            logger.info("Hostkey eq.php show id=%s: %s", sid, e)
+
+        try:
+            bill = await self._call(client, base, "get_billing_data", token,
+                                    extra={"id": str(sid)}, endpoint="whmcs.php")
+            brec = _detail_rec(bill)
+            if brec:
+                if price is None:
+                    price = _first_num(brec, "recurringamount", "amount", "cost",
+                                       "price", "total", "firstpaymentamount")
+                period = period or (str(brec.get("billingcycle") or brec.get("period") or "") or None)
+                next_due = next_due or _iso_date(
+                    brec.get("nextduedate") or brec.get("duedate") or brec.get("expiredate"))
+                currency = currency or brec.get("currencycode") or brec.get("currency")
+        except AdapterError as e:
+            logger.info("Hostkey whmcs get_billing_data id=%s: %s", sid, e)
+
+        return Service(
+            name=str(name or f"#{sid}"), status=status, price=price,
+            currency=(str(currency).upper() if currency else None),
+            period=period, next_due_at=next_due, external_id=str(sid), specs=specs,
+        )
 
 
 def _first_num(d: Dict[str, Any], *keys: str) -> Optional[float]:
@@ -294,3 +330,94 @@ def _iso_date(v: Any) -> Optional[str]:
     if len(parts) == 3 and len(parts[0]) == 4:
         return s
     return None
+
+
+def _pick_str(d: Dict[str, Any], *keys: str) -> Optional[str]:
+    for k in keys:
+        v = d.get(k)
+        if v not in (None, ""):
+            return str(v)
+    return None
+
+
+def _server_entries(payload: Any) -> List[tuple]:
+    """Из eq.php list вернуть [(id, row|None)].
+
+    row — dict, если инстанс отдал запись целиком; None — если только id
+    (servers:[55054]). Список серверов бывает под message.* или на верхнем уровне.
+    """
+    node = payload
+    if isinstance(node, dict) and isinstance(node.get("message"), dict):
+        node = node["message"]
+    seq: Any = None
+    if isinstance(node, dict):
+        for k in ("servers", "list", "server", "data", "items", "ids"):
+            if isinstance(node.get(k), list):
+                seq = node[k]
+                break
+        if seq is None:
+            seq = [v for v in node.values() if isinstance(v, (dict, int, str))]
+    elif isinstance(node, list):
+        seq = node
+    entries: List[tuple] = []
+    for item in (seq or []):
+        if isinstance(item, dict):
+            sid = item.get("id") or item.get("server_id") or item.get("eq_id")
+            entries.append((str(sid) if sid is not None else None, item))
+        elif item not in (None, "", True, False):
+            entries.append((str(item), None))
+    return entries
+
+
+def _service_from_row(r: Dict[str, Any]) -> Service:
+    """Собрать услугу из записи eq.php list (если инстанс отдаёт её целиком)."""
+    name = _pick_str(r, "name", "hostname", "server_name", "domain", "ip", "title")
+    sid = r.get("id") or r.get("server_id") or r.get("eq_id")
+    return Service(
+        name=str(name or ""),
+        status=str(r.get("status") or "").lower() or None,
+        price=_first_num(r, "cost", "price", "monthly", "recurringamount", "amount"),
+        currency=None,
+        period=str(r.get("billingcycle") or r.get("period") or "") or None,
+        next_due_at=_iso_date(
+            r.get("expiredate") or r.get("nextduedate") or r.get("paiddate")
+            or r.get("payment_date") or r.get("paid_till") or r.get("expires")
+        ),
+        external_id=str(sid) if sid is not None else None,
+        specs=_hwconfig_specs(r),
+    )
+
+
+def _detail_rec(payload: Any) -> Optional[Dict[str, Any]]:
+    """Достать запись сервера из ответа show/get_billing_data (снять message-обёртку)."""
+    node = payload
+    if isinstance(node, dict) and isinstance(node.get("message"), dict):
+        node = node["message"]
+    if isinstance(node, dict):
+        for k in ("server", "eq", "data", "info", "product", "service", "billing"):
+            if isinstance(node.get(k), dict):
+                return node[k]
+        return node
+    if isinstance(node, list):
+        for x in node:
+            if isinstance(x, dict):
+                return x
+    return None
+
+
+def _hwconfig_specs(rec: Dict[str, Any]) -> Optional[str]:
+    """Краткие характеристики: CPU/RAM/диск из hwconfig + локация."""
+    hw = rec.get("hwconfig") or rec.get("config") or rec.get("configuration")
+    parts: List[str] = []
+    if isinstance(hw, dict):
+        for key in ("cpu", "processor", "ram", "memory", "disk", "hdd", "ssd", "storage"):
+            v = hw.get(key)
+            if v:
+                parts.append(str(v))
+    elif isinstance(hw, str) and hw.strip():
+        parts.append(hw.strip())
+    loc = _pick_str(rec, "location", "city", "datacenter", "country", "region")
+    if loc and loc not in parts:
+        parts.append(loc)
+    specs = " · ".join(p for p in parts if p)
+    return specs[:200] or None
