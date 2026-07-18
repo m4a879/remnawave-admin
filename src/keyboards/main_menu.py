@@ -78,8 +78,6 @@ def nodes_menu_keyboard(admin: BotAdmin | None = None) -> InlineKeyboardMarkup:
 
 def resources_menu_keyboard(admin: BotAdmin | None = None) -> InlineKeyboardMarkup:
     kb = []
-    if admin is None or admin.has_perm_sync("admins", "view"):
-        kb.append([InlineKeyboardButton(text=_("actions.tokens"), callback_data="menu:tokens")])
     if admin is None or admin.has_perm_sync("templates", "view"):
         kb.append([InlineKeyboardButton(text=_("actions.templates"), callback_data="menu:templates")])
     if admin is None or admin.has_perm_sync("admins", "view"):

@@ -24,7 +24,6 @@
     "nodes": "🛰 Ноды",
     "hosts": "🖥 Хосты",
     "subs": "🧾 Подписки",
-    "tokens": "🔑 API токены",
     "templates": "📑 Шаблоны",
     "snippets": "✂️ Сниппеты",
     "configs": "🧩 Конфиги",
@@ -199,7 +198,6 @@
     "hosts": "🖥 Хостов: всего *{total}* (включено: `{enabled}`, выключено: `{disabled}`)",
     "nodes_detailed": "🛰 Нод: всего *{total}* (включено: `{enabled}`, выключено: `{disabled}`, онлайн: `{online}`)",
     "templates": "📑 Шаблонов: *{count}*",
-    "tokens": "🔑 API токенов: *{count}*",
     "snippets": "✂️ Сниппетов: *{count}*",
     "traffic_stats": "📶 Статистика трафика",
     "extended_stats": "📊 Расширенная статистика",
@@ -590,21 +588,6 @@
     "search_no_results": "🙅 Не найдено подписок по запросу: <code>{query}</code>",
     "search_results": "🔍 Найдено подписок: {count}\n\nЗапрос: <code>{query}</code>",
     "search_results_limited": "⚠️ Показано только {shown} из {total} результатов."
-  },
-  "token": {
-    "usage": "🔑 Создать: /token <name>. Список: /tokens.",
-    "created": "✅ API токен создан:\n🆔 UUID: {uuid}\n🔑 Token: {token}\nСохрани сейчас.",
-    "not_found": "🙅 Токен не найден.",
-    "delete": "Удалить",
-    "delete_confirm": "⚠️ Вы уверены, что хотите удалить токен <b>{name}</b>?\n\nЭто действие нельзя отменить!",
-    "delete_confirm_yes": "✅ Да, удалить",
-    "delete_confirm_no": "❌ Отмена",
-    "deleted": "🗑 Токен удален.",
-    "list_title": "🔑 API токены • всего {total}",
-    "list_item": "{name}: {token} (uuid: {uuid})",
-    "list_more": "…и еще {count}",
-    "list_hint": "ℹ️ Создать: /token <name>. Удалить: кнопками.",
-    "list_empty": "Нет API токенов."
   },
   "template": {
     "usage": "📑 Детали: /template <uuid>. Список: /templates.",

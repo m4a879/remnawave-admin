@@ -3838,30 +3838,11 @@
   },
   "resources": {
     "title": "Ресурсы",
-    "subtitle": "Управление API-токенами, шаблонами, сниппетами и профилями конфигурации",
+    "subtitle": "Управление шаблонами, сниппетами и профилями конфигурации",
     "tabs": {
-      "tokens": "API-токены",
       "templates": "Шаблоны",
       "snippets": "Сниппеты",
       "profiles": "Профили конфигурации"
-    },
-    "tokens": {
-      "description": "API-токены для доступа к Remnawave Panel API",
-      "create": "Создать токен",
-      "empty": "Нет API-токенов",
-      "created": "Токен создан",
-      "createError": "Не удалось создать токен",
-      "deleted": "Токен удалён",
-      "deleteError": "Не удалось удалить токен",
-      "createTitle": "Создать API-токен",
-      "createDescription": "Введите имя для нового API-токена",
-      "nameLabel": "Имя токена",
-      "namePlaceholder": "напр. my-bot-token",
-      "tokenLabel": "Токен",
-      "tokenCreated": "Токен создан",
-      "tokenCreatedDescription": "Скопируйте токен сейчас — он больше не будет показан",
-      "deleteTitle": "Удалить токен",
-      "deleteDescription": "Вы уверены, что хотите удалить этот токен? Это действие нельзя отменить."
     },
     "templates": {
       "description": "Шаблоны конфигурации VPN-подписок",

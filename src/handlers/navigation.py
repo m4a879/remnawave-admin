@@ -39,7 +39,7 @@ from shared.logger import logger
 from src.handlers.billing import _fetch_billing_nodes_text, _fetch_billing_text, _fetch_providers_text
 from src.handlers.hosts import _fetch_hosts_text
 from src.handlers.nodes import _fetch_nodes_text
-from src.handlers.resources import _fetch_configs_text, _fetch_snippets_text, _send_templates, _show_tokens
+from src.handlers.resources import _fetch_configs_text, _fetch_snippets_text, _send_templates
 from src.handlers.users import _format_user_choice, _send_user_summary, _show_user_search_results, _start_user_search_flow
 from src.keyboards.subscription_actions import subscription_keyboard
 from src.utils.auth import BotAdmin
@@ -424,9 +424,6 @@ async def _navigate(target: Message | CallbackQuery, destination: str, is_back: 
         return
     if destination == NavTarget.RESOURCES_MENU:
         await _send_clean_message(target, bot_menu_title(), reply_markup=resources_menu_keyboard(admin=admin))
-        return
-    if destination == NavTarget.TOKENS_MENU:
-        await _show_tokens(target, reply_markup=resources_menu_keyboard(admin=admin))
         return
     if destination == NavTarget.TEMPLATES_MENU:
         await _send_templates(target)

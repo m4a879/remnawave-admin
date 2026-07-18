@@ -1,13 +1,6 @@
 import client from './client'
 
 // Types
-export interface ApiToken {
-  uuid: string
-  token: string
-  tokenName: string
-  createdAt: string
-}
-
 export interface Template {
   uuid: string
   name: string
@@ -37,19 +30,6 @@ export interface ConfigProfile {
 
 // API functions
 export const resourcesApi = {
-  // Tokens
-  getTokens: async (): Promise<ApiToken[]> => {
-    const { data } = await client.get('/tokens')
-    return data.items || []
-  },
-  createToken: async (tokenName: string) => {
-    const { data } = await client.post('/tokens', { tokenName })
-    return data
-  },
-  deleteToken: async (uuid: string) => {
-    await client.delete(`/tokens/${uuid}`)
-  },
-
   // Templates
   getTemplates: async (): Promise<Template[]> => {
     const { data } = await client.get('/templates')

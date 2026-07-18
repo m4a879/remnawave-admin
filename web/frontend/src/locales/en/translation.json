@@ -3838,30 +3838,11 @@
   },
   "resources": {
     "title": "Resources",
-    "subtitle": "Manage API tokens, templates, snippets and config profiles",
+    "subtitle": "Manage templates, snippets and config profiles",
     "tabs": {
-      "tokens": "API Tokens",
       "templates": "Templates",
       "snippets": "Snippets",
       "profiles": "Config Profiles"
-    },
-    "tokens": {
-      "description": "API tokens for accessing the Remnawave Panel API",
-      "create": "Create Token",
-      "empty": "No API tokens yet",
-      "created": "Token created successfully",
-      "createError": "Failed to create token",
-      "deleted": "Token deleted",
-      "deleteError": "Failed to delete token",
-      "createTitle": "Create API Token",
-      "createDescription": "Enter a name for the new API token",
-      "nameLabel": "Token Name",
-      "namePlaceholder": "e.g. my-bot-token",
-      "tokenLabel": "Token",
-      "tokenCreated": "Token Created",
-      "tokenCreatedDescription": "Copy the token now — it won't be shown again",
-      "deleteTitle": "Delete Token",
-      "deleteDescription": "Are you sure you want to delete this token? This action cannot be undone."
     },
     "templates": {
       "description": "VPN subscription config templates",

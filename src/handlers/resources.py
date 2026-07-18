@@ -13,63 +13,21 @@ from src.utils.auth import BotAdmin, resolve_admin
 from src.keyboards.snippet_actions import snippet_actions_keyboard
 from src.keyboards.template_actions import template_actions_keyboard
 from src.keyboards.template_menu import template_list_keyboard, template_menu_keyboard
-from src.keyboards.token_actions import token_actions_keyboard
 from shared.internal_api import ApiClientError, NotFoundError, UnauthorizedError, internal_api_client
 from shared.database import db_service
 from src.services import data_access
 from src.utils.formatters import (
     build_config_profiles_list,
-    build_created_token,
     build_snippet_detail,
     build_snippets_list,
     build_template_summary,
     build_templates_list,
-    build_tokens_list,
 )
 from shared.logger import logger
 
 # Функции перенесены из basic.py
 
 router = Router(name="resources")
-
-
-async def _show_tokens(target: Message | CallbackQuery, reply_markup: InlineKeyboardMarkup | None = None, admin: BotAdmin | None = None) -> None:
-    """Показывает список токенов."""
-    text = await _fetch_tokens_text()
-    markup = reply_markup or main_menu_keyboard(admin=admin)
-    if isinstance(target, CallbackQuery):
-        await _edit_text_safe(target.message, text, reply_markup=markup)
-    else:
-        await _send_clean_message(target, text, reply_markup=markup)
-
-
-async def _create_token(target: Message | CallbackQuery, name: str, admin: BotAdmin | None = None) -> None:
-    """Создает новый токен."""
-    try:
-        token = await internal_api_client.create_token(name)
-    except UnauthorizedError:
-        text = _("errors.unauthorized")
-        if isinstance(target, CallbackQuery):
-            await target.message.edit_text(text, reply_markup=main_menu_keyboard(admin=admin))
-        else:
-            await _send_clean_message(target, text, reply_markup=main_menu_keyboard(admin=admin))
-        return
-    except ApiClientError:
-        logger.exception("❌ Create token failed")
-        text = _("errors.generic")
-        if isinstance(target, CallbackQuery):
-            await target.message.edit_text(text, reply_markup=main_menu_keyboard(admin=admin))
-        else:
-            await _send_clean_message(target, text, reply_markup=main_menu_keyboard(admin=admin))
-        return
-
-    summary = build_created_token(token, _)
-    token_uuid = token.get("response", token).get("uuid", "")
-    keyboard = token_actions_keyboard(token_uuid)
-    if isinstance(target, CallbackQuery):
-        await target.message.edit_text(summary, reply_markup=keyboard)
-    else:
-        await _send_clean_message(target, summary, reply_markup=keyboard)
 
 
 async def _send_templates(target: Message | CallbackQuery, admin: BotAdmin | None = None) -> None:
@@ -192,19 +150,6 @@ async def _upsert_snippet(target: Message, action: str, admin: BotAdmin | None =
     content = res.get("response", res).get("snippet", snippet_body)
     detail = build_snippet_detail({"name": name, "snippet": content}, _)
     await _send_clean_message(target, detail, reply_markup=snippet_actions_keyboard(name))
-
-
-async def _fetch_tokens_text() -> str:
-    """Получает текст со списком токенов (из БД, fallback на API)."""
-    try:
-        tokens = await data_access.get_all_tokens()
-        logger.info("Fetched %d tokens", len(tokens))
-        return build_tokens_list(tokens, _)
-    except UnauthorizedError:
-        return _("errors.unauthorized")
-    except ApiClientError as exc:
-        logger.exception("⚠️ Tokens fetch failed: %s", exc)
-        return _("errors.generic")
 
 
 async def _fetch_templates_text() -> str:
@@ -356,70 +301,6 @@ async def _send_config_detail(target: Message | CallbackQuery, config_uuid: str,
         await target.message.edit_text(summary, reply_markup=nodes_menu_keyboard(admin=admin))
     else:
         await _send_clean_message(target, summary, reply_markup=nodes_menu_keyboard(admin=admin))
-
-
-@router.callback_query(F.data == "menu:tokens")
-async def cb_tokens(callback: CallbackQuery, admin: BotAdmin) -> None:
-    """Обработчик кнопки 'Токены' в меню."""
-    if await _not_admin(callback):
-        return
-    await callback.answer()
-    await _show_tokens(callback, reply_markup=resources_menu_keyboard(admin=admin), admin=admin)
-
-
-@router.callback_query(F.data.startswith("token:"))
-async def cb_token_actions(callback: CallbackQuery, admin: BotAdmin) -> None:
-    """Обработчик действий с токеном."""
-    if await _not_admin(callback):
-        return
-    await callback.answer()
-    _prefix, token_uuid, action = callback.data.split(":")
-    try:
-        if action == "delete":
-            # Показываем подтверждение перед удалением
-            try:
-                token = await data_access.get_token_by_uuid(token_uuid)
-                token_name = token.get("name", "Unknown") if token else "Unknown"
-                from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
-                keyboard = InlineKeyboardMarkup(inline_keyboard=[
-                    [
-                        InlineKeyboardButton(
-                            text=_("token.delete_confirm_yes"),
-                            callback_data=f"token:{token_uuid}:delete_confirm"
-                        ),
-                        InlineKeyboardButton(
-                            text=_("token.delete_confirm_no"),
-                            callback_data=f"token:{token_uuid}:cancel"
-                        )
-                    ]
-                ])
-                await callback.message.edit_text(
-                    _("token.delete_confirm").format(name=token_name),
-                    reply_markup=keyboard,
-                    parse_mode="HTML"
-                )
-                return
-            except Exception:
-                logger.exception("Failed to get token for delete confirmation")
-                await callback.answer(_("errors.generic"), show_alert=True)
-                return
-        elif action == "delete_confirm":
-            if not await require_permission(callback, admin, "resources", "delete"):
-                return
-            await internal_api_client.delete_token(token_uuid)
-            await callback.message.edit_text(_("token.deleted"), reply_markup=main_menu_keyboard(admin=admin))
-        elif action == "cancel":
-            # Отмена - просто возвращаемся к списку токенов
-            await _show_tokens(callback, reply_markup=resources_menu_keyboard(admin=admin), admin=admin)
-        else:
-            await callback.answer(_("errors.generic"), show_alert=True)
-    except UnauthorizedError:
-        await callback.message.edit_text(_("errors.unauthorized"), reply_markup=main_menu_keyboard(admin=admin))
-    except NotFoundError:
-        await callback.message.edit_text(_("token.not_found"), reply_markup=main_menu_keyboard(admin=admin))
-    except ApiClientError:
-        logger.exception("❌ Token action failed action=%s token_uuid=%s actor_id=%s", action, token_uuid, callback.from_user.id)
-        await callback.message.edit_text(_("errors.generic"), reply_markup=main_menu_keyboard(admin=admin))
 
 
 @router.callback_query(F.data == "menu:templates")

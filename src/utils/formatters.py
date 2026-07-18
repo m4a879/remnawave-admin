@@ -581,42 +581,6 @@ def build_subscription_summary(sub: dict, t: Callable[[str], str]) -> str:
     )
 
 
-def _mask_token(token: str) -> str:
-    if not token:
-        return NA
-    if len(token) <= 8:
-        return token
-    return f"{token[:4]}...{token[-4:]}"
-
-
-def build_tokens_list(tokens: list[dict], t: Callable[[str], str]) -> str:
-    if not tokens:
-        return t("token.list_empty")
-    lines = [t("token.list_title").format(total=len(tokens))]
-    for item in tokens[:10]:
-        token = item.get("token", "")
-        token_name = item.get("tokenName", "n/a")
-        uuid = item.get("uuid", "n/a")
-        masked = _mask_token(token)
-        lines.append(t("token.list_item").format(name=token_name, token=masked, uuid=uuid))
-    if len(tokens) > 10:
-        lines.append(t("token.list_more").format(count=len(tokens) - 10))
-    lines.append(t("token.list_hint"))
-    return "\n".join(lines)
-
-
-def build_created_token(token: dict, t: Callable[[str], str]) -> str:
-    info = token.get("response", token)
-    return t("token.created").format(token=info.get("token", "n/a"), uuid=info.get("uuid", "n/a"))
-
-
-def build_token_line(token: dict, t: Callable[[str], str]) -> str:
-    token_name = token.get("tokenName", "n/a")
-    uuid = token.get("uuid", "n/a")
-    masked = _mask_token(token.get("token", ""))
-    return t("token.list_item").format(name=token_name, token=masked, uuid=uuid)
-
-
 def build_templates_list(templates: list[dict], t: Callable[[str], str]) -> str:
     if not templates:
         return t("template.list_empty")

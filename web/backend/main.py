@@ -45,7 +45,6 @@ from web.backend.api.v2 import agent_ws as agent_ws_api
 from web.backend.api.v2 import fleet as fleet_api
 from web.backend.api.v2 import terminal as terminal_api
 from web.backend.api.v2 import scripts as scripts_api
-from web.backend.api.v2 import tokens as tokens_api
 from web.backend.api.v2 import templates as templates_api
 from web.backend.api.v2 import snippets as snippets_api
 from web.backend.api.v2 import config_profiles as config_profiles_api
@@ -1009,7 +1008,6 @@ def create_app() -> FastAPI:
         app.include_router(fleet_api.router, prefix="/api/v2/fleet", tags=["fleet"])
         app.include_router(terminal_api.router, prefix="/api/v2", tags=["terminal"])
         app.include_router(scripts_api.router, prefix="/api/v2/fleet", tags=["scripts"])
-        app.include_router(tokens_api.router, prefix="/api/v2/tokens", tags=["tokens"])
         app.include_router(templates_api.router, prefix="/api/v2/templates", tags=["templates"])
         app.include_router(snippets_api.router, prefix="/api/v2/snippets", tags=["snippets"])
         app.include_router(config_profiles_api.router, prefix="/api/v2/config-profiles", tags=["config-profiles"])

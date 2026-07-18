@@ -149,9 +149,6 @@ _ROUTE_DEFS: list[dict[str, Any]] = [
     dict(name="get_hwid_devices_stats", method="GET", path="/hwid/devices/stats"),
     dict(name="get_user_hwid_devices", method="GET", path="/hwid/devices/{user_uuid}"),
 
-    # ── Token Management ──
-    dict(name="get_tokens", method="GET", path="/tokens"),
-    dict(name="delete_token", method="DELETE", path="/tokens/{token_uuid}"),
     # ── Subscription Page Configs ──
     dict(name="get_subscription_page_configs", method="GET", path="/subscription-page-configs"),
     dict(name="get_subscription_page_config_by_uuid", method="GET", path="/subscription-page-configs/{config_uuid}"),
@@ -355,9 +352,6 @@ class BaseInternalApiClient(BaseHttpClient):
 
     async def get_top_users_by_hwid_devices(self, limit: int = 10) -> dict:
         return await self._get("/hwid/devices/top-users", params={"limit": limit})
-
-    async def create_token(self, token_name: str) -> dict:
-        return await self._post("/tokens", json={"tokenName": token_name})
 
     async def get_subscription_request_history(self, start: int = 0, size: int = 100) -> dict:
         return await self._get("/subscription-request-history", params={"start": start, "size": size})

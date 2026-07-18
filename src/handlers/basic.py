@@ -34,7 +34,6 @@ from src.keyboards.user_create import (
 from src.keyboards.host_actions import host_actions_keyboard
 from src.keyboards.host_edit import host_edit_keyboard
 from src.keyboards.node_actions import node_actions_keyboard
-from src.keyboards.token_actions import token_actions_keyboard
 from src.keyboards.template_actions import template_actions_keyboard
 from src.keyboards.snippet_actions import snippet_actions_keyboard
 from src.keyboards.config_actions import config_actions_keyboard
@@ -71,10 +70,7 @@ from src.utils.formatters import (
     format_bytes,
     format_uptime,
     _esc,
-    build_tokens_list,
-    build_created_token,
     escape_markdown,
-    build_token_line,
     build_templates_list,
     build_template_summary,
     build_snippets_list,
@@ -91,7 +87,7 @@ from src.utils.formatters import (
 from shared.logger import logger
 from src.handlers.hosts import _apply_host_update, _fetch_hosts_text, _host_config_profiles_keyboard
 from src.handlers.common import _cleanup_message, _not_admin, _send_clean_message, _get_target_user_id, _clear_user_state, _edit_text_safe
-from src.handlers.resources import _show_tokens, _fetch_configs_text, _fetch_snippets_text, _send_templates, _send_template_detail
+from src.handlers.resources import _fetch_configs_text, _fetch_snippets_text, _send_templates, _send_template_detail
 from src.handlers.users import (
     _send_user_detail,
     _send_user_summary,

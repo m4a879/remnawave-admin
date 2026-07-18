@@ -24,7 +24,6 @@
     "nodes": "🛰 Nodes",
     "hosts": "🖥 Hosts",
     "subs": "🧾 Subscriptions",
-    "tokens": "🔑 API tokens",
     "templates": "📑 Templates",
     "snippets": "✂️ Snippets",
     "configs": "🧩 Configs",
@@ -199,7 +198,6 @@
     "hosts": "🖥 Hosts: total *{total}* (enabled: `{enabled}`, disabled: `{disabled}`)",
     "nodes_detailed": "🛰 Nodes: total *{total}* (enabled: `{enabled}`, disabled: `{disabled}`, online: `{online}`)",
     "templates": "📑 Templates: *{count}*",
-    "tokens": "🔑 API tokens: *{count}*",
     "snippets": "✂️ Snippets: *{count}*",
     "traffic_stats": "📶 Traffic statistics",
     "extended_stats": "📊 Extended statistics",
@@ -590,21 +588,6 @@
     "search_no_results": "🙅 No subscriptions found for query: <code>{query}</code>",
     "search_results": "🔍 Found subscriptions: {count}\n\nQuery: <code>{query}</code>",
     "search_results_limited": "⚠️ Showing only {shown} of {total} results."
-  },
-  "token": {
-    "usage": "🔑 Create: /token <name>. List: /tokens.",
-    "created": "✅ API token created:\n🆔 UUID: {uuid}\n🔑 Token: {token}\nSave it now.",
-    "not_found": "🙅 Token not found.",
-    "delete": "Delete",
-    "delete_confirm": "⚠️ Are you sure you want to delete token <b>{name}</b>?\n\nThis action cannot be undone!",
-    "delete_confirm_yes": "✅ Yes, delete",
-    "delete_confirm_no": "❌ Cancel",
-    "deleted": "🗑 Token deleted.",
-    "list_title": "🔑 API tokens • total {total}",
-    "list_item": "{name}: {token} (uuid: {uuid})",
-    "list_more": "…and {count} more",
-    "list_hint": "ℹ️ Create: /token <name>. Delete: buttons.",
-    "list_empty": "No API tokens."
   },
   "template": {
     "usage": "📑 Details: /template <uuid>. List: /templates.",

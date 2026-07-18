@@ -6,10 +6,6 @@ import { toast } from 'sonner'
 import {
   Plus,
   Trash2,
-  Copy,
-  Eye,
-  EyeOff,
-  FileText,
   Code,
   Settings,
   RefreshCw,
@@ -64,68 +60,8 @@ export default function Resources({ embedded }: { embedded?: boolean } = {}) {
   const canUpdate = useHasPermission('resources', 'edit')
   const canDelete = useHasPermission('resources', 'delete')
 
-  // Tab state
-  const [activeTab, setActiveTab] = useTabParam('tokens', ['tokens', 'templates', 'snippets', 'profiles'])
-
-  // ── API Tokens ──────────────────────────────────────────────────
-  const [tokenDialogOpen, setTokenDialogOpen] = useState(false)
-  const [tokenName, setTokenName] = useState('')
-  const [createdToken, setCreatedToken] = useState<{ token: string; tokenName: string } | null>(null)
-  const [deleteTokenConfirm, setDeleteTokenConfirm] = useState<string | null>(null)
-  const [revealedTokens, setRevealedTokens] = useState<Set<string>>(new Set())
-
-  const { data: tokens = [], isLoading: tokensLoading, isError: isTokensError, refetch: refetchTokens } = useQuery({
-    queryKey: ['tokens'],
-    queryFn: resourcesApi.getTokens,
-  })
-
-  const createTokenMutation = useMutation({
-    mutationFn: (name: string) => resourcesApi.createToken(name),
-    onSuccess: (data) => {
-      setCreatedToken(data)
-      setTokenDialogOpen(false)
-      setTokenName('')
-      queryClient.invalidateQueries({ queryKey: ['tokens'] })
-      toast.success(t('resources.tokens.created'))
-    },
-    onError: () => {
-      toast.error(t('resources.tokens.createError'))
-    },
-  })
-
-  const deleteTokenMutation = useMutation({
-    mutationFn: (uuid: string) => resourcesApi.deleteToken(uuid),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['tokens'] })
-      toast.success(t('resources.tokens.deleted'))
-      setDeleteTokenConfirm(null)
-    },
-    onError: () => {
-      toast.error(t('resources.tokens.deleteError'))
-    },
-  })
-
-  const copyToClipboard = (text: string) => {
-    navigator.clipboard.writeText(text)
-    toast.success(t('common.copied'))
-  }
-
-  const toggleTokenReveal = (uuid: string) => {
-    setRevealedTokens((prev) => {
-      const next = new Set(prev)
-      if (next.has(uuid)) {
-        next.delete(uuid)
-      } else {
-        next.add(uuid)
-      }
-      return next
-    })
-  }
-
-  const maskToken = (token: string) => {
-    if (token.length <= 8) return '••••••••'
-    return token.slice(0, 4) + '••••••••' + token.slice(-4)
-  }
+  // Tab state — управление API-токенами панели убрано (только в самой Remnawave)
+  const [activeTab, setActiveTab] = useTabParam('templates', ['templates', 'snippets', 'profiles'])
 
   // ── Templates ───────────────────────────────────────────────────
   const [templateDialogOpen, setTemplateDialogOpen] = useState(false)
@@ -349,8 +285,8 @@ export default function Resources({ embedded }: { embedded?: boolean } = {}) {
       toast.error(e.response?.data?.detail || t('common.error')),
   })
 
-  const hasError = isTokensError || isTemplatesError || isSnippetsError || isProfilesError
-  const handleRetry = () => { refetchTokens(); refetchTemplates(); refetchSnippets(); refetchProfiles() }
+  const hasError = isTemplatesError || isSnippetsError || isProfilesError
+  const handleRetry = () => { refetchTemplates(); refetchSnippets(); refetchProfiles() }
 
   if (hasError) {
     return (
@@ -382,10 +318,6 @@ export default function Resources({ embedded }: { embedded?: boolean } = {}) {
       {/* Tabs */}
       <Tabs value={activeTab} onValueChange={setActiveTab}>
         <TabsList>
-          <TabsTrigger value="tokens">
-            <FileText className="w-4 h-4 mr-2" />
-            {t('resources.tabs.tokens')}
-          </TabsTrigger>
           <TabsTrigger value="templates">
             <Code className="w-4 h-4 mr-2" />
             {t('resources.tabs.templates')}
@@ -399,92 +331,6 @@ export default function Resources({ embedded }: { embedded?: boolean } = {}) {
             {t('resources.tabs.profiles')}
           </TabsTrigger>
         </TabsList>
-
-        {/* ── Tab 1: API Tokens ────────────────────────────────── */}
-        <TabsContent value="tokens" className="space-y-4">
-          <div className="flex items-center justify-between">
-            <p className="text-sm text-dark-200">{t('resources.tokens.description')}</p>
-            <div className="flex gap-2">
-              <Button variant="outline" size="sm" onClick={() => refetchTokens()}>
-                <RefreshCw className="w-4 h-4" />
-              </Button>
-              {canCreate && (
-                <Button size="sm" onClick={() => setTokenDialogOpen(true)}>
-                  <Plus className="w-4 h-4 mr-2" />
-                  {t('resources.tokens.create')}
-                </Button>
-              )}
-            </div>
-          </div>
-
-          {tokensLoading ? (
-            <div className="space-y-3">
-              {[1, 2, 3].map((i) => (
-                <Skeleton key={i} className="h-24 w-full" />
-              ))}
-            </div>
-          ) : !Array.isArray(tokens) || tokens.length === 0 ? (
-            <Card className="border-[var(--glass-border)] bg-[var(--glass-bg)]">
-              <CardContent className="p-8 text-center">
-                <FileText className="w-12 h-12 mx-auto mb-3 text-dark-400" />
-                <p className="text-dark-200">{t('resources.tokens.empty')}</p>
-              </CardContent>
-            </Card>
-          ) : (
-            <div className="space-y-3">
-              {(Array.isArray(tokens) ? tokens : []).map((token) => {
-                const isRevealed = revealedTokens.has(token.uuid)
-                return (
-                  <Card key={token.uuid} className="border-[var(--glass-border)] bg-[var(--glass-bg)] hover:border-[var(--glass-border)] transition-colors">
-                    <CardContent className="p-4">
-                      <div className="flex items-start justify-between gap-4">
-                        <div className="flex-1 space-y-2">
-                          <div className="flex items-center gap-3">
-                            <h3 className="font-medium text-white">{token.tokenName}</h3>
-                            <Badge variant="outline" className="text-xs">
-                              {formatDate(token.createdAt)}
-                            </Badge>
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <code className="px-2 py-1 bg-[var(--glass-bg)] rounded text-xs font-mono text-dark-100 flex-1">
-                              {isRevealed ? token.token : maskToken(token.token)}
-                            </code>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => toggleTokenReveal(token.uuid)}
-                              className="h-7 px-2"
-                            >
-                              {isRevealed ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => copyToClipboard(token.token)}
-                              className="h-7 px-2"
-                            >
-                              <Copy className="w-4 h-4" />
-                            </Button>
-                          </div>
-                        </div>
-                        {canDelete && (
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => setDeleteTokenConfirm(token.uuid)}
-                            className="text-red-400 hover:text-red-300 hover:bg-red-500/10"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </Button>
-                        )}
-                      </div>
-                    </CardContent>
-                  </Card>
-                )
-              })}
-            </div>
-          )}
-        </TabsContent>
 
         {/* ── Tab 2: Templates ─────────────────────────────────── */}
         <TabsContent value="templates" className="space-y-4">
@@ -776,81 +622,6 @@ export default function Resources({ embedded }: { embedded?: boolean } = {}) {
         description={t('resources.profiles.deleteDescription')}
         variant="destructive"
         onConfirm={() => deleteProfileConfirm && deleteProfileMutation.mutate(deleteProfileConfirm.uuid)}
-      />
-
-      {/* Create Token Dialog */}
-      <Dialog open={tokenDialogOpen} onOpenChange={setTokenDialogOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>{t('resources.tokens.createTitle')}</DialogTitle>
-            <DialogDescription>{t('resources.tokens.createDescription')}</DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4">
-            <div>
-              <Label htmlFor="tokenName">{t('resources.tokens.nameLabel')}</Label>
-              <Input
-                id="tokenName"
-                value={tokenName}
-                onChange={(e) => setTokenName(e.target.value)}
-                placeholder={t('resources.tokens.namePlaceholder')}
-                className="mt-1"
-              />
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setTokenDialogOpen(false)}>
-              {t('common.cancel')}
-            </Button>
-            <Button
-              onClick={() => createTokenMutation.mutate(tokenName)}
-              disabled={!tokenName.trim() || createTokenMutation.isPending}
-            >
-              {createTokenMutation.isPending ? t('common.creating') : t('common.create')}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Show Created Token Dialog */}
-      <Dialog open={!!createdToken} onOpenChange={() => setCreatedToken(null)}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>{t('resources.tokens.tokenCreated')}</DialogTitle>
-            <DialogDescription>{t('resources.tokens.tokenCreatedDescription')}</DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4">
-            <div>
-              <Label>{t('resources.tokens.nameLabel')}</Label>
-              <Input value={createdToken?.tokenName || ''} readOnly className="mt-1" />
-            </div>
-            <div>
-              <Label>{t('resources.tokens.tokenLabel')}</Label>
-              <div className="flex gap-2 mt-1">
-                <Input value={createdToken?.token || ''} readOnly className="font-mono" />
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => createdToken && copyToClipboard(createdToken.token)}
-                >
-                  <Copy className="w-4 h-4" />
-                </Button>
-              </div>
-            </div>
-          </div>
-          <DialogFooter>
-            <Button onClick={() => setCreatedToken(null)}>{t('common.close')}</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Delete Token Confirm */}
-      <ConfirmDialog
-        open={!!deleteTokenConfirm}
-        onOpenChange={(open) => !open && setDeleteTokenConfirm(null)}
-        title={t('resources.tokens.deleteTitle')}
-        description={t('resources.tokens.deleteDescription')}
-        variant="destructive"
-        onConfirm={() => deleteTokenConfirm && deleteTokenMutation.mutate(deleteTokenConfirm)}
       />
 
       {/* Create Template Dialog */}
