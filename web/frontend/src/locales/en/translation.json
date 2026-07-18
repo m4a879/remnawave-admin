@@ -4102,6 +4102,9 @@
       "renewsAt": "Renews",
       "nodeBadge": "Panel node",
       "linkedItem": "Linked item: {{name}}",
+      "addProvider": "Add hoster",
+      "editProvider": "Edit hoster",
+      "providerUrl": "Website / dashboard",
       "fromApi": "From API",
       "manualItems": "Items",
       "addServer": "Add server"

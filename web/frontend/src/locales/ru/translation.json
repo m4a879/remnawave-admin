@@ -4102,6 +4102,9 @@
       "renewsAt": "Продление",
       "nodeBadge": "Нода панели",
       "linkedItem": "Связанная запись: {{name}}",
+      "addProvider": "Добавить хостера",
+      "editProvider": "Редактировать хостера",
+      "providerUrl": "Сайт / кабинет",
       "fromApi": "Из API",
       "manualItems": "Записи",
       "addServer": "Добавить сервер"

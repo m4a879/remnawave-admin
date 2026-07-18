@@ -22,6 +22,7 @@ import {
   Archive,
   MoreVertical,
   RotateCcw,
+  Pencil,
 } from '@/components/brand/icons'
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
@@ -51,7 +52,8 @@ import { cn } from '@/lib/utils'
 
 const CYCLES = ['monthly', 'yearly', 'days', 'once'] as const
 const PIE_COLORS = ['#06b6d4', '#8b5cf6', '#f59e0b', '#10b981', '#ef4444', '#ec4899', '#6366f1', '#14b8a6']
-const COMMON_CURRENCIES = ['RUB', 'USD', 'EUR']
+// фиат + ходовая крипта (курсы: фиат — ЦБ РФ, крипта — CoinGecko)
+const COMMON_CURRENCIES = ['RUB', 'USD', 'EUR', 'USDT', 'TON', 'BTC']
 
 function fmtMoney(amount: number, currency: string): string {
   const s = amount.toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
@@ -938,6 +940,8 @@ function HostersTab({ canCreate, canEdit, canDelete, onAddItem }: {
   const [deleteAccountId, setDeleteAccountId] = useState<number | null>(null)
   const [deleteProviderId, setDeleteProviderId] = useState<number | null>(null)
   const [deleteItemId, setDeleteItemId] = useState<number | null>(null)
+  // ручное создание/редактирование хостера (не все хостеры заведены в панели)
+  const [provForm, setProvForm] = useState<{ id: number | null; name: string; url: string } | null>(null)
   const [expanded, setExpanded] = useState<Set<number>>(new Set())
   const toggleExpand = (id: number) => setExpanded((prev) => {
     const next = new Set(prev)
@@ -1056,16 +1060,72 @@ function HostersTab({ canCreate, canEdit, canDelete, onAddItem }: {
     onSuccess: () => { toast.success(t('common.deleted')); setDeleteItemId(null); invalidate() },
     onError: () => toast.error(t('common.error')),
   })
+  const saveProvMut = useMutation({
+    mutationFn: async () => {
+      const data = { name: provForm!.name.trim(), url: provForm!.url.trim() || undefined }
+      if (provForm!.id != null) await financeApi.updateProvider(provForm!.id, data)
+      else await financeApi.createProvider(data)
+    },
+    onSuccess: () => { toast.success(t('common.saved')); setProvForm(null); invalidate() },
+    onError: () => toast.error(t('common.saveError')),
+  })
 
   const visibleProvs = (provs?.items || []).filter((p) => !p.archived)
 
+  const providerDialog = () => (
+    <Dialog open={provForm !== null} onOpenChange={(o) => !o && setProvForm(null)}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>
+            {provForm?.id != null ? t('finance.hoster.editProvider') : t('finance.hoster.addProvider')}
+          </DialogTitle>
+        </DialogHeader>
+        <div className="space-y-3">
+          <div>
+            <Label>{t('finance.field.name')}</Label>
+            <Input value={provForm?.name || ''} placeholder="Hetzner / Aeza / …"
+              onChange={(e) => provForm && setProvForm({ ...provForm, name: e.target.value })} />
+          </div>
+          <div>
+            <Label>{t('finance.hoster.providerUrl')}</Label>
+            <Input value={provForm?.url || ''} placeholder="https://my.hoster.com"
+              onChange={(e) => provForm && setProvForm({ ...provForm, url: e.target.value })} />
+          </div>
+        </div>
+        <DialogFooter>
+          <Button disabled={!provForm?.name.trim() || saveProvMut.isPending} onClick={() => saveProvMut.mutate()}>
+            {t('common.save')}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+
+  const addProviderBtn = canCreate && (
+    <Button size="sm" variant="outline" className="gap-1.5 shrink-0"
+      onClick={() => setProvForm({ id: null, name: '', url: '' })}>
+      <Plus className="w-4 h-4" /> {t('finance.hoster.addProvider')}
+    </Button>
+  )
+
   if (isError) return <QueryError onRetry={refetch} />
   if (isLoading) return <div className="space-y-2">{Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-16" />)}</div>
-  if (!visibleProvs.length) return <EmptyState icon={Server} title={t('finance.noProviders')} description={t('finance.noProvidersHint')} />
+  if (!visibleProvs.length) {
+    return (
+      <>
+        <EmptyState icon={Server} title={t('finance.noProviders')} description={t('finance.noProvidersHint')}
+          action={addProviderBtn || undefined} />
+        {providerDialog()}
+      </>
+    )
+  }
 
   return (
     <div className="space-y-3">
-      <p className="text-sm text-muted-foreground">{t('finance.hostersHint')}</p>
+      <div className="flex items-center justify-between gap-2 flex-wrap">
+        <p className="text-sm text-muted-foreground">{t('finance.hostersHint')}</p>
+        {addProviderBtn}
+      </div>
       <div className="space-y-1.5">
         {visibleProvs.map((p) => {
           const acc = accountByProvider.get(p.id)
@@ -1187,6 +1247,11 @@ function HostersTab({ canCreate, canEdit, canDelete, onAddItem }: {
                           </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
+                          {canEdit && (
+                            <DropdownMenuItem onClick={() => setProvForm({ id: p.id, name: p.name, url: p.url || '' })}>
+                              <Pencil className="w-4 h-4 mr-2" /> {t('finance.hoster.editProvider')}
+                            </DropdownMenuItem>
+                          )}
                           {canEdit && (
                             <DropdownMenuItem onClick={() => archiveProvMut.mutate(p.id)}>
                               <Archive className="w-4 h-4 mr-2" /> {t('finance.archive.archiveProvider')}
@@ -1424,6 +1489,8 @@ function HostersTab({ canCreate, canEdit, canDelete, onAddItem }: {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {providerDialog()}
 
       <ConfirmDialog
         open={deleteAccountId !== null}
