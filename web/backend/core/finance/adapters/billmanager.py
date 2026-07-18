@@ -178,33 +178,74 @@ class BillmanagerAdapter(HosterAdapter):
                 seen.add(key)
                 services.append(svc)
         if not services:
-            # ничего не нашли ни одной функцией — показать клиентское меню:
-            # в нём видно, как модуль услуг называется у этого инстанса
-            await self._log_client_menu(client, endpoint, credentials)
+            # 3) автообнаружение: у части инстансов услуги в подмодулях
+            # (Waicore: vds пуст, реальные VPS в vds.vps) — берём funcs из
+            # секции «Товары/услуги» клиентского меню и пробуем их
+            tried = set(_UNIFIED_SERVICE_FUNCS) | set(_TYPED_SERVICE_FUNCS)
+            for func in await self._menu_service_funcs(client, endpoint, credentials):
+                if func in tried:
+                    continue
+                tried.add(func)
+                rows = await self._try_list(client, endpoint, func, credentials)
+                for svc in self._services_from_rows(rows):
+                    key = svc.external_id or f"{func}:{svc.name}"
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    services.append(svc)
         return services
 
-    async def _log_client_menu(self, client, endpoint, credentials) -> None:
-        """func=menu: имена доступных клиенту функций (диагностика нестандартных модулей)."""
+    async def _menu_service_funcs(self, client, endpoint, credentials) -> List[str]:
+        """func=menu -> имена функций из секции услуг (mainmenuservice).
+
+        Меню — вложенные узлы с $name; секция услуг перечисляет модули,
+        доступные клиенту (включая подтипы вида vds.vps).
+        """
         try:
             doc = await self._call(client, endpoint, "menu", credentials)
         except AdapterError as e:
             logger.info("BILLmanager func=menu недоступна (%s)", e)
-            return
-        names: List[str] = []
+            return []
 
-        def walk(node: Any) -> None:
+        def node_name(node: Dict[str, Any]) -> Optional[str]:
+            nm = _unwrap(node.get("$name")) or _unwrap(node.get("name"))
+            return str(nm) if nm else None
+
+        def find_section(node: Any, name: str) -> Optional[Dict[str, Any]]:
             if isinstance(node, dict):
-                nm = _unwrap(node.get("$name")) or _unwrap(node.get("name"))
-                if nm:
-                    names.append(str(nm))
+                if node_name(node) == name:
+                    return node
                 for v in node.values():
-                    walk(v)
+                    found = find_section(v, name)
+                    if found is not None:
+                        return found
             elif isinstance(node, list):
                 for x in node:
-                    walk(x)
+                    found = find_section(x, name)
+                    if found is not None:
+                        return found
+            return None
 
-        walk(doc.get("menu") or doc)
-        logger.info("BILLmanager меню клиента (funcs): %s", names[:60] or str(doc)[:400])
+        def collect_names(node: Any, out: List[str]) -> None:
+            if isinstance(node, dict):
+                nm = node_name(node)
+                if nm:
+                    out.append(nm)
+                for v in node.values():
+                    collect_names(v, out)
+            elif isinstance(node, list):
+                for x in node:
+                    collect_names(x, out)
+
+        section = find_section(doc, "mainmenuservice")
+        if section is None:
+            logger.info("BILLmanager: секция mainmenuservice в меню не найдена")
+            return []
+        names: List[str] = []
+        collect_names(section, names)
+        funcs = [n for n in names if n != "mainmenuservice"][:20]
+        logger.info("BILLmanager funcs секции услуг: %s", funcs)
+        return funcs
 
     async def _try_list(self, client, endpoint, func, credentials) -> List[Dict[str, Any]]:
         """Вызвать func со списком услуг; вернуть строки, [] если функция недоступна.

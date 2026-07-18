@@ -133,6 +133,57 @@ class TestBillmanagerAdapter:
         assert result.services[1].price is None
 
     @pytest.mark.asyncio
+    async def test_fetch_discovers_submodule_funcs_via_menu(self):
+        """Реальный кейс Waicore: vds отвечает, но пуст — реальные VPS живут в
+        подмодуле vds.vps, имя которого берём из секции mainmenuservice меню."""
+        from web.backend.core.finance.adapters.billmanager import BillmanagerAdapter
+
+        called = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            func = request.url.params.get("func")
+            called.append(func)
+            if func == "subaccount":
+                return httpx.Response(200, json={"doc": {"elem": [
+                    {"balance": {"$": "0.00"}, "currency": {"$": "rub"}},
+                ]}})
+            if func == "item":
+                return httpx.Response(200, json={"doc": {"error": {
+                    "$type": "missed", "msg": {"$": "Не удалось найти функцию 'item'."},
+                }}})
+            if func == "menu":
+                return httpx.Response(200, json={"doc": {"menu": [
+                    {"$name": "mainmenuservice", "node": [
+                        {"$name": "vds", "node": [
+                            {"$name": "vds.vps"}, {"$name": "vds.vds_isp"},
+                        ]},
+                        {"$name": "dedic"},
+                    ]},
+                    {"$name": "finance", "node": [{"$name": "payment"}]},
+                ]}})
+            if func == "vds.vps":
+                return httpx.Response(200, json={"doc": {"elem": [
+                    {"id": {"$": "42"}, "name": {"$": "waicore-de-1"}, "cost": {"$": "450.00"},
+                     "expiredate": {"$": "2026-08-20"}, "status": {"$": "2"}},
+                ]}})
+            # vds/dedic/... отвечают без ошибки, но без elem (как на Waicore)
+            return httpx.Response(200, json={"doc": {"p_cnt": {"$": "0"}}})
+
+        adapter = BillmanagerAdapter()
+        with patch("httpx.AsyncClient", _patched_client(handler)):
+            result = await adapter.fetch("https://my.waicore.com", {"username": "u", "password": "p"})
+
+        assert "menu" in called and "vds.vps" in called
+        assert len(result.services) == 1
+        svc = result.services[0]
+        assert svc.name == "waicore-de-1"
+        assert svc.price == 450.0
+        assert svc.next_due_at == "2026-08-20"
+        assert svc.external_id == "42"
+        # funcs из меню, недоступные как списки (payment не пробуем — вне секции услуг)
+        assert "payment" not in called
+
+    @pytest.mark.asyncio
     async def test_fetch_balance_survives_all_services_missing(self):
         """Если ни одной функции услуг нет — баланс всё равно возвращается, services=[]"""
         from web.backend.core.finance.adapters.billmanager import BillmanagerAdapter
