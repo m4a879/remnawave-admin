@@ -26,15 +26,23 @@ export interface ChartSeries {
 }
 
 interface InteractiveChartProps {
-  data: Record<string, unknown>[]
+  data: Record<string, any>[]
   xKey: string
   series: ChartSeries[]
   height?: number
   defaultType?: ChartType
   allowedTypes?: ChartType[]
   yFormatter?: (v: number) => string
+  /** форматтер подписей оси X (напр. ISO-дата -> dd.mm) */
+  xFormatter?: (v: string) => string
   tooltip?: ReactElement
+  /** форматтер значений в дефолтном тултипе (если tooltip-элемент не задан) */
+  tooltipFormatter?: (value: number, name: string) => [React.ReactNode, React.ReactNode] | React.ReactNode
+  /** форматтер имени серии в легенде */
+  legendFormatter?: (name: string) => string
   brush?: boolean
+  /** стек серий (area/bar) — для «трафик по нодам» и т.п. */
+  stacked?: boolean
   exportName?: string
   className?: string
   /** ключ с «сырым» значением X (напр. ISO-дата) — для onRangeSelect/перезапроса */
@@ -49,7 +57,7 @@ const TYPE_ICONS: Record<ChartType, typeof Activity> = {
   bar: BarChart3,
 }
 
-function toCsv(rows: Record<string, unknown>[], xKey: string, series: ChartSeries[]): string {
+function toCsv(rows: Record<string, any>[], xKey: string, series: ChartSeries[]): string {
   const cols = [xKey, ...series.map((s) => s.key)]
   const header = [xKey, ...series.map((s) => s.name)].join(',')
   const escape = (v: unknown) => {
@@ -62,8 +70,8 @@ function toCsv(rows: Record<string, unknown>[], xKey: string, series: ChartSerie
 
 export function InteractiveChart({
   data, xKey, series, height = 260, defaultType = 'area',
-  allowedTypes = ['area', 'line', 'bar'], yFormatter, tooltip, brush, exportName, className,
-  rawKey, onRangeSelect,
+  allowedTypes = ['area', 'line', 'bar'], yFormatter, xFormatter, tooltip, tooltipFormatter, legendFormatter,
+  brush, stacked, exportName, className, rawKey, onRangeSelect,
 }: InteractiveChartProps) {
   const chart = useChartTheme()
   const { t } = useTranslation()
@@ -117,9 +125,10 @@ export function InteractiveChart({
 
   const renderSeries = useMemo(() => series.map((s, i) => {
     const color = colorOf(s, i)
+    const stackId = stacked ? 'stack' : undefined
     if (type === 'bar') {
-      return <Bar key={s.key} dataKey={s.key} name={s.name} fill={color} radius={[3, 3, 0, 0]}
-        fillOpacity={s.dashed ? 0.4 : 0.85} />
+      return <Bar key={s.key} dataKey={s.key} name={s.name} fill={color} stackId={stackId}
+        radius={stacked ? undefined : [3, 3, 0, 0]} fillOpacity={s.dashed ? 0.4 : 0.85} />
     }
     if (type === 'line') {
       return <Line key={s.key} type="monotone" dataKey={s.key} name={s.name} stroke={color}
@@ -127,12 +136,12 @@ export function InteractiveChart({
         dot={false} activeDot={{ r: 4, fill: color }} />
     }
     // area
-    return <Area key={s.key} type="monotone" dataKey={s.key} name={s.name} stroke={color}
+    return <Area key={s.key} type="monotone" dataKey={s.key} name={s.name} stroke={color} stackId={stackId}
       strokeWidth={s.dashed ? 1.5 : 2} strokeDasharray={s.dashed ? '5 5' : undefined}
       fill={s.dashed ? 'none' : `url(#${gradId.current}-${i})`} dot={false}
       activeDot={{ r: 4, fill: color }} />
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }), [series, type, chart.accentColor])
+  }), [series, type, stacked, chart.accentColor])
 
   return (
     <div className={className}>
@@ -181,15 +190,17 @@ export function InteractiveChart({
               ))}
             </defs>
             <CartesianGrid strokeDasharray="3 3" stroke={chart.grid} vertical={false} />
-            <XAxis dataKey={xKey} tick={{ fill: chart.tick, fontSize: 11 }} axisLine={false} tickLine={false} />
+            <XAxis dataKey={xKey} tick={{ fill: chart.tick, fontSize: 11 }} axisLine={false} tickLine={false}
+              tickFormatter={xFormatter ? (v: string) => xFormatter(v) : undefined} />
             <YAxis tick={{ fill: chart.tick, fontSize: 11 }} axisLine={false} tickLine={false} width={50}
               tickFormatter={yFormatter ? (v: number) => yFormatter(v) : undefined} />
             <RechartsTooltip
               content={tooltip}
               contentStyle={tooltip ? undefined : chart.tooltipStyle}
+              formatter={tooltip ? undefined : (tooltipFormatter as never)}
               cursor={{ stroke: `${chart.accentColor}4D` }}
             />
-            {series.length > 1 && <Legend wrapperStyle={{ fontSize: 11 }} />}
+            {series.length > 1 && <Legend wrapperStyle={{ fontSize: 11 }} formatter={legendFormatter} />}
             {renderSeries}
             {/* подсветка протягиваемого интервала */}
             {dragA && dragB && dragA !== dragB && (

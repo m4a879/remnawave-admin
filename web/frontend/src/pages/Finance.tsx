@@ -28,9 +28,9 @@ import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import {
-  AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip,
-  ResponsiveContainer, PieChart, Pie, Cell, Legend, LineChart, Line,
+  Tooltip as RechartsTooltip, ResponsiveContainer, PieChart, Pie, Cell,
 } from 'recharts'
+import { InteractiveChart } from '@/components/charts/InteractiveChart'
 import { financeApi, FinanceItem, ItemPayload, FinanceProvider, FinanceAccount, FinanceService, AccountTestResult } from '../api/finance'
 import client from '../api/client'
 import { Button } from '@/components/ui/button'
@@ -238,19 +238,17 @@ function OverviewTab() {
               })}
             </div>
             {balanceTrend.rows.length > 1 && (
-              <ResponsiveContainer width="100%" height={180}>
-                <LineChart data={balanceTrend.rows}>
-                  <CartesianGrid strokeDasharray="3 3" stroke={chart.grid} />
-                  <XAxis dataKey="date" stroke={chart.axis} fontSize={11} />
-                  <YAxis stroke={chart.axis} fontSize={11} width={48} />
-                  <RechartsTooltip contentStyle={chart.tooltipStyle} />
-                  <Legend />
-                  {balanceTrend.providers.map((p, i) => (
-                    <Line key={p} type="monotone" dataKey={p} stroke={PIE_COLORS[i % PIE_COLORS.length]}
-                      strokeWidth={2} dot={false} connectNulls />
-                  ))}
-                </LineChart>
-              </ResponsiveContainer>
+              <InteractiveChart
+                data={balanceTrend.rows}
+                xKey="date"
+                height={180}
+                defaultType="line"
+                exportName="hoster-balances"
+                tooltipFormatter={(v, n) => [fmtMoney(Number(v) || 0, base), n]}
+                series={balanceTrend.providers.map((p, i) => ({
+                  key: p, name: p, color: PIE_COLORS[i % PIE_COLORS.length],
+                }))}
+              />
             )}
           </CardContent>
         </Card>
@@ -314,30 +312,18 @@ function OverviewTab() {
                 {t('finance.noPayments')}
               </div>
             ) : (
-              <ResponsiveContainer width="100%" height={240}>
-                <AreaChart data={monthlyChart}>
-                  <defs>
-                    <linearGradient id="finExp" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stopColor="#ef4444" stopOpacity={0.3} />
-                      <stop offset="100%" stopColor="#ef4444" stopOpacity={0.02} />
-                    </linearGradient>
-                    <linearGradient id="finInc" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stopColor="#10b981" stopOpacity={0.3} />
-                      <stop offset="100%" stopColor="#10b981" stopOpacity={0.02} />
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid strokeDasharray="3 3" stroke={chart.grid} />
-                  <XAxis dataKey="label" stroke={chart.axis} fontSize={11} />
-                  <YAxis stroke={chart.axis} fontSize={11} width={48} />
-                  <RechartsTooltip
-                    contentStyle={chart.tooltipStyle}
-                    formatter={(v, n) => [fmtMoney(Number(v) || 0, base), t(`finance.${n}`)]}
-                  />
-                  <Legend formatter={(v) => t(`finance.${v}`)} />
-                  <Area type="monotone" dataKey="expense" stroke="#ef4444" fill="url(#finExp)" strokeWidth={2} />
-                  <Area type="monotone" dataKey="income" stroke="#10b981" fill="url(#finInc)" strokeWidth={2} />
-                </AreaChart>
-              </ResponsiveContainer>
+              <InteractiveChart
+                data={monthlyChart}
+                xKey="label"
+                height={240}
+                exportName="pl-by-month"
+                tooltipFormatter={(v, n) => [fmtMoney(Number(v) || 0, base), t(`finance.${n}`)]}
+                legendFormatter={(v) => t(`finance.${v}`)}
+                series={[
+                  { key: 'expense', name: 'expense', color: '#ef4444' },
+                  { key: 'income', name: 'income', color: '#10b981' },
+                ]}
+              />
             )}
           </CardContent>
         </Card>

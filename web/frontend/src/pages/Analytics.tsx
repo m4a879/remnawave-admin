@@ -28,19 +28,11 @@ import {
   Download,
 } from '@/components/brand/icons'
 import {
-  AreaChart,
-  Area,
-  LineChart,
-  Line,
-  XAxis,
-  YAxis,
-  CartesianGrid,
   Tooltip as RechartsTooltip,
   ResponsiveContainer,
   PieChart,
   Pie,
   Cell,
-  Legend,
 } from 'recharts'
 import { toast } from 'sonner'
 import client from '@/api/client'
@@ -788,7 +780,6 @@ const UsageBar = memo(function UsageBar({ percent }: { percent: number }) {
 
 function OnlineTrendCard() {
   const { t } = useTranslation()
-  const chart = useChartTheme()
   const [period, setPeriod] = useUrlParam('online_period', '24h')
   const [aggRaw, setAgg] = useUrlParam('online_agg', 'avg')
   const aggregation = aggRaw === 'max' ? 'max' : 'avg'
@@ -921,46 +912,18 @@ function OnlineTrendCard() {
                 <span className="text-white font-mono ml-1">{chartData.length}</span>
               </span>
             </div>
-            <ResponsiveContainer width="100%" height={240}>
-              <AreaChart data={chartData}>
-                <defs>
-                  <linearGradient id="onlineGrad" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor={chart.accentColor} stopOpacity={0.35} />
-                    <stop offset="100%" stopColor={chart.accentColor} stopOpacity={0.02} />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid strokeDasharray="3 3" stroke={chart.grid} vertical={false} />
-                <XAxis
-                  dataKey="label"
-                  stroke={chart.axis}
-                  fontSize={10}
-                  tickLine={false}
-                  axisLine={false}
-                  interval="preserveStartEnd"
-                  minTickGap={20}
-                />
-                <YAxis
-                  stroke={chart.axis}
-                  fontSize={10}
-                  tickLine={false}
-                  axisLine={false}
-                  allowDecimals={false}
-                />
-                <RechartsTooltip contentStyle={chart.tooltipStyle} />
-                <Area
-                  type="monotone"
-                  dataKey="value"
-                  stroke={chart.accentColor}
-                  strokeWidth={2}
-                  fill="url(#onlineGrad)"
-                  dot={false}
-                  activeDot={{ r: 4, fill: chart.accentColor }}
-                  name={aggregation === 'max'
-                    ? t('analytics.onlineTrend.max', { defaultValue: 'Максимум' })
-                    : t('analytics.onlineTrend.avg', { defaultValue: 'Средний' })}
-                />
-              </AreaChart>
-            </ResponsiveContainer>
+            <InteractiveChart
+              data={chartData}
+              xKey="label"
+              height={240}
+              exportName={`online-trend-${period}`}
+              series={[{
+                key: 'value',
+                name: aggregation === 'max'
+                  ? t('analytics.onlineTrend.max', { defaultValue: 'Максимум' })
+                  : t('analytics.onlineTrend.avg', { defaultValue: 'Средний' }),
+              }]}
+            />
           </>
         )}
       </CardContent>
@@ -1939,7 +1902,6 @@ const METRIC_COLORS = { cpu: '#ef4444', memory: '#f59e0b', disk: '#3b82f6' }
 
 function NodeMetricsHistoryCard() {
   const { t } = useTranslation()
-  const chart = useChartTheme()
   const [period, setPeriod] = useState('24h')
 
   const { data, isLoading, isError, refetch } = useQuery({
@@ -2019,34 +1981,20 @@ function NodeMetricsHistoryCard() {
           <div className="space-y-4">
             {/* Overview chart */}
             {chartData.length > 1 && (
-              <div className="h-48">
-                <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={chartData}>
-                    <CartesianGrid strokeDasharray="3 3" stroke={chart.grid} vertical={false} />
-                    <XAxis dataKey="time" stroke={chart.axis} fontSize={10} tickLine={false} />
-                    <YAxis
-                      stroke={chart.axis}
-                      fontSize={10}
-                      tickLine={false}
-                      axisLine={false}
-                      domain={[0, 100]}
-                      tickFormatter={(v: number) => `${v}%`}
-                    />
-                    <RechartsTooltip
-                      contentStyle={chart.tooltipStyle}
-                      formatter={(value) => [`${value}%`]}
-                    />
-                    <Line type="monotone" dataKey="cpu" name="CPU" stroke={METRIC_COLORS.cpu} strokeWidth={2} dot={false} />
-                    <Line type="monotone" dataKey="memory" name="RAM" stroke={METRIC_COLORS.memory} strokeWidth={2} dot={false} />
-                    <Line type="monotone" dataKey="disk" name="Disk" stroke={METRIC_COLORS.disk} strokeWidth={2} dot={false} />
-                    <Legend
-                      verticalAlign="top"
-                      height={28}
-                      formatter={(value: string) => <span className="text-xs text-muted-foreground">{value}</span>}
-                    />
-                  </LineChart>
-                </ResponsiveContainer>
-              </div>
+              <InteractiveChart
+                data={chartData}
+                xKey="time"
+                height={192}
+                defaultType="line"
+                exportName="node-metrics"
+                yFormatter={(v) => `${v}%`}
+                tooltipFormatter={(v, n) => [`${v}%`, n]}
+                series={[
+                  { key: 'cpu', name: 'CPU', color: METRIC_COLORS.cpu },
+                  { key: 'memory', name: 'RAM', color: METRIC_COLORS.memory },
+                  { key: 'disk', name: 'Disk', color: METRIC_COLORS.disk },
+                ]}
+              />
             )}
 
             {/* Per-node table */}
@@ -2265,7 +2213,6 @@ function RetentionCard() {
 
 function ChurnCard() {
   const { t } = useTranslation()
-  const chartTheme = useChartTheme()
   const [period, setPeriod] = useState('month')
   const [months, setMonths] = useState('6')
 
@@ -2341,18 +2288,17 @@ function ChurnCard() {
         ) : (
           <>
             {/* Chart */}
-            <ResponsiveContainer width="100%" height={260}>
-              <AreaChart data={series}>
-                <CartesianGrid strokeDasharray="3 3" stroke={chartTheme.grid} />
-                <XAxis dataKey="period" tick={{ fill: chartTheme.tick, fontSize: 11 }} />
-                <YAxis tick={{ fill: chartTheme.tick, fontSize: 11 }} />
-                <RechartsTooltip contentStyle={chartTheme.tooltipStyle} />
-                <Area type="monotone" dataKey="active_users" stroke="#06b6d4" fill="#06b6d4" fillOpacity={0.15} name="Active" />
-                <Area type="monotone" dataKey="churned_users" stroke="#ef4444" fill="#ef4444" fillOpacity={0.2} name="Churned" />
-                <Area type="monotone" dataKey="new_users" stroke="#10b981" fill="#10b981" fillOpacity={0.1} name="New" />
-                <Legend />
-              </AreaChart>
-            </ResponsiveContainer>
+            <InteractiveChart
+              data={series}
+              xKey="period"
+              height={260}
+              exportName="churn-retention"
+              series={[
+                { key: 'active_users', name: 'Active', color: '#06b6d4' },
+                { key: 'new_users', name: 'New', color: '#10b981' },
+                { key: 'churned_users', name: 'Churned', color: '#ef4444' },
+              ]}
+            />
 
             {/* Table */}
             <div className="overflow-x-auto mt-4">
@@ -2637,7 +2583,6 @@ function GeoBalanceCard() {
 function TorrentAnalyticsCard() {
   const { t } = useTranslation()
   const openUser = useOpenUser()
-  const chart = useChartTheme()
   const [days, setDays] = useState('7')
 
   const { data, isLoading, isError, refetch } = useQuery({
@@ -2705,18 +2650,16 @@ function TorrentAnalyticsCard() {
 
             {/* Timeline chart */}
             {chartData.length > 1 && (
-              <div className="h-48">
-                <ResponsiveContainer width="100%" height="100%">
-                  <AreaChart data={chartData}>
-                    <CartesianGrid strokeDasharray="3 3" stroke={chart.grid} vertical={false} />
-                    <XAxis dataKey="date" stroke={chart.axis} fontSize={10} tickLine={false} />
-                    <YAxis stroke={chart.axis} fontSize={10} tickLine={false} axisLine={false} />
-                    <RechartsTooltip contentStyle={chart.tooltipStyle} />
-                    <Area type="monotone" dataKey="events" name={t('analytics.torrent.events', { defaultValue: 'Events' })} stroke="#ef4444" fill="#ef444420" strokeWidth={2} />
-                    <Area type="monotone" dataKey="users" name={t('analytics.torrent.users', { defaultValue: 'Users' })} stroke="#f97316" fill="#f9731620" strokeWidth={2} />
-                  </AreaChart>
-                </ResponsiveContainer>
-              </div>
+              <InteractiveChart
+                data={chartData}
+                xKey="date"
+                height={192}
+                exportName="torrent-timeline"
+                series={[
+                  { key: 'events', name: t('analytics.torrent.events', { defaultValue: 'Events' }), color: '#ef4444' },
+                  { key: 'users', name: t('analytics.torrent.users', { defaultValue: 'Users' }), color: '#f97316' },
+                ]}
+              />
             )}
 
             {/* Top destinations + Top users side by side */}

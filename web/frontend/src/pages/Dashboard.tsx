@@ -51,11 +51,8 @@ import {
   Tooltip as RechartsTooltip,
   ResponsiveContainer,
   Cell,
-  LineChart,
-  Line,
-  AreaChart,
-  Area,
 } from 'recharts'
+import { InteractiveChart } from '@/components/charts/InteractiveChart'
 import client from '../api/client'
 import { financeApi } from '../api/finance'
 import { auditApi, type AuditLogEntry } from '../api/audit'
@@ -573,7 +570,6 @@ function GrowthTrendsCard({
   onMetricChange: (m: string) => void
 }) {
   const { t } = useTranslation()
-  const chart = useChartTheme()
   const formatBytesLocal = createFormatBytes(t)
 
   const metricOptions = [
@@ -607,33 +603,16 @@ function GrowthTrendsCard({
               <span className="text-xs text-muted-foreground">{t('dashboard.totalGrowth')}:</span>
               <span className="text-sm font-semibold text-primary-400">{formatValue(trends.total_growth)}</span>
             </div>
-            <ResponsiveContainer width="100%" height={180}>
-              <AreaChart data={trends.series}>
-                <defs>
-                  <linearGradient id="trendGrad" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor={chart.accentColor} stopOpacity={0.35} />
-                    <stop offset="100%" stopColor={chart.accentColor} stopOpacity={0.02} />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid strokeDasharray="3 3" stroke={chart.grid} vertical={false} />
-                <XAxis dataKey="date" stroke={chart.axis} fontSize={10} tickLine={false} axisLine={false} tickFormatter={(d) => { const p = d.split('-'); return `${p[2]}.${p[1]}` }} />
-                <YAxis stroke={chart.axis} fontSize={10} tickLine={false} axisLine={false} tickFormatter={(v) => metric === 'traffic' ? createFormatBytesShort(t)(v) : v} />
-                <RechartsTooltip content={(props: any) => {
-                  if (!props.active || !props.payload?.length) return null
-                  return (
-                    <div style={chart.tooltipStyle} className="px-3 py-2.5 rounded-xl shadow-xl">
-                      <p className={cn("text-[10px] uppercase tracking-wider mb-1", chart.tooltipMutedClass)}>{props.label}</p>
-                      {props.payload.map((entry: any, i: number) => (
-                        <p key={i} className="text-xs font-medium" style={{ color: entry.color }}>
-                          {entry.name}: {formatValue(entry.value)}
-                        </p>
-                      ))}
-                    </div>
-                  )
-                }} />
-                <Area type="monotone" dataKey="value" name={metricOptions.find((o) => o.value === metric)?.label || metric} stroke={chart.accentColor} fill="url(#trendGrad)" strokeWidth={1.5} />
-              </AreaChart>
-            </ResponsiveContainer>
+            <InteractiveChart
+              data={trends.series}
+              xKey="date"
+              height={180}
+              exportName={`dashboard-trend-${metric}`}
+              xFormatter={(d) => { const p = d.split('-'); return `${p[2]}.${p[1]}` }}
+              yFormatter={(v) => (metric === 'traffic' ? createFormatBytesShort(t)(v) : String(v))}
+              tooltipFormatter={(v) => formatValue(v as number)}
+              series={[{ key: 'value', name: metricOptions.find((o) => o.value === metric)?.label || metric }]}
+            />
           </>
         ) : (
           <div className="h-[180px] flex items-center justify-center">
@@ -2281,41 +2260,32 @@ export default function Dashboard() {
               {timeseriesLoading ? (
                 <ChartSkeleton />
               ) : trafficChartData.length > 0 ? (
-                <ResponsiveContainer width="100%" height={240}>
-                  {nodeUuids.length > 0 && nodeTrafficChartData.length > 0 ? (
-                    <AreaChart data={nodeTrafficChartData}>
-                      <defs>
-                        {nodeUuids.map((uid, i) => (
-                          <linearGradient key={uid} id={`grad-${i}`} x1="0" y1="0" x2="0" y2="1">
-                            <stop offset="0%" stopColor={chart.nodeColors[i % chart.nodeColors.length]} stopOpacity={0.35} />
-                            <stop offset="100%" stopColor={chart.nodeColors[i % chart.nodeColors.length]} stopOpacity={0.02} />
-                          </linearGradient>
-                        ))}
-                      </defs>
-                      <CartesianGrid strokeDasharray="3 3" stroke={chart.grid} vertical={false} />
-                      <XAxis dataKey="name" stroke={chart.axis} fontSize={10} tickLine={false} axisLine={false} />
-                      <YAxis stroke={chart.axis} fontSize={10} tickFormatter={(v) => formatBytesShort(v)} tickLine={false} axisLine={false} />
-                      <RechartsTooltip content={<TrafficChartTooltip />} />
-                      {nodeUuids.map((uid, i) => (
-                        <Area key={uid} type="monotone" dataKey={uid} name={nodeNames[uid] || uid.substring(0, 8)} stackId="traffic" stroke={chart.nodeColors[i % chart.nodeColors.length]} fill={`url(#grad-${i})`} strokeWidth={1.5} />
-                      ))}
-                    </AreaChart>
-                  ) : (
-                    <LineChart data={trafficChartData}>
-                      <defs>
-                        <linearGradient id="trafficGrad" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="0%" stopColor={chart.accentColor} stopOpacity={0.35} />
-                          <stop offset="100%" stopColor={chart.accentColor} stopOpacity={0.02} />
-                        </linearGradient>
-                      </defs>
-                      <CartesianGrid strokeDasharray="3 3" stroke={chart.grid} vertical={false} />
-                      <XAxis dataKey="name" stroke={chart.axis} fontSize={10} tickLine={false} axisLine={false} />
-                      <YAxis stroke={chart.axis} fontSize={10} tickFormatter={(v) => formatBytesShort(v)} tickLine={false} axisLine={false} />
-                      <RechartsTooltip content={<TrafficChartTooltip />} />
-                      <Line type="monotone" dataKey="value" name={t('dashboard.traffic')} stroke={chart.accentColor} strokeWidth={2} dot={false} activeDot={{ r: 5, fill: chart.accentColor, stroke: 'rgba(255,255,255,0.3)', strokeWidth: 2 }} />
-                    </LineChart>
-                  )}
-                </ResponsiveContainer>
+                nodeUuids.length > 0 && nodeTrafficChartData.length > 0 ? (
+                  <InteractiveChart
+                    data={nodeTrafficChartData}
+                    xKey="name"
+                    height={240}
+                    stacked
+                    exportName="dashboard-node-traffic"
+                    yFormatter={(v) => formatBytesShort(v)}
+                    tooltip={<TrafficChartTooltip />}
+                    series={nodeUuids.map((uid, i) => ({
+                      key: uid, name: nodeNames[uid] || uid.substring(0, 8),
+                      color: chart.nodeColors[i % chart.nodeColors.length],
+                    }))}
+                  />
+                ) : (
+                  <InteractiveChart
+                    data={trafficChartData}
+                    xKey="name"
+                    height={240}
+                    defaultType="line"
+                    exportName="dashboard-traffic"
+                    yFormatter={(v) => formatBytesShort(v)}
+                    tooltip={<TrafficChartTooltip />}
+                    series={[{ key: 'value', name: t('dashboard.traffic') }]}
+                  />
+                )
               ) : (
                 <div className="h-60 flex items-center justify-center">
                   <span className="text-muted-foreground text-sm">{t('dashboard.noDataForPeriod')}</span>
