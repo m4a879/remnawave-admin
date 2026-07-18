@@ -40,14 +40,14 @@ class TestMigrationFiles:
     def test_migration_files_have_revision(self):
         """Each migration should define revision and down_revision."""
         for f in self._get_migration_files():
-            content = f.read_text()
+            content = f.read_text(encoding="utf-8")
             assert "revision" in content, f"{f.name} missing 'revision'"
             assert "down_revision" in content, f"{f.name} missing 'down_revision'"
 
     def test_migration_files_have_upgrade_downgrade(self):
         """Each migration should define upgrade() and downgrade() functions."""
         for f in self._get_migration_files():
-            content = f.read_text()
+            content = f.read_text(encoding="utf-8")
             assert "def upgrade()" in content, f"{f.name} missing upgrade()"
             assert "def downgrade()" in content, f"{f.name} missing downgrade()"
 
@@ -72,7 +72,7 @@ class TestMigrationFiles:
         down_revisions = {}  # revision_id -> down_revision_id (None for root)
 
         for f in files:
-            content = f.read_text()
+            content = f.read_text(encoding="utf-8")
             rev_match = revision_pattern.search(content)
             down_match = down_rev_pattern.search(content)
             if rev_match and down_match:
