@@ -32,6 +32,7 @@ import { QueryError } from '@/components/QueryError'
 import { useHasPermission } from '@/components/PermissionGate'
 import { cn } from '@/lib/utils'
 import { useFormatters } from '@/lib/useFormatters'
+import { b64DecodeUtf8, b64EncodeUtf8 } from '@/lib/base64'
 
 // Template type options
 const TEMPLATE_TYPES = [
@@ -131,7 +132,8 @@ export default function Resources({ embedded }: { embedded?: boolean } = {}) {
   const [editTemplateDialogOpen, setEditTemplateDialogOpen] = useState(false)
   const [templateFormData, setTemplateFormData] = useState({ name: '', templateType: 'XRAY_JSON' })
   const [editingTemplate, setEditingTemplate] = useState<Template | null>(null)
-  const [editTemplateForm, setEditTemplateForm] = useState({ name: '', templateJson: '' })
+  // isYaml: MIHOMO/CLASH/STASH хранят YAML (encodedTemplateYaml, base64), не JSON
+  const [editTemplateForm, setEditTemplateForm] = useState({ name: '', templateJson: '', isYaml: false })
   const [deleteTemplateConfirm, setDeleteTemplateConfirm] = useState<string | null>(null)
 
   const { data: templates = [], isLoading: templatesLoading, isError: isTemplatesError, refetch: refetchTemplates } = useQuery({
@@ -154,8 +156,10 @@ export default function Resources({ embedded }: { embedded?: boolean } = {}) {
   })
 
   const updateTemplateMutation = useMutation({
-    mutationFn: (data: { uuid: string; name?: string; templateJson?: Record<string, unknown> }) =>
-      resourcesApi.updateTemplate(data.uuid, { name: data.name, templateJson: data.templateJson }),
+    mutationFn: (data: { uuid: string; name?: string; templateJson?: Record<string, unknown>; encodedTemplateYaml?: string }) =>
+      resourcesApi.updateTemplate(data.uuid, {
+        name: data.name, templateJson: data.templateJson, encodedTemplateYaml: data.encodedTemplateYaml,
+      }),
     onSuccess: () => {
       setEditTemplateDialogOpen(false)
       setEditingTemplate(null)
@@ -181,15 +185,27 @@ export default function Resources({ embedded }: { embedded?: boolean } = {}) {
 
   const openEditTemplate = (template: Template) => {
     setEditingTemplate(template)
+    const isYaml = !!template.encodedTemplateYaml
     setEditTemplateForm({
       name: template.name,
-      templateJson: JSON.stringify(template.templateJson, null, 2),
+      templateJson: isYaml
+        ? b64DecodeUtf8(template.encodedTemplateYaml!)
+        : JSON.stringify(template.templateJson, null, 2),
+      isYaml,
     })
     setEditTemplateDialogOpen(true)
   }
 
   const handleUpdateTemplate = () => {
     if (!editingTemplate) return
+    if (editTemplateForm.isYaml) {
+      updateTemplateMutation.mutate({
+        uuid: editingTemplate.uuid,
+        name: editTemplateForm.name,
+        encodedTemplateYaml: b64EncodeUtf8(editTemplateForm.templateJson),
+      })
+      return
+    }
     try {
       const json = JSON.parse(editTemplateForm.templateJson)
       updateTemplateMutation.mutate({
@@ -286,10 +302,51 @@ export default function Resources({ embedded }: { embedded?: boolean } = {}) {
   // ── Config Profiles ─────────────────────────────────────────────
   // встроенный редактор профиля (исходник + вычисленный, история версий)
   const [editingProfile, setEditingProfile] = useState<ConfigProfile | null>(null)
+  const [createProfileOpen, setCreateProfileOpen] = useState(false)
+  const [newProfileName, setNewProfileName] = useState('')
+  const [renameProfile, setRenameProfile] = useState<{ uuid: string; name: string } | null>(null)
+  const [deleteProfileConfirm, setDeleteProfileConfirm] = useState<ConfigProfile | null>(null)
 
   const { data: configProfiles = [], isLoading: profilesLoading, isError: isProfilesError, refetch: refetchProfiles } = useQuery({
     queryKey: ['config-profiles'],
     queryFn: resourcesApi.getConfigProfiles,
+  })
+
+  const createProfileMutation = useMutation({
+    mutationFn: (name: string) => resourcesApi.createConfigProfile(name),
+    onSuccess: (created) => {
+      queryClient.invalidateQueries({ queryKey: ['config-profiles'] })
+      setCreateProfileOpen(false)
+      setNewProfileName('')
+      toast.success(t('resources.profiles.created'))
+      // сразу в редактор — заполнять конфиг
+      if (created?.uuid) setEditingProfile(created)
+    },
+    onError: (e: { response?: { data?: { detail?: string } } }) =>
+      toast.error(e.response?.data?.detail || t('common.error')),
+  })
+
+  const renameProfileMutation = useMutation({
+    mutationFn: (p: { uuid: string; name: string }) => resourcesApi.renameConfigProfile(p.uuid, p.name),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['config-profiles'] })
+      setRenameProfile(null)
+      toast.success(t('common.saved'))
+    },
+    onError: (e: { response?: { data?: { detail?: string } } }) =>
+      toast.error(e.response?.data?.detail || t('common.saveError')),
+  })
+
+  const deleteProfileMutation = useMutation({
+    mutationFn: (uuid: string) => resourcesApi.deleteConfigProfile(uuid),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['config-profiles'] })
+      setDeleteProfileConfirm(null)
+      toast.success(t('common.deleted'))
+    },
+    // панель откажет, если профиль привязан к нодам — показываем причину
+    onError: (e: { response?: { data?: { detail?: string } } }) =>
+      toast.error(e.response?.data?.detail || t('common.error')),
   })
 
   const hasError = isTokensError || isTemplatesError || isSnippetsError || isProfilesError
@@ -582,9 +639,16 @@ export default function Resources({ embedded }: { embedded?: boolean } = {}) {
         <TabsContent value="profiles" className="space-y-4">
           <div className="flex items-center justify-between">
             <p className="text-sm text-dark-200">{t('resources.profiles.description')}</p>
-            <Button variant="outline" size="sm" onClick={() => refetchProfiles()}>
-              <RefreshCw className="w-4 h-4" />
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button variant="outline" size="sm" onClick={() => refetchProfiles()} aria-label={t('common.refresh')}>
+                <RefreshCw className="w-4 h-4" />
+              </Button>
+              {canCreate && (
+                <Button size="sm" className="gap-1.5" onClick={() => setCreateProfileOpen(true)}>
+                  <Plus className="w-4 h-4" /> {t('resources.profiles.create')}
+                </Button>
+              )}
+            </div>
           </div>
 
           {profilesLoading ? (
@@ -612,19 +676,31 @@ export default function Resources({ embedded }: { embedded?: boolean } = {}) {
                     <div className="space-y-3">
                       <div className="flex items-start justify-between gap-2">
                         <h3 className="font-medium text-white">{profile.name}</h3>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="h-7 px-2 text-xs shrink-0 text-dark-200 hover:text-white"
-                          title={t('resources.profiles.openInEditor')}
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            setEditingProfile(profile)
-                          }}
-                        >
-                          <FileJson className="w-3.5 h-3.5 mr-1" />
-                          {t('resources.profiles.openInEditor')}
-                        </Button>
+                        <div className="flex items-center shrink-0" onClick={(e) => e.stopPropagation()}>
+                          <Button
+                            variant="ghost" size="sm"
+                            className="h-7 px-2 text-xs text-dark-200 hover:text-white"
+                            title={t('resources.profiles.openInEditor')}
+                            onClick={() => setEditingProfile(profile)}
+                          >
+                            <FileJson className="w-3.5 h-3.5 mr-1" />
+                            {t('resources.profiles.openInEditor')}
+                          </Button>
+                          {canUpdate && (
+                            <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-dark-200 hover:text-white"
+                              title={t('resources.profiles.rename')} aria-label={t('resources.profiles.rename')}
+                              onClick={() => setRenameProfile({ uuid: profile.uuid, name: profile.name })}>
+                              <Settings className="w-3.5 h-3.5" />
+                            </Button>
+                          )}
+                          {canDelete && (
+                            <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-red-400 hover:text-red-300"
+                              title={t('common.delete')} aria-label={t('common.delete')}
+                              onClick={() => setDeleteProfileConfirm(profile)}>
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </Button>
+                          )}
+                        </div>
                       </div>
                       <div className="text-xs text-dark-300 space-y-1">
                         <div>{t('resources.uuid')} {profile.uuid.slice(0, 8)}...</div>
@@ -644,6 +720,63 @@ export default function Resources({ embedded }: { embedded?: boolean } = {}) {
 
       {/* Встроенный редактор профиля xray */}
       <ProfileEditorDialog profile={editingProfile} onClose={() => setEditingProfile(null)} />
+
+      {/* Создание профиля */}
+      <Dialog open={createProfileOpen} onOpenChange={setCreateProfileOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>{t('resources.profiles.createTitle')}</DialogTitle>
+            <DialogDescription>{t('resources.profiles.createDescription')}</DialogDescription>
+          </DialogHeader>
+          <div>
+            <Label htmlFor="newProfileName">{t('resources.profiles.nameLabel')}</Label>
+            <Input id="newProfileName" value={newProfileName} className="mt-1"
+              placeholder="Germany-Reality" maxLength={30}
+              onChange={(e) => setNewProfileName(e.target.value)} />
+            <p className="text-[11px] text-dark-300 mt-1">{t('resources.profiles.nameHint')}</p>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setCreateProfileOpen(false)}>{t('common.cancel')}</Button>
+            <Button
+              disabled={newProfileName.trim().length < 2 || !/^[A-Za-z0-9_\s-]+$/.test(newProfileName.trim()) || createProfileMutation.isPending}
+              onClick={() => createProfileMutation.mutate(newProfileName.trim())}>
+              {createProfileMutation.isPending ? t('common.creating') : t('common.create')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Переименование профиля */}
+      <Dialog open={renameProfile !== null} onOpenChange={(o) => !o && setRenameProfile(null)}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>{t('resources.profiles.renameTitle')}</DialogTitle>
+          </DialogHeader>
+          <div>
+            <Label htmlFor="renameProfileName">{t('resources.profiles.nameLabel')}</Label>
+            <Input id="renameProfileName" value={renameProfile?.name || ''} className="mt-1" maxLength={30}
+              onChange={(e) => renameProfile && setRenameProfile({ ...renameProfile, name: e.target.value })} />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setRenameProfile(null)}>{t('common.cancel')}</Button>
+            <Button
+              disabled={!renameProfile || renameProfile.name.trim().length < 2 || !/^[A-Za-z0-9_\s-]+$/.test(renameProfile.name.trim()) || renameProfileMutation.isPending}
+              onClick={() => renameProfile && renameProfileMutation.mutate({ uuid: renameProfile.uuid, name: renameProfile.name.trim() })}>
+              {renameProfileMutation.isPending ? t('common.saving') : t('common.save')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Удаление профиля */}
+      <ConfirmDialog
+        open={deleteProfileConfirm !== null}
+        onOpenChange={(open) => !open && setDeleteProfileConfirm(null)}
+        title={t('resources.profiles.deleteTitle', { name: deleteProfileConfirm?.name })}
+        description={t('resources.profiles.deleteDescription')}
+        variant="destructive"
+        onConfirm={() => deleteProfileConfirm && deleteProfileMutation.mutate(deleteProfileConfirm.uuid)}
+      />
 
       {/* Create Token Dialog */}
       <Dialog open={tokenDialogOpen} onOpenChange={setTokenDialogOpen}>
@@ -793,7 +926,7 @@ export default function Resources({ embedded }: { embedded?: boolean } = {}) {
                 <CodeEditor
                   value={editTemplateForm.templateJson}
                   onChange={(v) => setEditTemplateForm({ ...editTemplateForm, templateJson: v })}
-                  schema="json"
+                  schema={editTemplateForm.isYaml ? 'yaml' : 'json'}
                 />
               </div>
             </div>

@@ -21,7 +21,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
-import { Server, History, AlertTriangle, Check, RotateCcw } from '@/components/brand/icons'
+import { Server, History, AlertTriangle, Check, RotateCcw, Key } from '@/components/brand/icons'
 import { cn } from '@/lib/utils'
 
 interface Props {
@@ -43,6 +43,11 @@ export function ProfileEditorDialog({ profile, onClose }: Props) {
   const [errorCount, setErrorCount] = useState(0)
   // «Исходник» — редактируемый конфиг; «Вычисленный» — раскрытый панелью (read-only)
   const [view, setView] = useState<'source' | 'computed'>('source')
+  // предпросмотр версии из истории: дифф с текущим текстом до загрузки
+  const [versionPreview, setVersionPreview] = useState<{ meta: ConfigVersion; content: string } | null>(null)
+  // пара ключей x25519 для Reality (генерит панель)
+  const [keypair, setKeypair] = useState<{ publicKey: string; privateKey: string } | null>(null)
+  const [keysOpen, setKeysOpen] = useState(false)
 
   // конфиг профиля из панели
   const { data: profileData, isLoading } = useQuery({
@@ -128,14 +133,46 @@ export function ProfileEditorDialog({ profile, onClose }: Props) {
     }
   }
 
-  const loadVersion = async (v: ConfigVersion) => {
+  // клик по версии: сначала дифф с текущим, загрузка — осознанным действием
+  const openVersionPreview = async (v: ConfigVersion) => {
     try {
       const full = await resourcesApi.getProfileVersion(v.id)
-      setText(full.content)
-      toast.info(t('resources.editor.versionLoaded', { date: fmtDate(v.created_at) }))
+      setVersionPreview({ meta: v, content: full.content })
     } catch {
       toast.error(t('common.error'))
     }
+  }
+
+  const loadPreviewedVersion = () => {
+    if (!versionPreview) return
+    setText(versionPreview.content)
+    setVersionPreview(null)
+    toast.info(t('resources.editor.versionLoaded', { date: fmtDate(versionPreview.meta.created_at) }))
+  }
+
+  const generateKeys = async () => {
+    try {
+      const data = await resourcesApi.generateX25519()
+      const pair = data.keypairs?.[0]
+      if (!pair) throw new Error('empty')
+      setKeypair(pair)
+      setKeysOpen(true)
+    } catch {
+      toast.error(t('common.error'))
+    }
+  }
+
+  const insertAtCursor = (value: string) => {
+    const cm = cmRef.current
+    if (!cm) return
+    cm.dispatch(cm.state.replaceSelection(value))
+    cm.focus()
+    setKeysOpen(false)
+  }
+
+  const copyText = (value: string) => {
+    navigator.clipboard.writeText(value)
+    toast.success(t('common.copied'))
   }
 
   const saveMut = useMutation({
@@ -275,6 +312,10 @@ export function ProfileEditorDialog({ profile, onClose }: Props) {
               <Button variant="outline" size="sm" onClick={formatJson}>
                 {t('resources.editor.format')}
               </Button>
+              <Button variant="outline" size="sm" className="gap-1.5" onClick={generateKeys}
+                title={t('resources.editor.keysHint')}>
+                <Key className="w-4 h-4" /> {t('resources.editor.keys')}
+              </Button>
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <Button variant="outline" size="sm" className="gap-1.5">
@@ -289,7 +330,7 @@ export function ProfileEditorDialog({ profile, onClose }: Props) {
                   {!versions?.items.length ? (
                     <div className="px-3 py-2 text-xs text-muted-foreground">{t('resources.editor.noVersions')}</div>
                   ) : versions.items.map((v) => (
-                    <DropdownMenuItem key={v.id} onClick={() => loadVersion(v)} className="gap-2">
+                    <DropdownMenuItem key={v.id} onClick={() => openVersionPreview(v)} className="gap-2">
                       <RotateCcw className="w-3.5 h-3.5" />
                       <span className="font-mono text-xs">{fmtDate(v.created_at)}</span>
                       <span className="text-xs text-muted-foreground">{v.created_by || '—'}</span>
@@ -329,6 +370,61 @@ export function ProfileEditorDialog({ profile, onClose }: Props) {
             <Button onClick={() => saveMut.mutate()} disabled={saveMut.isPending}>
               {saveMut.isPending ? t('common.saving') : t('resources.editor.confirmSave')}
             </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* предпросмотр версии из истории: дифф текущий → версия */}
+      <Dialog open={versionPreview !== null} onOpenChange={(o) => !o && setVersionPreview(null)}>
+        <DialogContent className="w-[97vw] max-w-[1400px] h-[88vh] flex flex-col gap-3 p-4 sm:p-5">
+          <DialogHeader className="shrink-0">
+            <DialogTitle className="text-base">
+              {t('resources.editor.versionDiffTitle', {
+                date: fmtDate(versionPreview?.meta.created_at ?? null),
+                author: versionPreview?.meta.created_by || '—',
+              })}
+            </DialogTitle>
+            <p className="text-[11px] text-muted-foreground">{t('resources.editor.versionDiffHint')}</p>
+          </DialogHeader>
+          <div className="flex-1 min-h-0">
+            {versionPreview && <CodeDiff original={text} modified={versionPreview.content} />}
+          </div>
+          <DialogFooter className="shrink-0">
+            <Button variant="outline" onClick={() => setVersionPreview(null)}>{t('common.cancel')}</Button>
+            <Button onClick={loadPreviewedVersion}>
+              <RotateCcw className="w-4 h-4 mr-1.5" /> {t('resources.editor.loadVersion')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* пара ключей x25519 для Reality */}
+      <Dialog open={keysOpen} onOpenChange={setKeysOpen}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="text-base">{t('resources.editor.keysTitle')}</DialogTitle>
+            <p className="text-[11px] text-muted-foreground">{t('resources.editor.keysDialogHint')}</p>
+          </DialogHeader>
+          {keypair && (
+            <div className="space-y-3">
+              {([['privateKey', keypair.privateKey], ['publicKey', keypair.publicKey]] as const).map(([label, value]) => (
+                <div key={label}>
+                  <p className="text-xs text-muted-foreground mb-1">{t(`resources.editor.${label}`)}</p>
+                  <div className="flex items-center gap-2">
+                    <code className="flex-1 min-w-0 truncate text-xs font-mono px-2.5 py-2 rounded-md bg-[var(--glass-bg)] border border-[var(--glass-border)]">{value}</code>
+                    <Button variant="outline" size="sm" onClick={() => copyText(value)}>{t('common.copy')}</Button>
+                    <Button variant="outline" size="sm" onClick={() => insertAtCursor(value)}
+                      title={t('resources.editor.insertAtCursor')}>
+                      {t('resources.editor.insert')}
+                    </Button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={generateKeys}>{t('resources.editor.regenerate')}</Button>
+            <Button onClick={() => setKeysOpen(false)}>{t('common.close')}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

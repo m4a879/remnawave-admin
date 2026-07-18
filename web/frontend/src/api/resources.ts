@@ -13,6 +13,8 @@ export interface Template {
   name: string
   templateType: string // XRAY_JSON, XRAY_BASE64, MIHOMO, STASH, CLASH, SINGBOX
   templateJson: Record<string, unknown> | null
+  // YAML-шаблоны (MIHOMO/CLASH/STASH): base64-строка YAML
+  encodedTemplateYaml?: string | null
   viewPosition: number
   createdAt: string
   updatedAt: string
@@ -61,7 +63,7 @@ export const resourcesApi = {
     const { data } = await client.post('/templates', { name, templateType })
     return data
   },
-  updateTemplate: async (uuid: string, updates: { name?: string; templateJson?: Record<string, unknown> }) => {
+  updateTemplate: async (uuid: string, updates: { name?: string; templateJson?: Record<string, unknown>; encodedTemplateYaml?: string }) => {
     const { data } = await client.patch(`/templates/${uuid}`, updates)
     return data
   },
@@ -104,6 +106,22 @@ export const resourcesApi = {
   },
   updateConfigProfile: async (uuid: string, config: Record<string, unknown>) => {
     const { data } = await client.patch(`/config-profiles/${uuid}`, config)
+    return data
+  },
+  createConfigProfile: async (name: string): Promise<ConfigProfile> => {
+    const { data } = await client.post('/config-profiles', { name })
+    return data
+  },
+  renameConfigProfile: async (uuid: string, name: string) => {
+    const { data } = await client.patch(`/config-profiles/${uuid}/name`, { name })
+    return data
+  },
+  deleteConfigProfile: async (uuid: string) => {
+    const { data } = await client.delete(`/config-profiles/${uuid}`)
+    return data
+  },
+  generateX25519: async (): Promise<{ keypairs: { publicKey: string; privateKey: string }[] }> => {
+    const { data } = await client.get('/config-profiles/tools/x25519')
     return data
   },
   getProfileVersions: async (uuid: string): Promise<{ items: ConfigVersion[] }> => {

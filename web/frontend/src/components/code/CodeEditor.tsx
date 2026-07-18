@@ -22,6 +22,7 @@ import {
 } from '@codemirror/autocomplete'
 import { lintKeymap, linter, lintGutter, forEachDiagnostic, Diagnostic } from '@codemirror/lint'
 import { json, jsonLanguage, jsonParseLinter } from '@codemirror/lang-json'
+import { yaml } from '@codemirror/lang-yaml'
 import { oneDark } from '@codemirror/theme-one-dark'
 import Ajv, { ValidateFunction } from 'ajv'
 import xraySchema from './xray.schema.json'
@@ -32,7 +33,7 @@ const ajv = new Ajv({ allErrors: true, strict: false })
 const INBOUND_PROTOCOLS = ['dokodemo-door', 'http', 'shadowsocks', 'socks', 'trojan', 'vless', 'vmess', 'wireguard', 'hysteria', 'tun']
 const OUTBOUND_PROTOCOLS = ['blackhole', 'dns', 'freedom', 'http', 'loopback', 'shadowsocks', 'socks', 'trojan', 'vless', 'vmess', 'wireguard', 'hysteria']
 
-export type CodeEditorSchema = 'xray' | 'json' | 'none'
+export type CodeEditorSchema = 'xray' | 'json' | 'yaml' | 'none'
 
 interface CodeEditorProps {
   value: string
@@ -208,7 +209,9 @@ export function CodeEditor({ value, onChange, readOnly = false, schema = 'json',
       EditorState.readOnly.of(readOnly),
     ]
 
-    if (schema !== 'none') {
+    if (schema === 'yaml') {
+      extensions.push(yaml())
+    } else if (schema !== 'none') {
       extensions.push(json(), lintGutter(), makeLinter(validate))
       extensions.push(autocompletion({ activateOnTyping: true, icons: true }))
       const completion = makeCompletion(jsonSchema)
