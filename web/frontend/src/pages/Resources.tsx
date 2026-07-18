@@ -70,6 +70,8 @@ export default function Resources({ embedded }: { embedded?: boolean } = {}) {
   const [editingTemplate, setEditingTemplate] = useState<Template | null>(null)
   // isYaml: MIHOMO/CLASH/STASH хранят YAML (encodedTemplateYaml, base64), не JSON
   const [editTemplateForm, setEditTemplateForm] = useState({ name: '', templateJson: '', isYaml: false })
+  const [editTemplateLoading, setEditTemplateLoading] = useState(false)
+  const [editTemplateErrors, setEditTemplateErrors] = useState(0)
   const [deleteTemplateConfirm, setDeleteTemplateConfirm] = useState<string | null>(null)
 
   const { data: templates = [], isLoading: templatesLoading, isError: isTemplatesError, refetch: refetchTemplates } = useQuery({
@@ -123,10 +125,11 @@ export default function Resources({ embedded }: { embedded?: boolean } = {}) {
     // список шаблонов не содержит контента (templateJson/encodedTemplateYaml) —
     // грузим полный шаблон по uuid
     setEditingTemplate(template)
-    // тип YAML определяем сразу по метаданным списка, чтобы не мигал редактор
     const yamlTypes = ['MIHOMO', 'CLASH', 'STASH']
     const isYamlType = yamlTypes.includes(template.templateType)
     setEditTemplateForm({ name: template.name, templateJson: '', isYaml: isYamlType })
+    setEditTemplateErrors(0)
+    setEditTemplateLoading(true)
     setEditTemplateDialogOpen(true)
     try {
       const full = await resourcesApi.getTemplate(template.uuid)
@@ -140,6 +143,20 @@ export default function Resources({ embedded }: { embedded?: boolean } = {}) {
       })
     } catch {
       toast.error(t('common.error'))
+    } finally {
+      setEditTemplateLoading(false)
+    }
+  }
+
+  const formatEditTemplate = () => {
+    if (editTemplateForm.isYaml) return
+    try {
+      setEditTemplateForm({
+        ...editTemplateForm,
+        templateJson: JSON.stringify(JSON.parse(editTemplateForm.templateJson), null, 2),
+      })
+    } catch {
+      toast.error(t('resources.templates.invalidJson'))
     }
   }
 
@@ -688,41 +705,63 @@ export default function Resources({ embedded }: { embedded?: boolean } = {}) {
 
       {/* Edit Template Dialog */}
       <Dialog open={editTemplateDialogOpen} onOpenChange={setEditTemplateDialogOpen}>
-        <DialogContent className="w-[95vw] max-w-3xl">
-          <DialogHeader>
-            <DialogTitle>{t('resources.templates.editTitle')}</DialogTitle>
+        <DialogContent className="w-[97vw] max-w-[1100px] h-[88vh] flex flex-col gap-3 p-4 sm:p-5">
+          <DialogHeader className="shrink-0">
+            <div className="flex items-center gap-2 flex-wrap pr-8">
+              <DialogTitle>{t('resources.templates.editTitle')}</DialogTitle>
+              <Badge variant="outline" className="text-[10px]">
+                {editingTemplate?.templateType}{editTemplateForm.isYaml ? ' · YAML' : ' · JSON'}
+              </Badge>
+              {!editTemplateForm.isYaml && !editTemplateLoading && (
+                editTemplateErrors > 0 ? (
+                  <Badge className="bg-red-500/20 text-red-300 text-[10px]">
+                    {t('resources.editor.errors', { count: editTemplateErrors })}
+                  </Badge>
+                ) : (
+                  <Badge className="bg-green-500/20 text-green-300 text-[10px]">{t('resources.editor.valid')}</Badge>
+                )
+              )}
+            </div>
           </DialogHeader>
-          <div className="space-y-4">
-            <div>
-              <Label htmlFor="editTemplateName">{t('resources.templates.nameLabel')}</Label>
-              <Input
-                id="editTemplateName"
-                value={editTemplateForm.name}
-                onChange={(e) => setEditTemplateForm({ ...editTemplateForm, name: e.target.value })}
-                className="mt-1"
-              />
-            </div>
-            <div>
-              <Label htmlFor="editTemplateJson">{t('resources.templates.jsonLabel')}</Label>
-              <div className="mt-1 h-72">
-                <CodeEditor
-                  value={editTemplateForm.templateJson}
-                  onChange={(v) => setEditTemplateForm({ ...editTemplateForm, templateJson: v })}
-                  schema={editTemplateForm.isYaml ? 'yaml' : 'json'}
-                />
-              </div>
-            </div>
+          <div className="shrink-0">
+            <Label htmlFor="editTemplateName">{t('resources.templates.nameLabel')}</Label>
+            <Input
+              id="editTemplateName"
+              value={editTemplateForm.name}
+              onChange={(e) => setEditTemplateForm({ ...editTemplateForm, name: e.target.value })}
+              className="mt-1"
+            />
           </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setEditTemplateDialogOpen(false)}>
-              {t('common.cancel')}
-            </Button>
-            <Button
-              onClick={handleUpdateTemplate}
-              disabled={!editTemplateForm.name.trim() || updateTemplateMutation.isPending}
-            >
-              {updateTemplateMutation.isPending ? t('common.saving') : t('common.save')}
-            </Button>
+          <div className="flex-1 min-h-0">
+            {editTemplateLoading ? (
+              <Skeleton className="h-full w-full" />
+            ) : (
+              <CodeEditor
+                key={`${editingTemplate?.uuid}-${editTemplateForm.isYaml ? 'yaml' : 'json'}`}
+                value={editTemplateForm.templateJson}
+                onChange={(v) => setEditTemplateForm({ ...editTemplateForm, templateJson: v })}
+                schema={editTemplateForm.isYaml ? 'yaml' : 'json'}
+                onDiagnostics={setEditTemplateErrors}
+              />
+            )}
+          </div>
+          <DialogFooter className="shrink-0 flex-wrap gap-2 sm:justify-between">
+            {!editTemplateForm.isYaml ? (
+              <Button variant="outline" size="sm" onClick={formatEditTemplate}>
+                {t('resources.editor.format')}
+              </Button>
+            ) : <span />}
+            <div className="flex items-center gap-2">
+              <Button variant="outline" onClick={() => setEditTemplateDialogOpen(false)}>
+                {t('common.cancel')}
+              </Button>
+              <Button
+                onClick={handleUpdateTemplate}
+                disabled={!editTemplateForm.name.trim() || editTemplateLoading || updateTemplateMutation.isPending || (!editTemplateForm.isYaml && editTemplateErrors > 0)}
+              >
+                {updateTemplateMutation.isPending ? t('common.saving') : t('common.save')}
+              </Button>
+            </div>
           </DialogFooter>
         </DialogContent>
       </Dialog>
