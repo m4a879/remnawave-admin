@@ -893,6 +893,17 @@
       "resetStrategy": "Reset strategy",
       "trafficUsed": "Traffic used"
     },
+    "connectionKeys": {
+      "button": "Keys",
+      "title": "Connection keys",
+      "hint": "Full per-host keys (admin source — shown even with incompatible HWID). Copy or show a QR.",
+      "active": "Active",
+      "hidden": "Hidden",
+      "disabled": "Disabled",
+      "copyAll": "Copy all",
+      "empty": "No keys",
+      "error": "Failed to load keys"
+    },
     "antiAbuse": {
       "title": "Anti-Abuse",
       "trustScore": "Trust Score",

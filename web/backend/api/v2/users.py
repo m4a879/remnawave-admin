@@ -2004,6 +2004,34 @@ async def get_subscription_info(
         raise api_error(502, E.API_SERVICE_UNAVAILABLE)
 
 
+@router.get("/{user_uuid}/connection-keys")
+async def get_user_connection_keys(
+    user_uuid: str,
+    admin: AdminUser = Depends(require_permission("users", "view")),
+):
+    """Полные ключи подключения пользователя (vless://… по хостам), сгруппированные
+    enabledKeys/hiddenKeys/disabledKeys.
+
+    Админский источник Panel API (не гейтится HWID), в отличие от subscription-info.
+    subscription uuid в Remnawave = user uuid.
+    """
+    await _ensure_user_visible(admin, user_uuid)
+    from shared.api_client import api_client
+    from shared.database import db_service
+
+    if db_service.is_connected:
+        u = await db_service.get_user_by_uuid(user_uuid)
+        if not u:
+            raise api_error(404, E.USER_NOT_FOUND)
+    try:
+        result = await api_client.get_subscription_connection_keys(user_uuid)
+        payload = result.get("response", result) if isinstance(result, dict) else result
+        return payload
+    except Exception as e:
+        logger.error("Failed to get connection keys for %s: %s", user_uuid, e)
+        raise api_error(502, E.API_SERVICE_UNAVAILABLE)
+
+
 # ── IP Control ────────────────────────────────────────────────────
 
 @router.post("/{user_uuid}/fetch-ips")
