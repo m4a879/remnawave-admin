@@ -51,6 +51,7 @@ AVAILABLE_RESOURCES = {
     "reports": ["view", "create"],
     "mailserver": ["view", "create", "edit", "delete"],
     "dns": ["view", "edit"],
+    "bscheck": ["view", "check"],
     "backups": ["view", "create", "delete"],
     "access_policies": ["view", "create", "edit", "delete"],
     "api_keys": ["view", "create", "edit", "delete"],

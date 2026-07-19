@@ -373,6 +373,13 @@ DEFAULT_CONFIG_DEFINITIONS: List[Dict[str, Any]] = [
         "description": "Управляется на странице «DNS», не здесь",
         "default_value": "", "is_secret": True, "is_readonly": True, "sort_order": 94,
     },
+    {
+        "key": "bscheck_token",
+        "value_type": "string", "category": "general",
+        "display_name": "BS-Check: токен bschekbot (зашифр.)",
+        "description": "Токен bsk_live_… (bsbord) для проверки нод через операторов. Правится на странице нод",
+        "default_value": "", "is_secret": True, "is_readonly": True, "sort_order": 95,
+    },
 
     # === SYNC ===
     {
