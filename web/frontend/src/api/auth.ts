@@ -90,6 +90,7 @@ export interface AdminInfo {
   unlimited_traffic_policy: string
   auth_method: string
   password_is_generated: boolean
+  totp_enabled: boolean
   unrestricted_user_access: boolean
   permissions: PermissionEntry[]
 }
@@ -341,6 +342,21 @@ export const authApi = {
   },
   deleteOauthProvider: async (provider: string): Promise<void> => {
     await client.delete(`/auth/oauth/providers/${provider}`)
+  },
+
+  // ── 2FA (TOTP) — управление из сессии ────────────────────────
+  setup2fa: async (): Promise<TotpSetupResponse> => {
+    const { data } = await client.post<TotpSetupResponse>('/auth/2fa/setup'); return data
+  },
+  enable2fa: async (code: string): Promise<void> => {
+    await client.post('/auth/2fa/enable', { code })
+  },
+  disable2fa: async (code: string): Promise<void> => {
+    await client.post('/auth/2fa/disable', { code })
+  },
+  regenBackupCodes: async (code: string): Promise<string[]> => {
+    const { data } = await client.post<TotpSetupResponse>('/auth/2fa/backup-codes', { code })
+    return data.backup_codes
   },
 
   /**

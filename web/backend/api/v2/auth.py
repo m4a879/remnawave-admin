@@ -684,6 +684,7 @@ async def get_current_user(admin: AdminUser = Depends(get_current_admin)):
     """
     # Check if password is auto-generated (needs changing)
     password_is_generated = False
+    totp_enabled = False
     admin_email = None
     unlimited_traffic_policy = "allowed"
     unrestricted_user_access = False
@@ -703,6 +704,7 @@ async def get_current_user(admin: AdminUser = Depends(get_current_admin)):
             if account:
                 if account.get("is_generated_password"):
                     password_is_generated = True
+                totp_enabled = bool(account.get("totp_enabled"))
                 admin_email = account.get("email")
                 unlimited_traffic_policy = account.get("unlimited_traffic_policy", "allowed")
                 unrestricted_user_access = account.get("unrestricted_user_access", False) or False
@@ -742,6 +744,7 @@ async def get_current_user(admin: AdminUser = Depends(get_current_admin)):
         unrestricted_user_access=unrestricted_user_access,
         auth_method=admin.auth_method,
         password_is_generated=password_is_generated,
+        totp_enabled=totp_enabled,
         permissions=permissions,
     )
 
@@ -1163,3 +1166,80 @@ async def oauth_del_link(link_id: int, admin: AdminUser = Depends(get_current_ad
     if getattr(admin, "account_id", None):
         await oa.delete_link(link_id, admin.account_id)
     return SuccessResponse(message="Привязка удалена")
+
+
+# ── 2FA (TOTP) — управление из активной сессии ───────────────────
+
+
+async def _authed_account(admin: AdminUser):
+    if not getattr(admin, "account_id", None):
+        raise api_error(400, E.FORBIDDEN, "2FA доступна только для аккаунтов admin_accounts")
+    from web.backend.core.admin_accounts import get_admin_account_by_id
+    acc = await get_admin_account_by_id(admin.account_id)
+    if not acc:
+        raise api_error(404, E.USER_NOT_FOUND, "Аккаунт не найден")
+    return acc
+
+
+@router.post("/2fa/setup", response_model=TotpSetupResponse)
+async def totp_setup_authed(admin: AdminUser = Depends(get_current_admin)):
+    account = await _authed_account(admin)
+    if account.get("totp_enabled"):
+        raise api_error(400, E.FORBIDDEN, "2FA уже включена")
+    from web.backend.core.rbac import update_admin_account
+    secret = generate_totp_secret()
+    uri = get_provisioning_uri(secret, admin.username)
+    codes = generate_backup_codes()
+    await update_admin_account(account["id"], totp_secret=encrypt_totp_secret(secret),
+                               backup_codes=encrypt_backup_codes(codes))
+    return TotpSetupResponse(secret=secret, qr_code=generate_qr_base64(uri),
+                             provisioning_uri=uri, backup_codes=codes)
+
+
+@router.post("/2fa/enable", response_model=SuccessResponse)
+async def totp_enable_authed(data: TotpVerifyRequest, admin: AdminUser = Depends(get_current_admin)):
+    account = await _authed_account(admin)
+    if account.get("totp_enabled"):
+        raise api_error(400, E.FORBIDDEN, "2FA уже включена")
+    if not account.get("totp_secret"):
+        raise api_error(400, E.FORBIDDEN, "Сначала вызови /2fa/setup")
+    secret = decrypt_totp_secret(account["totp_secret"])
+    if not verify_totp_code(secret, data.code, account_id=account["id"]):
+        raise api_error(401, E.INVALID_TOKEN, "Неверный код")
+    from web.backend.core.rbac import update_admin_account
+    await update_admin_account(account["id"], totp_enabled=True)
+    await write_audit_log(admin_id=admin.account_id, admin_username=admin.username,
+                          action="2fa.enable", resource="auth", resource_id="totp")
+    return SuccessResponse(message="2FA включена")
+
+
+@router.post("/2fa/disable", response_model=SuccessResponse)
+async def totp_disable_authed(data: TotpVerifyRequest, admin: AdminUser = Depends(get_current_admin)):
+    account = await _authed_account(admin)
+    if not account.get("totp_enabled") or not account.get("totp_secret"):
+        raise api_error(400, E.FORBIDDEN, "2FA не включена")
+    secret = decrypt_totp_secret(account["totp_secret"])
+    ok = verify_totp_code(secret, data.code, account_id=account["id"])
+    if not ok:
+        ok, _ = verify_backup_code(account.get("backup_codes"), data.code)
+    if not ok:
+        raise api_error(401, E.INVALID_TOKEN, "Неверный код")
+    from web.backend.core.rbac import update_admin_account
+    await update_admin_account(account["id"], totp_enabled=False)
+    await write_audit_log(admin_id=admin.account_id, admin_username=admin.username,
+                          action="2fa.disable", resource="auth", resource_id="totp")
+    return SuccessResponse(message="2FA отключена")
+
+
+@router.post("/2fa/backup-codes", response_model=TotpSetupResponse)
+async def totp_regen_backup(data: TotpVerifyRequest, admin: AdminUser = Depends(get_current_admin)):
+    account = await _authed_account(admin)
+    if not account.get("totp_enabled") or not account.get("totp_secret"):
+        raise api_error(400, E.FORBIDDEN, "2FA не включена")
+    secret = decrypt_totp_secret(account["totp_secret"])
+    if not verify_totp_code(secret, data.code, account_id=account["id"]):
+        raise api_error(401, E.INVALID_TOKEN, "Неверный код")
+    from web.backend.core.rbac import update_admin_account
+    codes = generate_backup_codes()
+    await update_admin_account(account["id"], backup_codes=encrypt_backup_codes(codes))
+    return TotpSetupResponse(secret="", qr_code="", provisioning_uri="", backup_codes=codes)

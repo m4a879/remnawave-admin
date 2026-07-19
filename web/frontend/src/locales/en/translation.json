@@ -3050,6 +3050,7 @@
     "subtitle": "Bot and panel configuration. Priority: DB > .env > default",
     "tabs": {
       "general": "General",
+      "auth": "Auth methods",
       "resources": "Remnawave Resources",
       "faq": "FAQ"
     },
@@ -3190,6 +3191,28 @@
       "removed": "Provider disabled",
       "unlinked": "Unlinked",
       "on": "on"
+    },
+    "telegram": {
+      "title": "Telegram",
+      "linked": "Account linked",
+      "notLinked": "Telegram is not linked to this admin.",
+      "hint": "Telegram login is configured at the account level (telegram_id). Linking is done by a superadmin when the admin is created."
+    },
+    "totp": {
+      "title": "2FA (one-time codes)",
+      "on": "enabled",
+      "off": "disabled",
+      "hint": "An extra code from an authenticator app (Google Authenticator, Aegis, etc.) at login. Backup codes cover a lost phone.",
+      "enable": "Enable 2FA",
+      "disable": "Disable",
+      "newBackup": "New backup codes",
+      "scan": "Scan the QR in your app or enter the key manually:",
+      "code": "Code from app",
+      "confirm": "Confirm",
+      "enabled": "2FA enabled",
+      "disabled": "2FA disabled",
+      "regen": "Regenerate codes",
+      "backupHint": "Keep backup codes somewhere safe — each works once."
     },
     "password": {
       "title": "Change Password",

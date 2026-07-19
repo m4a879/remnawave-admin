@@ -31,6 +31,8 @@ import { Input } from '@/components/ui/input'
 import { Card, CardContent } from '@/components/ui/card'
 import PasskeysBlock from '@/components/settings/PasskeysBlock'
 import OAuthBlock from '@/components/settings/OAuthBlock'
+import TotpBlock from '@/components/settings/TotpBlock'
+import TelegramBlock from '@/components/settings/TelegramBlock'
 import { Badge } from '@/components/ui/badge'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
@@ -1446,9 +1448,18 @@ export default function Settings() {
       <Tabs defaultValue="general">
         <TabsList>
           <TabsTrigger value="general">{t('settings.tabs.general')}</TabsTrigger>
+          <TabsTrigger value="auth">{t('settings.tabs.auth')}</TabsTrigger>
           <TabsTrigger value="resources">{t('settings.tabs.resources')}</TabsTrigger>
           <TabsTrigger value="faq">{t('settings.tabs.faq')}</TabsTrigger>
         </TabsList>
+
+        <TabsContent value="auth" className="space-y-6 mt-4">
+          <ChangePasswordBlock />
+          <TelegramBlock />
+          <TotpBlock />
+          <PasskeysBlock />
+          <OAuthBlock />
+        </TabsContent>
 
         <TabsContent value="resources" className="mt-4">
           <Resources embedded />
@@ -1505,10 +1516,7 @@ export default function Settings() {
         />
       )}
 
-      {/* Security blocks */}
-      {!search && <ChangePasswordBlock />}
-      {!search && <PasskeysBlock />}
-      {!search && <OAuthBlock />}
+      {/* Методы авторизации вынесены во вкладку «auth». Здесь — IP-доступ. */}
       {!search && <IpWhitelistBlock />}
 
       {/* Settings as accordion */}
