@@ -33,6 +33,7 @@ import PasskeysBlock from '@/components/settings/PasskeysBlock'
 import OAuthBlock from '@/components/settings/OAuthBlock'
 import TotpBlock from '@/components/settings/TotpBlock'
 import TelegramBlock from '@/components/settings/TelegramBlock'
+import SessionsBlock from '@/components/settings/SessionsBlock'
 import { Badge } from '@/components/ui/badge'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
@@ -1459,6 +1460,7 @@ export default function Settings() {
           <TotpBlock />
           <PasskeysBlock />
           <OAuthBlock />
+          <SessionsBlock />
         </TabsContent>
 
         <TabsContent value="resources" className="mt-4">

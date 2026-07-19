@@ -62,6 +62,13 @@ vi.mock('@/api/auth', () => ({
     deleteOauthLink: vi.fn(),
     setOauthProvider: vi.fn(),
     deleteOauthProvider: vi.fn(),
+    listSessions: vi.fn().mockResolvedValue([]),
+    revokeSession: vi.fn(),
+    revokeOtherSessions: vi.fn(),
+    setup2fa: vi.fn(),
+    enable2fa: vi.fn(),
+    disable2fa: vi.fn(),
+    regenBackupCodes: vi.fn(),
   },
 }))
 

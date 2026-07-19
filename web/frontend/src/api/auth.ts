@@ -25,6 +25,16 @@ export interface OauthLink {
   last_used_at: string | null
 }
 
+export interface AdminSession {
+  id: string
+  auth_method: string | null
+  ip: string | null
+  user_agent: string | null
+  created_at: string | null
+  last_seen_at: string | null
+  current: boolean
+}
+
 export interface TelegramUser {
   id: number
   first_name: string
@@ -342,6 +352,17 @@ export const authApi = {
   },
   deleteOauthProvider: async (provider: string): Promise<void> => {
     await client.delete(`/auth/oauth/providers/${provider}`)
+  },
+
+  // ── Активные сессии ──────────────────────────────────────────
+  listSessions: async (): Promise<AdminSession[]> => {
+    const { data } = await client.get('/auth/sessions'); return data.items
+  },
+  revokeSession: async (sid: string): Promise<void> => {
+    await client.delete(`/auth/sessions/${sid}`)
+  },
+  revokeOtherSessions: async (): Promise<void> => {
+    await client.post('/auth/sessions/revoke-others')
   },
 
   // ── 2FA (TOTP) — управление из сессии ────────────────────────

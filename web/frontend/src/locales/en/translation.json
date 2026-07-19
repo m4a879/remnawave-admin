@@ -3214,6 +3214,17 @@
       "regen": "Regenerate codes",
       "backupHint": "Keep backup codes somewhere safe — each works once."
     },
+    "sessions": {
+      "title": "Active sessions",
+      "hint": "Devices and browsers signed in as this admin. Revoke any session you don't recognize.",
+      "empty": "No active sessions.",
+      "current": "current",
+      "thisDevice": "this device",
+      "revoke": "Revoke",
+      "revoked": "Session revoked",
+      "revokeOthers": "Sign out other devices",
+      "revokedOthers": "Other sessions revoked"
+    },
     "password": {
       "title": "Change Password",
       "changeRequired": "Change required",

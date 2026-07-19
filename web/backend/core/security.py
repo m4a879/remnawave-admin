@@ -202,6 +202,7 @@ def create_access_token(
     subject: str,
     username: str,
     auth_method: str = "telegram",
+    sid: Optional[str] = None,
 ) -> str:
     """
     Create JWT access token.
@@ -210,6 +211,7 @@ def create_access_token(
         subject: Token subject (telegram_id as string, or "pwd:<username>")
         username: Display username
         auth_method: "telegram" or "password"
+        sid: Optional session id (admin_sessions.id) for session tracking/revocation
 
     Returns:
         Encoded JWT token
@@ -225,6 +227,8 @@ def create_access_token(
         "type": "access",
         "auth_method": auth_method,
     }
+    if sid:
+        payload["sid"] = sid
 
     return jwt.encode(payload, settings.secret_key, algorithm=settings.jwt_algorithm)
 
@@ -264,12 +268,13 @@ def create_password_reset_token(admin_id: int, username: str) -> str:
     return jwt.encode(payload, settings.secret_key, algorithm=settings.jwt_algorithm)
 
 
-def create_refresh_token(subject: str) -> str:
+def create_refresh_token(subject: str, sid: Optional[str] = None) -> str:
     """
     Create JWT refresh token.
 
     Args:
         subject: Token subject (telegram_id as string, or "pwd:<username>")
+        sid: Optional session id (admin_sessions.id), carried across rotations
 
     Returns:
         Encoded JWT refresh token
@@ -283,6 +288,8 @@ def create_refresh_token(subject: str) -> str:
         "iat": int(datetime.now(timezone.utc).timestamp()),
         "type": "refresh",
     }
+    if sid:
+        payload["sid"] = sid
 
     return jwt.encode(payload, settings.secret_key, algorithm=settings.jwt_algorithm)
 

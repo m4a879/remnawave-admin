@@ -34,6 +34,7 @@ from web.backend.core.security import (
     get_access_ttl_minutes,
 )
 from web.backend.core.token_blacklist import token_blacklist
+from web.backend.core import sessions as _sessions
 from web.backend.core.totp import (
     generate_totp_secret,
     encrypt_totp_secret,
@@ -163,10 +164,8 @@ async def register_admin(request: Request, response: Response, data: RegisterReq
 
     # Auto-login after registration
     subject = f"pwd:{data.username.strip()}"
-    access_token = create_access_token(subject, data.username.strip(), auth_method="password")
-    refresh_token = create_refresh_token(subject)
-
-    set_auth_cookies(response, request, access_token, refresh_token)
+    access_token, refresh_token = await _issue_login(
+        request, response, subject, data.username.strip(), "password")
     return TokenResponse(
         access_token=access_token,
         refresh_token=refresh_token,
@@ -287,10 +286,8 @@ async def telegram_login(request: Request, response: Response, data: TelegramAut
 
     # 2FA disabled or no RBAC account — issue full tokens directly
     await notify_login_success(ip=client_ip, username=username, auth_method="telegram")
-    access_token = create_access_token(subject, username, auth_method="telegram")
-    refresh_token = create_refresh_token(subject)
-
-    set_auth_cookies(response, request, access_token, refresh_token)
+    access_token, refresh_token = await _issue_login(
+        request, response, subject, username, "telegram", account=account)
     return LoginResponse(
         access_token=access_token,
         refresh_token=refresh_token,
@@ -381,10 +378,8 @@ async def password_login(request: Request, response: Response, data: LoginReques
 
     # 2FA disabled or no RBAC account — issue full tokens directly
     await notify_login_success(ip=client_ip, username=data.username, auth_method="password")
-    access_token = create_access_token(subject, data.username, auth_method="password")
-    refresh_token = create_refresh_token(subject)
-
-    set_auth_cookies(response, request, access_token, refresh_token)
+    access_token, refresh_token = await _issue_login(
+        request, response, subject, data.username, "password", account=account)
     return LoginResponse(
         access_token=access_token,
         refresh_token=refresh_token,
@@ -409,6 +404,31 @@ def _get_subject(admin: AdminUser) -> str:
     if admin.auth_method == "password":
         return f"pwd:{admin.username}"
     return str(admin.telegram_id)
+
+
+async def _issue_login(
+    request: Request,
+    response: Response,
+    subject: str,
+    username: str,
+    auth_method: str,
+    account: Optional[dict] = None,
+) -> tuple:
+    """Завести сессию (если account-backed) и выдать access+refresh с sid.
+
+    Единая точка выдачи токенов для всех способов входа: создаёт строку
+    admin_sessions, зашивает sid в оба токена и ставит cookie.
+    Возвращает (access_token, refresh_token).
+    """
+    account_id = account.get("id") if account else None
+    if account_id is None:
+        acc = await _get_rbac_account(subject)
+        account_id = acc.get("id") if acc else None
+    sid = await _sessions.create_session(request, subject, account_id, auth_method, username)
+    access_token = create_access_token(subject, username, auth_method=auth_method, sid=sid)
+    refresh_token = create_refresh_token(subject, sid=sid)
+    set_auth_cookies(response, request, access_token, refresh_token)
+    return access_token, refresh_token
 
 
 @router.post("/totp/setup", response_model=TotpSetupResponse)
@@ -512,13 +532,10 @@ async def totp_confirm_setup(
     # Blacklist temp token to prevent reuse
     _blacklist_temp_token(request)
 
-    settings = get_web_settings()
-    access_token = create_access_token(subject, admin.username, auth_method=admin.auth_method)
-    refresh_token = create_refresh_token(subject)
-
     logger.info("TOTP enabled for user '%s'", admin.username)
     await notify_login_success(ip=client_ip, username=admin.username, auth_method=admin.auth_method)
-    set_auth_cookies(response, request, access_token, refresh_token)
+    access_token, refresh_token = await _issue_login(
+        request, response, subject, admin.username, admin.auth_method, account=account)
     return TokenResponse(
         access_token=access_token,
         refresh_token=refresh_token,
@@ -554,11 +571,9 @@ async def totp_verify(
         login_guard.record_success(client_ip)
         _blacklist_temp_token(request)
 
-        settings = get_web_settings()
-        access_token = create_access_token(subject, admin.username, auth_method=admin.auth_method)
-        refresh_token = create_refresh_token(subject)
         await notify_login_success(ip=client_ip, username=admin.username, auth_method=admin.auth_method)
-        set_auth_cookies(response, request, access_token, refresh_token)
+        access_token, refresh_token = await _issue_login(
+            request, response, subject, admin.username, admin.auth_method, account=account)
         return TokenResponse(
             access_token=access_token,
             refresh_token=refresh_token,
@@ -575,11 +590,9 @@ async def totp_verify(
         login_guard.record_success(client_ip)
         _blacklist_temp_token(request)
 
-        settings = get_web_settings()
-        access_token = create_access_token(subject, admin.username, auth_method=admin.auth_method)
-        refresh_token = create_refresh_token(subject)
         await notify_login_success(ip=client_ip, username=admin.username, auth_method=admin.auth_method)
-        set_auth_cookies(response, request, access_token, refresh_token)
+        access_token, refresh_token = await _issue_login(
+            request, response, subject, admin.username, admin.auth_method, account=account)
         return TokenResponse(
             access_token=access_token,
             refresh_token=refresh_token,
@@ -634,6 +647,11 @@ async def refresh_tokens(
     subject = payload["sub"]
     settings = get_web_settings()
 
+    # Session tracking: если токен помечен sid, сессия — источник истины
+    sid = payload.get("sid")
+    if sid is not None and not await _sessions.validate_for_refresh(sid):
+        raise api_error(401, E.INVALID_REFRESH_TOKEN)
+
     # Determine auth method from subject format
     if subject.startswith("pwd:"):
         # Password-based auth — verify account still exists and is active
@@ -655,19 +673,22 @@ async def refresh_tokens(
         if not is_valid:
             if not settings.admin_login or username.lower() != settings.admin_login.lower():
                 raise api_error(403, E.ADMIN_NOT_FOUND)
-        access_token = create_access_token(subject, username, auth_method="password")
+        access_token = create_access_token(subject, username, auth_method="password", sid=sid)
     else:
         # Telegram-based auth — verify still in admins list
         telegram_id = int(subject)
         if telegram_id not in settings.admins:
             raise api_error(403, E.NOT_AN_ADMIN)
-        access_token = create_access_token(subject, payload.get("username", "admin"), auth_method="telegram")
+        access_token = create_access_token(subject, payload.get("username", "admin"), auth_method="telegram", sid=sid)
 
-    refresh_token = create_refresh_token(subject)
+    refresh_token = create_refresh_token(subject, sid=sid)
 
     # Blacklist the old refresh token to prevent reuse
     if "exp" in payload:
         token_blacklist.add(refresh_token_in, float(payload["exp"]))
+
+    if sid is not None:
+        await _sessions.touch_session(sid, request)
 
     set_auth_cookies(response, request, access_token, refresh_token)
     return TokenResponse(
@@ -822,6 +843,10 @@ async def logout(
         if payload and "exp" in payload:
             token_blacklist.add(access_token, float(payload["exp"]))
             logger.info("Token blacklisted for user '%s'", admin.username)
+        # Отозвать сессию этого входа, чтобы она ушла из списка активных
+        sid = payload.get("sid") if payload else None
+        if sid and getattr(admin, "account_id", None):
+            await _sessions.revoke_session(admin.account_id, sid)
 
     # Refresh из cookie тоже гасим — иначе сессию можно воскресить
     refresh_cookie = request.cookies.get(REFRESH_COOKIE)
@@ -1034,9 +1059,8 @@ async def wa_login_finish(request: Request, response: Response, data: WaLoginFin
     subject = ("pwd:" + acc["username"]) if acc.get("username") else str(acc.get("telegram_id"))
     logger.info("Passkey login for '%s' from %s", username, client_ip)
     await notify_login_success(ip=client_ip, username=username, auth_method="passkey")
-    access_token = create_access_token(subject, username, auth_method="passkey")
-    refresh_token = create_refresh_token(subject)
-    set_auth_cookies(response, request, access_token, refresh_token)
+    access_token, refresh_token = await _issue_login(
+        request, response, subject, username, "passkey", account=acc)
     return LoginResponse(access_token=access_token, refresh_token=refresh_token)
 
 
@@ -1143,9 +1167,8 @@ async def oauth_callback(request: Request, response: Response, data: OAuthCallba
     subject = ("pwd:" + acc["username"]) if acc.get("username") else str(acc.get("telegram_id"))
     logger.info("OAuth(%s) login for '%s' from %s", provider, username, client_ip)
     await notify_login_success(ip=client_ip, username=username, auth_method=f"oauth:{provider}")
-    access_token = create_access_token(subject, username, auth_method="oauth")
-    refresh_token = create_refresh_token(subject)
-    set_auth_cookies(response, request, access_token, refresh_token)
+    access_token, refresh_token = await _issue_login(
+        request, response, subject, username, "oauth", account=acc)
     return {"mode": "login", "access_token": access_token, "refresh_token": refresh_token}
 
 
@@ -1243,3 +1266,55 @@ async def totp_regen_backup(data: TotpVerifyRequest, admin: AdminUser = Depends(
     codes = generate_backup_codes()
     await update_admin_account(account["id"], backup_codes=encrypt_backup_codes(codes))
     return TotpSetupResponse(secret="", qr_code="", provisioning_uri="", backup_codes=codes)
+
+
+# ── Активные сессии — список / отзыв (self-service, scope по account_id) ──
+
+
+def _current_sid(request: Request) -> Optional[str]:
+    """Достать sid текущего входа из access-токена (Bearer или cookie)."""
+    auth_header = request.headers.get("authorization", "")
+    token = auth_header[7:] if auth_header.startswith("Bearer ") else request.cookies.get(ACCESS_COOKIE)
+    if not token:
+        return None
+    payload = decode_token(token)
+    return payload.get("sid") if payload else None
+
+
+@router.get("/sessions")
+async def list_admin_sessions(request: Request, admin: AdminUser = Depends(get_current_admin)):
+    """Свои активные сессии (текущая помечена current)."""
+    if not getattr(admin, "account_id", None):
+        return {"items": []}
+    cur = _current_sid(request)
+    items = await _sessions.list_sessions(admin.account_id)
+    return {"items": [{
+        "id": s["id"],
+        "auth_method": s.get("auth_method"),
+        "ip": s.get("ip"),
+        "user_agent": s.get("user_agent"),
+        "created_at": s.get("created_at"),
+        "last_seen_at": s.get("last_seen_at"),
+        "current": s["id"] == cur,
+    } for s in items]}
+
+
+@router.delete("/sessions/{sid}", response_model=SuccessResponse)
+async def revoke_admin_session(sid: str, admin: AdminUser = Depends(get_current_admin)):
+    """Отозвать одну свою сессию."""
+    if getattr(admin, "account_id", None):
+        await _sessions.revoke_session(admin.account_id, sid)
+        await write_audit_log(admin_id=admin.account_id, admin_username=admin.username,
+                              action="session.revoke", resource="auth", resource_id=sid[:12])
+    return SuccessResponse(message="Сессия отозвана")
+
+
+@router.post("/sessions/revoke-others", response_model=SuccessResponse)
+async def revoke_other_admin_sessions(request: Request, admin: AdminUser = Depends(get_current_admin)):
+    """Отозвать все свои сессии, кроме текущей."""
+    revoked = 0
+    if getattr(admin, "account_id", None):
+        revoked = await _sessions.revoke_others(admin.account_id, _current_sid(request))
+        await write_audit_log(admin_id=admin.account_id, admin_username=admin.username,
+                              action="session.revoke_others", resource="auth", resource_id=str(revoked))
+    return SuccessResponse(message=f"Отозвано сессий: {revoked}")

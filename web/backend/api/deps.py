@@ -249,6 +249,14 @@ async def get_current_admin(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
+    from web.backend.core.sessions import is_session_revoked
+    if is_session_revoked(payload.get("sid", "")):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Session has been revoked",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
     return await _validate_token_payload(payload)
 
 
@@ -350,6 +358,11 @@ async def get_current_admin_ws(
     if not payload:
         await websocket.close(code=4001, reason="Invalid token")
         raise HTTPException(status_code=401, detail="Invalid token")
+
+    from web.backend.core.sessions import is_session_revoked
+    if is_session_revoked(payload.get("sid", "")):
+        await websocket.close(code=4001, reason="Session revoked")
+        raise HTTPException(status_code=401, detail="Session revoked")
 
     try:
         admin = await _validate_token_payload(payload)
