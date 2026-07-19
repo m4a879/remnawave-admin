@@ -32,7 +32,8 @@ class AezaProvider(DnsProvider):
         DnsField("api_key", "API-ключ", type="password",
                  help="Панель my.aeza.net → раздел API → создать ключ."),
     ]
-    record_types = ["A", "AAAA", "CNAME", "MX", "TXT", "NS"]
+    # типы из /records/types Aeza (SRV требует вес/порт — вне общей модели, опущен)
+    record_types = ["A", "AAAA", "CNAME", "TXT", "MX", "ALIAS", "DNAME"]
     proxyable = []
     supports_ttl = True
 
@@ -129,11 +130,12 @@ def _record(r: Dict[str, Any]) -> DnsRecord:
 
 
 def _payload_body(rec: Dict[str, Any]) -> Dict[str, Any]:
+    # поле значения у Aeza — `content` (slug из /records/types); MX = priority+content
     rtype = str(rec.get("type") or "").upper()
     body: Dict[str, Any] = {
         "type": rtype,
         "name": str(rec.get("name") or "").strip(),
-        "value": str(rec.get("content") or "").strip(),
+        "content": str(rec.get("content") or "").strip(),
     }
     ttl = rec.get("ttl")
     if ttl and int(ttl) > 1:

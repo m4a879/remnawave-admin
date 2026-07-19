@@ -256,11 +256,11 @@ class TestAezaDns:
                     {"id": 3413, "name": "example.com"}]}})
             if p == "/api/v2/domains/3413/records" and m == "GET":
                 return httpx.Response(200, json={"data": {"items": [
-                    {"id": 1, "type": "A", "name": "www", "value": "1.2.3.4", "ttl": 3600}]}})
+                    {"id": 1, "type": "A", "name": "www", "content": "1.2.3.4", "ttl": 3600}]}})
             if p == "/api/v2/domains/3413/records" and m == "POST":
                 seen.update(json.loads(request.content.decode()))
                 return httpx.Response(201, json={"data": {
-                    "id": 2, "type": "A", "name": "api", "value": "5.6.7.8"}})
+                    "id": 2, "type": "A", "name": "api", "content": "5.6.7.8"}})
             return httpx.Response(404)
 
         prov = AezaProvider()
@@ -271,7 +271,7 @@ class TestAezaDns:
                 "type": "A", "name": "api", "content": "5.6.7.8"})
         assert zs[0].id == "3413" and zs[0].name == "example.com"
         assert rs[0].name == "www" and rs[0].content == "1.2.3.4"
-        assert seen["type"] == "A" and seen["value"] == "5.6.7.8" and seen["name"] == "api"
+        assert seen["type"] == "A" and seen["content"] == "5.6.7.8" and seen["name"] == "api"
         assert rec.id == "2"
 
     @pytest.mark.asyncio
