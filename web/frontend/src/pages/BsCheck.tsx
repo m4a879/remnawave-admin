@@ -956,11 +956,32 @@ function ConfigTab({ operators }: { operators: BsOperator[] }) {
   const [core, setCore] = useState('stable')
   const [modems, setModems] = useState<string[]>([])
   const [testId, setTestId] = useState<number | null>(null)
+  const [est, setEst] = useState<{ cost: number; n: number } | null>(null)
+
+  // Хосты из vless://…@host:port (для оценки через probe/preview — у vless превью нет)
+  const vlessHosts = (): string[] => {
+    const out: string[] = []
+    const re = /vless:\/\/[^@\s]+@([^:/?#\s]+)(?::(\d+))?/gi
+    let m: RegExpExecArray | null
+    while ((m = re.exec(raw)) && out.length < 10) {
+      const h = m[2] ? `${m[1]}:${m[2]}` : m[1]
+      if (!out.includes(h)) out.push(h)
+    }
+    return out
+  }
 
   const body = () => ({ raw_input: raw, selected_modems: modems, dpi, core })
   const submit = useMutation({
     mutationFn: () => bscheckApi.vlessSubmit(body()),
     onSuccess: (d) => { setTestId(d.test_id); toast.success(t('bscheck.vlessCost', { cost: d.cost_credits })) },
+    onError: onErr,
+  })
+  const estimate = useMutation({
+    mutationFn: () => bscheckApi.preview({
+      targets: vlessHosts(), operators: modems,
+      probes: { icmp: false, tcp: true, sni: true }, sni_hosts: [], dpi,
+    }),
+    onSuccess: (d) => setEst({ cost: d.cost_credits, n: vlessHosts().length }),
     onError: onErr,
   })
   const poll: UseQueryResult<any> = useQuery({
@@ -976,10 +997,11 @@ function ConfigTab({ operators }: { operators: BsOperator[] }) {
   const offKeys = offKeySet(operators)
   const locked = dpi === 'on'
   const setLock = (v: boolean) => {
+    setEst(null)
     if (v) { setDpi('on'); setModems((m) => m.filter((k) => !offKeys.has(k))) }
     else setDpi('any')
   }
-  const toggleModem = (op: string) => setModems((m) => m.includes(op) ? m.filter((x) => x !== op) : [...m, op])
+  const toggleModem = (op: string) => { setEst(null); setModems((m) => m.includes(op) ? m.filter((x) => x !== op) : [...m, op]) }
   const data: any = poll.data
   const servers: any[] = vlessServers(data)
 
@@ -1007,7 +1029,7 @@ function ConfigTab({ operators }: { operators: BsOperator[] }) {
         <Label>{t('bscheck.rawInput')}</Label>
         <Textarea value={raw} rows={5} className="mt-1 font-mono text-xs"
           placeholder={'vless://…\nvless://…'}
-          onChange={(e) => { setRaw(e.target.value); setTestId(null) }} />
+          onChange={(e) => { setRaw(e.target.value); setTestId(null); setEst(null) }} />
         <p className="text-[11px] text-muted-foreground mt-1">{t('bscheck.rawInputHint')}</p>
       </div>
 
@@ -1060,11 +1082,21 @@ function ConfigTab({ operators }: { operators: BsOperator[] }) {
         </div>
       )}
 
-      <div className="flex items-center justify-end">
-        <Button disabled={!canCheck || !raw.trim() || submit.isPending || (testId != null && poll.isLoading && !servers.length)}
-          onClick={() => submit.mutate()}>
-          {submit.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : t('bscheck.runVless')}
-        </Button>
+      <div className="space-y-1">
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          {est != null && (
+            <span className="mr-auto text-xs text-amber-300">{t('bscheck.vlessEst', { cost: est.cost, n: est.n })}</span>
+          )}
+          <Button variant="outline" disabled={!canCheck || vlessHosts().length === 0 || estimate.isPending}
+            onClick={() => estimate.mutate()} title={t('bscheck.vlessEstHint')}>
+            {estimate.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : t('bscheck.preview')}
+          </Button>
+          <Button disabled={!canCheck || !raw.trim() || submit.isPending || (testId != null && poll.isLoading && !servers.length)}
+            onClick={() => submit.mutate()}>
+            {submit.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : t('bscheck.runVless')}
+          </Button>
+        </div>
+        <p className="text-[11px] text-muted-foreground text-right">{t('bscheck.vlessEstNote')}</p>
       </div>
 
       {testId != null && (
