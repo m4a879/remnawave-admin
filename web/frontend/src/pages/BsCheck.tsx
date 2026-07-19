@@ -37,9 +37,10 @@ import {
 import {
   ShieldCheck, RefreshCw, Loader2, Check, X, Key, History,
   Crosshair, Network, FileCode, Gauge, Wifi, AlertTriangle,
-  Clock, Plus, Pencil, Trash2, ChevronRight,
+  Clock, Plus, Pencil, Trash2, ChevronRight, ShieldAlert,
 } from '@/components/brand/icons'
 import { cn } from '@/lib/utils'
+import ReputationTab from '@/components/bscheck/ReputationTab'
 
 // ── Бренды операторов (цвет = фон бейджа, fg = текст) ─────────────
 
@@ -415,12 +416,14 @@ function Shell({ account }: { account: { balance_credits?: number; balance_total
           <TabsTrigger value="nodes" className="gap-1.5"><ShieldCheck className="w-4 h-4" />{t('bscheck.tabsNodes')}</TabsTrigger>
           <TabsTrigger value="ip" className="gap-1.5"><Crosshair className="w-4 h-4" />{t('bscheck.tabsIp')}</TabsTrigger>
           <TabsTrigger value="config" className="gap-1.5"><FileCode className="w-4 h-4" />{t('bscheck.tabsConfig')}</TabsTrigger>
+          <TabsTrigger value="reputation" className="gap-1.5"><ShieldAlert className="w-4 h-4" />{t('bscheck.tabsReputation')}</TabsTrigger>
           <TabsTrigger value="schedule" className="gap-1.5"><Clock className="w-4 h-4" />{t('bscheck.tabsSchedule')}</TabsTrigger>
           <TabsTrigger value="history" className="gap-1.5"><History className="w-4 h-4" />{t('bscheck.tabsHistory')}</TabsTrigger>
         </TabsList>
         <TabsContent value="nodes"><NodesTab operators={ops} /></TabsContent>
         <TabsContent value="ip"><IpTab operators={ops} /></TabsContent>
         <TabsContent value="config"><ConfigTab operators={ops} /></TabsContent>
+        <TabsContent value="reputation"><ReputationTab /></TabsContent>
         <TabsContent value="schedule"><ScheduleTab operators={ops} /></TabsContent>
         <TabsContent value="history"><HistoryTab operators={ops} /></TabsContent>
       </Tabs>

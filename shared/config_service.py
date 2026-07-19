@@ -380,6 +380,25 @@ DEFAULT_CONFIG_DEFINITIONS: List[Dict[str, Any]] = [
         "description": "Токен bsk_live_… (bsbord) для проверки нод через операторов. Правится на странице нод",
         "default_value": "", "is_secret": True, "is_readonly": True, "sort_order": 95,
     },
+    # Репутация IP — токены провайдеров (правятся на странице BS-Check → Репутация)
+    {
+        "key": "reputation_ipinfo_token", "value_type": "string", "category": "general",
+        "display_name": "Репутация: ipinfo.io токен (зашифр.)",
+        "description": "Управляется на странице BS-Check", "default_value": "",
+        "is_secret": True, "is_readonly": True, "sort_order": 96,
+    },
+    {
+        "key": "reputation_ipqs_token", "value_type": "string", "category": "general",
+        "display_name": "Репутация: IPQualityScore токен (зашифр.)",
+        "description": "Управляется на странице BS-Check", "default_value": "",
+        "is_secret": True, "is_readonly": True, "sort_order": 97,
+    },
+    {
+        "key": "reputation_abuseipdb_token", "value_type": "string", "category": "general",
+        "display_name": "Репутация: AbuseIPDB токен (зашифр.)",
+        "description": "Управляется на странице BS-Check", "default_value": "",
+        "is_secret": True, "is_readonly": True, "sort_order": 98,
+    },
     # === SYNC ===
     {
         "key": "sync_interval_seconds",

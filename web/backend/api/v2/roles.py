@@ -52,6 +52,7 @@ AVAILABLE_RESOURCES = {
     "mailserver": ["view", "create", "edit", "delete"],
     "dns": ["view", "edit"],
     "bscheck": ["view", "check"],
+    "reputation": ["view", "check"],
     "backups": ["view", "create", "delete"],
     "access_policies": ["view", "create", "edit", "delete"],
     "api_keys": ["view", "create", "edit", "delete"],
