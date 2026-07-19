@@ -4172,7 +4172,8 @@
     "jobEvery": "каждые {{m}} мин",
     "jobNodesN": "{{n}} нод",
     "jobAllNodes": "все ноды",
-    "jobLinksN": "{{n}} ссылок"
+    "jobLinksN": "{{n}} ссылок",
+    "jobConfirmDel": "Точно?"
   },
   "dns": {
     "title": "DNS",

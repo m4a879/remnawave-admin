@@ -4172,7 +4172,8 @@
     "jobEvery": "every {{m}} min",
     "jobNodesN": "{{n}} nodes",
     "jobAllNodes": "all nodes",
-    "jobLinksN": "{{n}} links"
+    "jobLinksN": "{{n}} links",
+    "jobConfirmDel": "Sure?"
   },
   "dns": {
     "title": "DNS",

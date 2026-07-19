@@ -182,7 +182,7 @@ function ProbeConfig({ cfg, onChange, operators, showOperators = true }: {
               </Button>
             </div>
           </div>
-          <div className="flex flex-wrap gap-1.5 mt-1">
+          <div className="flex flex-wrap gap-2 mt-1">
             {operators.map((op) => {
               const b = opBrand(op.id)
               const sel = cfg.ops.includes(op.op_key)
@@ -191,7 +191,7 @@ function ProbeConfig({ cfg, onChange, operators, showOperators = true }: {
               return (
                 <button key={op.op_key} type="button" disabled={disabled}
                   onClick={() => !disabled && toggleOp(op.op_key)}
-                  className={cn('inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[11px] border transition-colors',
+                  className={cn('inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/40',
                     sel ? 'border-primary-500/50 bg-primary-500/15 text-primary-200'
                       : 'border-[var(--glass-border)] text-muted-foreground hover:text-white',
                     disabled && 'opacity-40 cursor-not-allowed hover:text-muted-foreground')}
@@ -454,6 +454,7 @@ function ScheduleTab({ operators }: { operators: BsOperator[] }) {
   const { data, isLoading } = useQuery({ queryKey: ['bscheck-jobs'], queryFn: bscheckApi.jobs })
   const { data: nodesData } = useQuery({ queryKey: ['bscheck-nodes'], queryFn: bscheckApi.nodes })
   const [editing, setEditing] = useState<BsJob | 'new' | null>(null)
+  const [confirmDel, setConfirmDel] = useState<number | null>(null)
   const jobs = data || []
   const nodes = nodesData || []
 
@@ -493,12 +494,18 @@ function ScheduleTab({ operators }: { operators: BsOperator[] }) {
                 {job.budget_daily > 0 && <span className="text-[11px] text-muted-foreground">≤ {job.budget_daily} ◈</span>}
                 <span className="ml-auto text-[11px] text-muted-foreground">{job.last_run_at ? fmtDate(job.last_run_at) : t('bscheck.autoNever')}</span>
               </div>
-              <div className="mt-1 flex items-center gap-2">
+              <div className="mt-2 flex items-center gap-2">
                 <span className="text-[11px] font-mono text-muted-foreground truncate flex-1">{jobTargetSummary(job, t)}</span>
                 {canCheck && (
                   <>
-                    <Button size="sm" variant="ghost" className="h-7 w-7" onClick={() => setEditing(job)} aria-label={t('bscheck.jobEdit')}><Pencil className="w-3.5 h-3.5" /></Button>
-                    <Button size="sm" variant="ghost" className="h-7 w-7 text-red-400" onClick={() => del.mutate(job.id)} aria-label={t('common.delete')}><Trash2 className="w-3.5 h-3.5" /></Button>
+                    <Button size="sm" variant="outline" className="gap-1.5 min-h-[36px]" onClick={() => { setEditing(job); setConfirmDel(null) }}>
+                      <Pencil className="w-3.5 h-3.5" /> {t('bscheck.jobEdit')}
+                    </Button>
+                    <Button size="sm" variant="outline"
+                      className={cn('gap-1.5 min-h-[36px]', confirmDel === job.id ? 'bg-red-600 text-white hover:bg-red-500' : 'text-red-400 hover:text-red-300')}
+                      onClick={() => { if (confirmDel === job.id) { del.mutate(job.id); setConfirmDel(null) } else setConfirmDel(job.id) }}>
+                      <Trash2 className="w-3.5 h-3.5" /> {confirmDel === job.id ? t('bscheck.jobConfirmDel') : t('common.delete')}
+                    </Button>
                   </>
                 )}
               </div>
@@ -585,13 +592,13 @@ function JobDialog({ job, operators, nodes, onClose, onSaved }: {
           {kind === 'node' && (
             <div>
               <Label>{t('bscheck.autoNodes')}</Label>
-              <div className="flex flex-wrap gap-1.5 mt-1">
+              <div className="flex flex-wrap gap-2 mt-1">
                 {nodes.map((n) => {
                   const sel = selNodes.includes(n.uuid)
                   return (
                     <button key={n.uuid} type="button"
                       onClick={() => setSelNodes((p) => p.includes(n.uuid) ? p.filter((x) => x !== n.uuid) : [...p, n.uuid])}
-                      className={cn('px-2 py-0.5 rounded-md text-[11px] border transition-colors',
+                      className={cn('px-2.5 py-1 rounded-md text-[11px] border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/40',
                         sel ? 'border-primary-500/50 bg-primary-500/15 text-primary-200' : 'border-[var(--glass-border)] text-muted-foreground hover:text-white')}>
                       {n.name}
                     </button>
@@ -638,7 +645,7 @@ function JobDialog({ job, operators, nodes, onClose, onSaved }: {
           {operators.length > 0 && (
             <div>
               <Label>{t('bscheck.operators')}</Label>
-              <div className="flex flex-wrap gap-1.5 mt-1">
+              <div className="flex flex-wrap gap-2 mt-1">
                 {operators.map((op) => {
                   const b = opBrand(op.id)
                   const sel = ops.includes(op.op_key)
@@ -647,7 +654,7 @@ function JobDialog({ job, operators, nodes, onClose, onSaved }: {
                   return (
                     <button key={op.op_key} type="button" disabled={off}
                       onClick={() => !off && setOps((p) => p.includes(op.op_key) ? p.filter((x) => x !== op.op_key) : [...p, op.op_key])}
-                      className={cn('inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[11px] border transition-colors',
+                      className={cn('inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/40',
                         sel ? 'border-primary-500/50 bg-primary-500/15 text-primary-200' : 'border-[var(--glass-border)] text-muted-foreground hover:text-white',
                         off && 'opacity-40 cursor-not-allowed hover:text-muted-foreground')}>
                       <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: b.bg }} />
@@ -1314,7 +1321,7 @@ function ConfigTab({ operators }: { operators: BsOperator[] }) {
       {operators.length > 0 && (
         <div>
           <Label>{t('bscheck.selectedModems')}</Label>
-          <div className="flex flex-wrap gap-1.5 mt-1">
+          <div className="flex flex-wrap gap-2 mt-1">
             {operators.map((op) => {
               const b = opBrand(op.id)
               const sel = modems.includes(op.op_key)
@@ -1323,7 +1330,7 @@ function ConfigTab({ operators }: { operators: BsOperator[] }) {
               return (
                 <button key={op.op_key} type="button" disabled={off}
                   onClick={() => !off && toggleModem(op.op_key)}
-                  className={cn('inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[11px] border transition-colors',
+                  className={cn('inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/40',
                     sel ? 'border-primary-500/50 bg-primary-500/15 text-primary-200'
                       : 'border-[var(--glass-border)] text-muted-foreground hover:text-white',
                     off && 'opacity-40 cursor-not-allowed hover:text-muted-foreground')}>
