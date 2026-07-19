@@ -6,10 +6,10 @@
 запускать пробу и управлять токеном).
 """
 import logging
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from web.backend.api.deps import AdminUser, require_permission
 from web.backend.core import bscheck as bs
@@ -32,7 +32,8 @@ class TokenIn(BaseModel):
 
 
 class ProbeIn(BaseModel):
-    target: str = Field(min_length=1, max_length=255)
+    target: Optional[str] = None              # одна цель (проверка ноды)
+    targets: Optional[List[str]] = None       # 1..10 целей (мульти-проверка)
     operators: List[str] = Field(default_factory=list)   # op_key[]; пусто = все
     probes: Dict[str, bool] = Field(default_factory=lambda: {"icmp": True, "tcp": True, "sni": False})
     sni_hosts: List[str] = Field(default_factory=list)
@@ -45,10 +46,74 @@ class ProbeIn(BaseModel):
             raise ValueError("dpi must be on|any")
         return v
 
+    @model_validator(mode="after")
+    def _has_target(self):
+        if not (self.target and self.target.strip()) and not (self.targets and any(t.strip() for t in self.targets)):
+            raise ValueError("target or targets required")
+        if self.targets and len(self.targets) > 10:
+            raise ValueError("too many targets (max 10)")
+        return self
+
+
+class ScanIn(BaseModel):
+    cidr: str = Field(min_length=9, max_length=32)   # ровно один /24
+    operators: List[str] = Field(default_factory=list)
+    probes: Dict[str, bool] = Field(default_factory=lambda: {"icmp": True, "tcp": True, "sni": False})
+    sni_hosts: List[str] = Field(default_factory=list)
+    dpi: str = "on"
+
+    @field_validator("dpi")
+    @classmethod
+    def _dpi(cls, v: str) -> str:
+        if v not in ("on", "any"):
+            raise ValueError("dpi must be on|any")
+        return v
+
+
+class VlessIn(BaseModel):
+    raw_input: str = Field(min_length=1, max_length=1_000_000)
+    selected_modems: List[str] = Field(default_factory=list)
+    dpi: str = "on"
+    core: str = "stable"
+
+    @field_validator("dpi")
+    @classmethod
+    def _dpi(cls, v: str) -> str:
+        if v not in ("on", "any"):
+            raise ValueError("dpi must be on|any")
+        return v
+
+    @field_validator("core")
+    @classmethod
+    def _core(cls, v: str) -> str:
+        if v not in ("stable", "new"):
+            raise ValueError("core must be stable|new")
+        return v
+
+
+def _first_target(p: ProbeIn) -> str:
+    if p.target and p.target.strip():
+        return p.target.strip()
+    return (p.targets[0].strip() if p.targets and p.targets[0].strip() else "")
+
 
 def _body(p: ProbeIn) -> Dict:
-    return {"target": p.target.strip(), "operators": p.operators,
+    b = {"operators": p.operators, "probes": p.probes, "sni_hosts": p.sni_hosts, "dpi": p.dpi}
+    if p.targets:
+        b["targets"] = [t.strip() for t in p.targets if t.strip()][:10]
+    elif p.target:
+        b["target"] = p.target.strip()
+    return b
+
+
+def _scan_body(p: ScanIn) -> Dict:
+    return {"cidr": p.cidr.strip(), "operators": p.operators,
             "probes": p.probes, "sni_hosts": p.sni_hosts, "dpi": p.dpi}
+
+
+def _vless_body(p: VlessIn) -> Dict:
+    return {"raw_input": p.raw_input, "selected_modems": p.selected_modems,
+            "dpi": p.dpi, "core": p.core}
 
 
 # ── Токен / статус ───────────────────────────────────────────────
@@ -111,7 +176,7 @@ async def check_node(node_uuid: str, data: ProbeIn,
         result = await bs.probe(_body(data))
     except bs.BscheckError as e:
         raise _upstream(e)
-    summary = bs.summarize(result, data.target.strip())
+    summary = bs.summarize(result, _first_target(data))
     saved = await db_service.save_bscheck(
         node_uuid, summary["passed"], summary["total"], summary.get("cost_credits"),
         {"summary": summary, "raw": result}, created_by=admin.username)
@@ -132,3 +197,88 @@ async def node_history(node_uuid: str,
 @router.get("/summary")
 async def summary_map(admin: AdminUser = Depends(require_permission("bscheck", "view"))):
     return {"items": await db_service.get_bscheck_summary_map()}
+
+
+# ── Ноды с реальным IP / мульти-проверка / скан /24 / VLESS ──────
+
+
+@router.get("/nodes")
+async def nodes(admin: AdminUser = Depends(require_permission("bscheck", "view"))):
+    """Ноды с РЕАЛЬНЫМ публичным IP (agent_ip; фолбэк address) — для проверки БС.
+
+    За NetBird address = туннельный 100.x, поэтому для операторской пробы нужен
+    agent_ip (реальный источник трафика, миграция 0076).
+    """
+    rows = await db_service.get_all_nodes()
+    out = []
+    for n in rows:
+        out.append({
+            "uuid": n.get("uuid"), "name": n.get("name"),
+            "ip": n.get("agent_ip") or n.get("address"),
+            "address": n.get("address"), "agent_ip": n.get("agent_ip"),
+        })
+    return {"items": out}
+
+
+@router.post("/probe")
+async def probe_multi(data: ProbeIn,
+                      admin: AdminUser = Depends(require_permission("bscheck", "check"))):
+    """Проба одной или нескольких (до 10) целей — общий инструмент, не по ноде."""
+    try:
+        result = await bs.probe(_body(data))
+    except bs.BscheckError as e:
+        raise _upstream(e)
+    await write_audit_log(admin_id=admin.account_id, admin_username=admin.username,
+                          action="bscheck.probe", resource="bscheck", resource_id=_first_target(data))
+    return {"targets": bs.summarize_all(result), "cost_credits": result.get("cost_credits")}
+
+
+@router.post("/scans/preview")
+async def scans_preview(data: ScanIn,
+                        admin: AdminUser = Depends(require_permission("bscheck", "view"))):
+    try:
+        return await bs.scans_preview(_scan_body(data))
+    except bs.BscheckError as e:
+        raise _upstream(e)
+
+
+@router.post("/scans")
+async def scans_submit(data: ScanIn,
+                       admin: AdminUser = Depends(require_permission("bscheck", "check"))):
+    try:
+        res = await bs.scans_submit(_scan_body(data))
+    except bs.BscheckError as e:
+        raise _upstream(e)
+    await write_audit_log(admin_id=admin.account_id, admin_username=admin.username,
+                          action="bscheck.scan", resource="bscheck", resource_id=data.cidr)
+    return res
+
+
+@router.get("/scans/{scan_id}")
+async def scans_status(scan_id: str,
+                       admin: AdminUser = Depends(require_permission("bscheck", "view"))):
+    try:
+        return await bs.scans_status(scan_id)
+    except bs.BscheckError as e:
+        raise _upstream(e)
+
+
+@router.post("/vless")
+async def vless_submit(data: VlessIn,
+                       admin: AdminUser = Depends(require_permission("bscheck", "check"))):
+    try:
+        res = await bs.vless_submit(_vless_body(data))
+    except bs.BscheckError as e:
+        raise _upstream(e)
+    await write_audit_log(admin_id=admin.account_id, admin_username=admin.username,
+                          action="bscheck.vless", resource="bscheck", resource_id="config")
+    return res
+
+
+@router.get("/vless/{test_id}")
+async def vless_status(test_id: str,
+                       admin: AdminUser = Depends(require_permission("bscheck", "view"))):
+    try:
+        return await bs.vless_status(test_id)
+    except bs.BscheckError as e:
+        raise _upstream(e)

@@ -139,6 +139,38 @@ async def probe(body: Dict[str, Any]) -> Dict[str, Any]:
     return data if isinstance(data, dict) else {}
 
 
+# ── Скан /24 и VLESS-тест (асинхронные: submit -> poll) ───────────
+
+async def scans_preview(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Цена скана /24 без списания."""
+    data = await _request("POST", "/scans/preview", json_body=body)
+    return data if isinstance(data, dict) else {}
+
+
+async def scans_submit(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Запустить скан /24 (async → scan_id). Платно (Idempotency-Key)."""
+    data = await _request("POST", "/scans", json_body=body, idempotency=True, timeout=30)
+    return data if isinstance(data, dict) else {}
+
+
+async def scans_status(scan_id: str) -> Dict[str, Any]:
+    """Статус/результат скана (поллинг, бесплатно)."""
+    data = await _request("GET", f"/scans/{scan_id}")
+    return data if isinstance(data, dict) else {}
+
+
+async def vless_submit(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Запустить тест VLESS/… конфига (async → test_id). Платно."""
+    data = await _request("POST", "/vless", json_body=body, idempotency=True, timeout=30)
+    return data if isinstance(data, dict) else {}
+
+
+async def vless_status(test_id: str) -> Dict[str, Any]:
+    """Статус/результат VLESS-теста (поллинг, бесплатно; result при result_ready)."""
+    data = await _request("GET", f"/vless/{test_id}")
+    return data if isinstance(data, dict) else {}
+
+
 # ── Разбор результата пробы для бейджа ───────────────────────────
 
 def summarize(result: Dict[str, Any], target: str) -> Dict[str, Any]:
@@ -173,3 +205,15 @@ def summarize(result: Dict[str, Any], target: str) -> Dict[str, Any]:
         "skipped_dpi_off": [s.get("operator") for s in (result.get("skipped_dpi_off") or [])
                             if isinstance(s, dict)],
     }
+
+
+def summarize_all(result: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Свести probe с несколькими целями: [{target, passed, total, operators}]."""
+    by_target = result.get("by_target") or {}
+    out: List[Dict[str, Any]] = []
+    for tgt in by_target:
+        s = summarize(result, tgt)
+        s["target"] = tgt
+        out.append(s)
+    out.sort(key=lambda x: x["target"])
+    return out

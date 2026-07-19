@@ -112,3 +112,64 @@ class TestClient:
 
         with patch("httpx.AsyncClient", _patched_client(h)):
             assert await bs.verify_token("bad") is False
+
+
+# ── summarize_all (мульти-цель) ──────────────────────────────────
+
+
+class TestSummarizeAll:
+    def test_multi_target(self):
+        result = {"by_target": {
+            "1.1.1.1": {"by_operator": {"ufo1:mts": {"ok": True, "channel_state": "DPI_ON"}}},
+            "2.2.2.2": {"by_operator": {"ufo1:mts": {"ok": False, "channel_state": "DPI_ON"}}}}}
+        rows = bs.summarize_all(result)
+        assert len(rows) == 2
+        assert rows[0]["target"] == "1.1.1.1" and rows[0]["passed"] == 1
+        assert rows[1]["target"] == "2.2.2.2" and rows[1]["passed"] == 0
+
+
+# ── Скан /24 и VLESS ─────────────────────────────────────────────
+
+
+class TestScansVless:
+    @pytest.mark.asyncio
+    async def test_scan_submit_and_status(self):
+        def h(r):
+            if r.url.path == "/v1/scans" and r.method == "POST":
+                assert r.headers.get("Idempotency-Key")
+                return httpx.Response(200, json={"outcome": "queued", "scan_id": 12345, "state": "running"})
+            if r.url.path == "/v1/scans/12345":
+                return httpx.Response(200, json={"scan_id": 12345, "state": "done",
+                                                 "result": {"up_n": 7, "total": 256}})
+            return httpx.Response(404)
+
+        with _token(), patch("httpx.AsyncClient", _patched_client(h)):
+            sub = await bs.scans_submit({"cidr": "1.2.3.0/24", "operators": ["ufo1:mts"]})
+            st = await bs.scans_status("12345")
+        assert sub["scan_id"] == 12345 and st["state"] == "done" and st["result"]["up_n"] == 7
+
+    @pytest.mark.asyncio
+    async def test_scan_preview(self):
+        def h(r):
+            return httpx.Response(200, json={"cost_credits": 240, "total_ips": 256})
+
+        with _token(), patch("httpx.AsyncClient", _patched_client(h)):
+            p = await bs.scans_preview({"cidr": "1.2.3.0/24"})
+        assert p["cost_credits"] == 240
+
+    @pytest.mark.asyncio
+    async def test_vless_submit_and_status(self):
+        def h(r):
+            if r.url.path == "/v1/vless" and r.method == "POST":
+                assert r.headers.get("Idempotency-Key")
+                return httpx.Response(200, json={"outcome": "queued", "test_id": 88, "cost_credits": 30})
+            if r.url.path == "/v1/vless/88":
+                return httpx.Response(200, json={"test_id": 88, "state": "done", "result_ready": True,
+                    "result": [{"server_name": "s1", "ok": True, "tunnel_up": True, "speed_mbps": 42.0}]})
+            return httpx.Response(404)
+
+        with _token(), patch("httpx.AsyncClient", _patched_client(h)):
+            sub = await bs.vless_submit({"raw_input": "vless://x", "dpi": "on"})
+            st = await bs.vless_status("88")
+        assert sub["test_id"] == 88 and st["result_ready"] is True
+        assert st["result"][0]["speed_mbps"] == 42.0
