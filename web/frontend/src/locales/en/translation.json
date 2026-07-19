@@ -1899,6 +1899,15 @@
     "telegramIdHint": "Telegram ID (optional, for Telegram login)",
     "hasBotAccess": "Bot access enabled",
     "unrestrictedUserAccess": "Can view all users",
+    "authMethods": {
+      "restrict": "Restrict login methods",
+      "hint": "The admin will only be able to sign in with the selected methods. Others are rejected.",
+      "pickOne": "Select at least one login method or turn off the restriction.",
+      "password": "Password",
+      "telegram": "Telegram",
+      "passkey": "Passkey",
+      "oauth": "OAuth"
+    },
     "selectRole": "Select role",
     "password": "Password",
     "newPassword": "New password",

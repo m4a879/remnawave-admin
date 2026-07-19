@@ -276,7 +276,11 @@ interface AdminFormData {
   has_bot_access: boolean
   unlimited_traffic_policy: string
   unrestricted_user_access: boolean
+  restrict_auth_methods: boolean
+  allowed_auth_methods: string[]
 }
+
+const AUTH_METHOD_OPTIONS = ['password', 'telegram', 'passkey', 'oauth'] as const
 
 const emptyForm: AdminFormData = {
   username: '',
@@ -290,6 +294,8 @@ const emptyForm: AdminFormData = {
   has_bot_access: false,
   unlimited_traffic_policy: 'allowed',
   unrestricted_user_access: false, // scoping ON по умолчанию для новых админов (изоляция multi-tenant)
+  restrict_auth_methods: false,
+  allowed_auth_methods: [],
 }
 
 function AdminFormDialog({
@@ -329,12 +335,19 @@ function AdminFormDialog({
         has_bot_access: editingAdmin.has_bot_access || false,
         unlimited_traffic_policy: editingAdmin.unlimited_traffic_policy || 'allowed',
         unrestricted_user_access: editingAdmin.unrestricted_user_access ?? true,
+        restrict_auth_methods: !!(editingAdmin.allowed_auth_methods && editingAdmin.allowed_auth_methods.length),
+        allowed_auth_methods: editingAdmin.allowed_auth_methods || [],
       }
     }
     return { ...emptyForm }
   })
 
   const handleSubmit = () => {
+    // Ограничение методов включено, но ни один не выбран — это локаут.
+    if (form.restrict_auth_methods && form.allowed_auth_methods.length === 0) {
+      onLocalError?.(t('admins.authMethods.pickOne'))
+      return
+    }
     if (editingAdmin) {
       const update: AdminAccountUpdate = {}
       if (form.username && form.username !== editingAdmin.username) update.username = form.username
@@ -369,6 +382,12 @@ function AdminFormDialog({
       if (form.unrestricted_user_access !== (editingAdmin.unrestricted_user_access ?? true)) {
         update.unrestricted_user_access = form.unrestricted_user_access
       }
+      // Политика метода входа: сравниваем как отсортированные множества.
+      const newMethods = form.restrict_auth_methods ? [...form.allowed_auth_methods].sort() : []
+      const oldMethods = [...(editingAdmin.allowed_auth_methods || [])].sort()
+      if (JSON.stringify(newMethods) !== JSON.stringify(oldMethods)) {
+        update.allowed_auth_methods = form.restrict_auth_methods ? form.allowed_auth_methods : []
+      }
       // If no fields changed, don't submit — avoid a misleading success toast.
       if (Object.keys(update).length === 0) {
         const msg = t('admins.errors.noChanges', { defaultValue: 'No changes to save.' })
@@ -390,6 +409,9 @@ function AdminFormDialog({
       if (form.max_traffic_gb) create.max_traffic_gb = parseInt(form.max_traffic_gb)
       if (form.max_nodes) create.max_nodes = parseInt(form.max_nodes)
       if (form.max_hosts) create.max_hosts = parseInt(form.max_hosts)
+      if (form.restrict_auth_methods && form.allowed_auth_methods.length) {
+        create.allowed_auth_methods = form.allowed_auth_methods
+      }
       onSave(create)
     }
   }
@@ -453,6 +475,48 @@ function AdminFormDialog({
               className="rounded border-[var(--glass-border)] bg-[var(--glass-bg)]"
             />
             <Label htmlFor="unrestricted_user_access" className="cursor-pointer">{t('admins.unrestrictedUserAccess')}</Label>
+          </div>
+
+          <div className="space-y-2">
+            <div className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                id="restrict_auth_methods"
+                checked={form.restrict_auth_methods}
+                onChange={(e) => setForm({ ...form, restrict_auth_methods: e.target.checked })}
+                className="rounded border-[var(--glass-border)] bg-[var(--glass-bg)]"
+              />
+              <Label htmlFor="restrict_auth_methods" className="cursor-pointer">{t('admins.authMethods.restrict')}</Label>
+            </div>
+            {form.restrict_auth_methods && (
+              <div className="pl-6 space-y-1.5">
+                <p className="text-xs text-dark-300">{t('admins.authMethods.hint')}</p>
+                <div className="flex flex-wrap gap-2">
+                  {AUTH_METHOD_OPTIONS.map((m) => {
+                    const on = form.allowed_auth_methods.includes(m)
+                    return (
+                      <button
+                        key={m}
+                        type="button"
+                        onClick={() => setForm({
+                          ...form,
+                          allowed_auth_methods: on
+                            ? form.allowed_auth_methods.filter((x) => x !== m)
+                            : [...form.allowed_auth_methods, m],
+                        })}
+                        className={`px-3 py-1.5 rounded-lg text-sm border transition-colors ${
+                          on
+                            ? 'bg-primary-500/20 border-primary-500/40 text-primary-200'
+                            : 'bg-[var(--glass-bg)] border-[var(--glass-border)] text-dark-300'
+                        }`}
+                      >
+                        {t(`admins.authMethods.${m}`)}
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+            )}
           </div>
 
           <div>

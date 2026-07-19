@@ -160,6 +160,7 @@ ADMIN_UPDATE_COLUMNS: List[str] = [
     "unlimited_traffic_policy",
     "unrestricted_user_access",
     "has_bot_access",
+    "allowed_auth_methods",
 ]
 
 ADMIN_UPDATE_COLUMNS_SET = frozenset(ADMIN_UPDATE_COLUMNS)

@@ -1899,6 +1899,15 @@
     "telegramIdHint": "Telegram ID (опционально, для входа через Telegram)",
     "hasBotAccess": "Доступ к боту",
     "unrestrictedUserAccess": "Может видеть всех пользователей",
+    "authMethods": {
+      "restrict": "Ограничить способы входа",
+      "hint": "Админ сможет входить только выбранными способами. Остальные будут отклонены.",
+      "pickOne": "Выберите хотя бы один способ входа или снимите ограничение.",
+      "password": "Пароль",
+      "telegram": "Telegram",
+      "passkey": "Passkey",
+      "oauth": "OAuth"
+    },
     "selectRole": "Выберите роль",
     "password": "Пароль",
     "newPassword": "Новый пароль",

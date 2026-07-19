@@ -35,6 +35,7 @@ from web.backend.core.security import (
 )
 from web.backend.core.token_blacklist import token_blacklist
 from web.backend.core import sessions as _sessions
+from web.backend.core.auth_policy import method_allowed
 from web.backend.core.totp import (
     generate_totp_secret,
     encrypt_totp_secret,
@@ -271,6 +272,7 @@ async def telegram_login(request: Request, response: Response, data: TelegramAut
     # Check 2FA requirement (global toggle)
     totp_required = config_service.get("auth_totp_required", False)
     account = await _get_rbac_account(subject)
+    _check_method_policy(account, "telegram", client_ip, username)
 
     if totp_required and account:
         # Don't notify login success yet — wait for 2FA completion
@@ -363,6 +365,7 @@ async def password_login(request: Request, response: Response, data: LoginReques
     # Check 2FA requirement (global toggle)
     totp_required = config_service.get("auth_totp_required", False)
     account = await _get_rbac_account(subject)
+    _check_method_policy(account, "password", client_ip, data.username)
 
     if totp_required and account:
         # Don't notify login success yet — wait for 2FA completion
@@ -404,6 +407,14 @@ def _get_subject(admin: AdminUser) -> str:
     if admin.auth_method == "password":
         return f"pwd:{admin.username}"
     return str(admin.telegram_id)
+
+
+def _check_method_policy(account: Optional[dict], method: str, client_ip: str, username: str) -> None:
+    """403, если способ входа запрещён политикой аккаунта (см. auth_policy)."""
+    if account and not method_allowed(account, method):
+        log_auth_failure(client_ip, username, method, "Method disallowed by admin policy")
+        logger.warning("Login method '%s' blocked by policy for '%s'", method, username)
+        raise api_error(403, E.FORBIDDEN, "Этот способ входа запрещён политикой для вашего аккаунта")
 
 
 async def _issue_login(
@@ -1057,6 +1068,7 @@ async def wa_login_finish(request: Request, response: Response, data: WaLoginFin
     login_guard.record_success(client_ip)
     username = acc.get("username") or (str(acc.get("telegram_id")) if acc.get("telegram_id") else f"admin{acc['id']}")
     subject = ("pwd:" + acc["username"]) if acc.get("username") else str(acc.get("telegram_id"))
+    _check_method_policy(acc, "passkey", client_ip, username)
     logger.info("Passkey login for '%s' from %s", username, client_ip)
     await notify_login_success(ip=client_ip, username=username, auth_method="passkey")
     access_token, refresh_token = await _issue_login(
@@ -1165,6 +1177,7 @@ async def oauth_callback(request: Request, response: Response, data: OAuthCallba
     login_guard.record_success(client_ip)
     username = acc.get("username") or (str(acc.get("telegram_id")) if acc.get("telegram_id") else f"admin{acc['id']}")
     subject = ("pwd:" + acc["username"]) if acc.get("username") else str(acc.get("telegram_id"))
+    _check_method_policy(acc, "oauth", client_ip, username)
     logger.info("OAuth(%s) login for '%s' from %s", provider, username, client_ip)
     await notify_login_success(ip=client_ip, username=username, auth_method=f"oauth:{provider}")
     access_token, refresh_token = await _issue_login(

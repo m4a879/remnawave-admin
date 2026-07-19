@@ -31,6 +31,7 @@ export interface AdminAccount {
   has_bot_access: boolean
   unlimited_traffic_policy: string
   unrestricted_user_access: boolean
+  allowed_auth_methods: string[] | null
   users_created: number
   traffic_used_bytes: number
   nodes_created: number
@@ -54,6 +55,7 @@ export interface AdminAccountCreate {
   has_bot_access?: boolean
   unlimited_traffic_policy?: string
   unrestricted_user_access?: boolean
+  allowed_auth_methods?: string[] | null
 }
 
 export interface AdminAccountUpdate {
@@ -69,6 +71,7 @@ export interface AdminAccountUpdate {
   has_bot_access?: boolean
   unlimited_traffic_policy?: string
   unrestricted_user_access?: boolean
+  allowed_auth_methods?: string[] | null
 }
 
 export interface RoleCreate {
