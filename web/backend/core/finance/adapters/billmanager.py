@@ -136,12 +136,21 @@ class BillmanagerAdapter(HosterAdapter):
         try:
             data = resp.json()
         except ValueError:
-            # диагностика: что именно пришло вместо JSON (HTML логина/визитки,
-            # Cloudflare-челлендж, неверный адрес) — видно content-type и начало тела
+            # диагностика: что пришло вместо JSON. Частые случаи: анти-бот
+            # проверка хостера («подтвердите, что вы человек»), HTML логина/
+            # визитки, неверный адрес — видно по content-type и началу тела.
             ct = resp.headers.get("content-type", "?")
             snippet = " ".join((resp.text or "").split())[:140]
+            low = snippet.lower()
+            if any(k in low for k in ("verify you", "security check", "are human",
+                                      "captcha", "проверк", "robot", "challenge")):
+                raise AdapterError(
+                    "Хостер включил анти-бот проверку («подтвердите, что вы человек») перед "
+                    "панелью — автосинк по API невозможен без действий на его стороне. "
+                    "Попросите хостера добавить IP сервера в whitelist или открыть доступ к "
+                    "API, либо ведите этого провайдера в финмодуле вручную.")
             hint = ""
-            if "<html" in snippet.lower() or "<!doctype" in snippet.lower():
+            if "<html" in low or "<!doctype" in low:
                 hint = (" — пришла HTML-страница, а не API. Проверьте адрес: нужен корень "
                         "BILLmanager (напр. https://my.ВАШ-ХОСТ), не сайт-визитка; либо панель "
                         "за Cloudflare/WAF")
