@@ -366,6 +366,13 @@ DEFAULT_CONFIG_DEFINITIONS: List[Dict[str, Any]] = [
         "description": "Управляется на странице «DNS», не здесь",
         "default_value": "", "is_secret": True, "is_readonly": True, "sort_order": 93,
     },
+    {
+        "key": "dns_creds_aeza",
+        "value_type": "string", "category": "general",
+        "display_name": "DNS: Aeza (зашифр.)",
+        "description": "Управляется на странице «DNS», не здесь",
+        "default_value": "", "is_secret": True, "is_readonly": True, "sort_order": 94,
+    },
 
     # === SYNC ===
     {

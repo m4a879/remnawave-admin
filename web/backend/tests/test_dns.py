@@ -24,7 +24,7 @@ class TestRegistry:
         from web.backend.core import dns
 
         slugs = {p.slug for p in dns.list_providers()}
-        assert {"cloudflare", "timeweb", "regru", "selectel"} <= slugs
+        assert {"cloudflare", "timeweb", "regru", "selectel", "aeza"} <= slugs
         assert dns.get_provider("cloudflare").proxyable == ["A", "AAAA", "CNAME"]
         assert dns.get_provider("regru").supports_ttl is False
         assert dns.get_provider("timeweb").proxyable == []
@@ -236,6 +236,53 @@ class TestSelectelDns:
 
         with patch("httpx.AsyncClient", _patched_client(h)):
             assert await SelectelProvider().verify({"token": "bad"}) is False
+
+
+# ── Aeza ─────────────────────────────────────────────────────────
+
+
+class TestAezaDns:
+    @pytest.mark.asyncio
+    async def test_zones_records_create(self):
+        from web.backend.core.dns.aeza import AezaProvider
+
+        seen = {}
+
+        def h(request: httpx.Request) -> httpx.Response:
+            assert request.headers.get("X-API-KEY") == "KEY"
+            p, m = request.url.path, request.method
+            if p == "/api/v2/domains" and m == "GET":
+                return httpx.Response(200, json={"data": {"items": [
+                    {"id": 3413, "name": "example.com"}]}})
+            if p == "/api/v2/domains/3413/records" and m == "GET":
+                return httpx.Response(200, json={"data": {"items": [
+                    {"id": 1, "type": "A", "name": "www", "value": "1.2.3.4", "ttl": 3600}]}})
+            if p == "/api/v2/domains/3413/records" and m == "POST":
+                seen.update(json.loads(request.content.decode()))
+                return httpx.Response(201, json={"data": {
+                    "id": 2, "type": "A", "name": "api", "value": "5.6.7.8"}})
+            return httpx.Response(404)
+
+        prov = AezaProvider()
+        with patch("httpx.AsyncClient", _patched_client(h)):
+            zs = await prov.list_zones({"api_key": "KEY"})
+            rs = await prov.list_records({"api_key": "KEY"}, "3413")
+            rec = await prov.create_record({"api_key": "KEY"}, "3413", {
+                "type": "A", "name": "api", "content": "5.6.7.8"})
+        assert zs[0].id == "3413" and zs[0].name == "example.com"
+        assert rs[0].name == "www" and rs[0].content == "1.2.3.4"
+        assert seen["type"] == "A" and seen["value"] == "5.6.7.8" and seen["name"] == "api"
+        assert rec.id == "2"
+
+    @pytest.mark.asyncio
+    async def test_verify_false_on_forbidden(self):
+        from web.backend.core.dns.aeza import AezaProvider
+
+        def h(request):
+            return httpx.Response(403, json={"error": "bad"})
+
+        with patch("httpx.AsyncClient", _patched_client(h)):
+            assert await AezaProvider().verify({"api_key": "bad"}) is False
 
 
 # ── Хранение кредов ──────────────────────────────────────────────
