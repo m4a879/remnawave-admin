@@ -22,11 +22,12 @@ class RepProvider(ABC):
     slug: str = ""
     name: str = ""
     needs_token: bool = True
+    handles_domain: bool = False   # умеет ли принимать домен (не только IP)
     signup_url: str = ""
 
     @abstractmethod
-    async def lookup(self, ip: str, token: Optional[str]) -> Dict[str, Any]:
-        """Вернуть НОРМАЛИЗОВАННЫЙ результат по IP (см. normalized())."""
+    async def lookup(self, target: str, token: Optional[str]) -> Dict[str, Any]:
+        """Вернуть НОРМАЛИЗОВАННЫЙ результат по IP/домену (см. normalized())."""
         raise NotImplementedError
 
 
@@ -51,13 +52,26 @@ def normalized(provider: str, ip: str, *, score: Optional[int] = None,
                is_hosting: Optional[bool] = None, is_tor: Optional[bool] = None,
                recent_abuse: Optional[bool] = None, country: Optional[str] = None,
                asn: Optional[str] = None, org: Optional[str] = None,
+               blocked: Optional[bool] = None, rkn_domain: Optional[str] = None,
+               blocked_subnets: Optional[List[str]] = None,
                raw: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     return {
         "provider": provider, "ip": ip, "score": score,
         "is_proxy": is_proxy, "is_vpn": is_vpn, "is_hosting": is_hosting,
         "is_tor": is_tor, "recent_abuse": recent_abuse,
+        "blocked": blocked, "rkn_domain": rkn_domain,
+        "blocked_subnets": blocked_subnets or None,
         "country": country, "asn": asn, "org": org, "raw": raw or {},
     }
+
+
+def looks_ip(s: str) -> bool:
+    import ipaddress
+    try:
+        ipaddress.ip_address(s.strip())
+        return True
+    except ValueError:
+        return False
 
 
 # ── Токены ───────────────────────────────────────────────────────
@@ -115,17 +129,24 @@ async def _write_value(key: str, value: str) -> None:
 
 # ── Проверка ─────────────────────────────────────────────────────
 
-async def lookup_all(ip: str) -> List[Dict[str, Any]]:
-    """Прогнать IP через всех НАСТРОЕННЫХ провайдеров (free — всегда)."""
+async def lookup_all(target: str) -> List[Dict[str, Any]]:
+    """Прогнать IP/домен через всех НАСТРОЕННЫХ провайдеров.
+
+    Домен — только через провайдеров с handles_domain (остальные умеют лишь IP).
+    """
+    target = target.strip()
+    is_ip = looks_ip(target)
     out: List[Dict[str, Any]] = []
     for slug, prov in _REGISTRY.items():
+        if not is_ip and not prov.handles_domain:
+            continue
         if prov.needs_token and not get_token(slug):
             continue
         try:
-            out.append(await prov.lookup(ip, get_token(slug)))
+            out.append(await prov.lookup(target, get_token(slug)))
         except RepError as e:
-            out.append({"provider": slug, "ip": ip, "error": str(e)})
+            out.append({"provider": slug, "ip": target, "error": str(e)})
         except Exception as e:  # noqa: BLE001
-            logger.warning("reputation %s(%s): %s", slug, ip, e)
-            out.append({"provider": slug, "ip": ip, "error": str(e)})
+            logger.warning("reputation %s(%s): %s", slug, target, e)
+            out.append({"provider": slug, "ip": target, "error": str(e)})
     return out

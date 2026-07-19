@@ -17,6 +17,9 @@ export interface RepResult {
   is_hosting?: boolean | null
   is_tor?: boolean | null
   recent_abuse?: boolean | null
+  blocked?: boolean | null
+  rkn_domain?: string | null
+  blocked_subnets?: string[] | null
   country?: string | null
   asn?: string | null
   org?: string | null
@@ -34,7 +37,7 @@ export const reputationApi = {
   async delCreds(slug: string): Promise<void> {
     await client.delete(`/reputation/providers/${slug}/creds`)
   },
-  async lookup(ip: string): Promise<{ ip: string; results: RepResult[] }> {
-    const { data } = await client.post('/reputation/lookup', { ip }); return data
+  async lookup(target: string): Promise<{ target: string; results: RepResult[] }> {
+    const { data } = await client.post('/reputation/lookup', { target }); return data
   },
 }

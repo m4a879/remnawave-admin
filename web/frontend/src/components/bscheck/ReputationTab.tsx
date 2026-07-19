@@ -32,9 +32,11 @@ function scoreTone(score: number): string {
 /** Вердикт по IP — в основном по abuse (флаги vpn/hosting для ноды ожидаемы). */
 function verdict(results: RepResult[], t: (k: string) => string): { label: string; tone: string } {
   const clean = results.filter((r) => !r.error)
+  const blocked = clean.some((r) => r.blocked)
   const abuse = clean.some((r) => r.recent_abuse) ||
     clean.some((r) => r.provider === 'abuseipdb' && (r.score ?? 0) >= 25)
   const maxScore = Math.max(0, ...clean.map((r) => r.score ?? 0))
+  if (blocked) return { label: t('reputation.verdictBlocked'), tone: 'bg-red-500/20 text-red-300' }
   if (abuse || maxScore >= 85) return { label: t('reputation.verdictDirty'), tone: 'bg-red-500/20 text-red-300' }
   if (maxScore >= 50) return { label: t('reputation.verdictSuspicious'), tone: 'bg-amber-500/20 text-amber-300' }
   return { label: t('reputation.verdictClean'), tone: 'bg-green-500/20 text-green-300' }
@@ -48,15 +50,21 @@ function Flag({ on, label, tone }: { on: boolean | null | undefined; label: stri
 function RepCard({ r }: { r: RepResult }) {
   const { t } = useTranslation()
   const providerName: Record<string, string> = {
-    ipapi: 'ip-api', ipinfo: 'ipinfo', ipqs: 'IPQualityScore', abuseipdb: 'AbuseIPDB',
+    ipapi: 'ip-api', ipinfo: 'ipinfo', ipqs: 'IPQualityScore',
+    abuseipdb: 'AbuseIPDB', cheburcheck: 'CheburCheck (РКН)',
   }
   return (
     <div className="rounded-lg border border-[var(--glass-border)] p-3 space-y-1.5">
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-2 flex-wrap">
         <span className="text-sm font-medium">{providerName[r.provider] || r.provider}</span>
         {r.score != null && (
           <Badge className={cn('text-[10px]', scoreTone(r.score))}>
             {r.provider === 'abuseipdb' ? t('reputation.abuse') : t('reputation.fraud')}: {r.score}
+          </Badge>
+        )}
+        {r.blocked != null && (
+          <Badge className={cn('text-[10px]', r.blocked ? 'bg-red-500/20 text-red-300' : 'bg-green-500/20 text-green-300')}>
+            {r.blocked ? t('reputation.blockedRkn') : t('reputation.notBlocked')}
           </Badge>
         )}
         {r.country && <span className="ml-auto text-[11px] text-muted-foreground">{r.country}</span>}
@@ -72,6 +80,10 @@ function RepCard({ r }: { r: RepResult }) {
             <Flag on={r.is_proxy} label="Proxy" tone="bg-amber-500/20 text-amber-300" />
             <Flag on={r.is_hosting} label="Hosting" tone="bg-white/10 text-muted-foreground" />
           </div>
+          {r.rkn_domain && <p className="text-[11px] text-red-300">{t('reputation.rknDomain')}: {r.rkn_domain}</p>}
+          {r.blocked_subnets && r.blocked_subnets.length > 0 && (
+            <p className="text-[11px] text-muted-foreground truncate">{r.blocked_subnets.join(', ')}</p>
+          )}
           {(r.asn || r.org) && (
             <p className="text-[11px] text-muted-foreground truncate">{[r.asn, r.org].filter(Boolean).join(' · ')}</p>
           )}
@@ -128,7 +140,7 @@ export default function ReputationTab() {
   const qc = useQueryClient()
   const canCheck = usePermissionStore((s) => s.hasPermission)('reputation', 'check')
   const [ip, setIp] = useState('')
-  const [current, setCurrent] = useState<{ ip: string; results: RepResult[] } | null>(null)
+  const [current, setCurrent] = useState<{ target: string; results: RepResult[] } | null>(null)
   const [tokenProv, setTokenProv] = useState<RepProvider | null>(null)
 
   const { data: providers } = useQuery({ queryKey: ['rep-providers'], queryFn: reputationApi.providers })
@@ -172,7 +184,7 @@ export default function ReputationTab() {
       <Card className="p-3 space-y-2">
         <Label>{t('reputation.checkIp')}</Label>
         <div className="flex items-center gap-2">
-          <Input value={ip} className="font-mono" placeholder="1.2.3.4"
+          <Input value={ip} className="font-mono" placeholder="1.2.3.4 или example.com"
             onChange={(e) => setIp(e.target.value)} />
           <Button className="gap-1.5 shrink-0" disabled={!ip.trim() || !anyConfigured || lookup.isPending}
             onClick={() => lookup.mutate(ip.trim())}>
@@ -202,7 +214,7 @@ export default function ReputationTab() {
       {current && (
         <Card className="p-3 space-y-3">
           <div className="flex items-center gap-2">
-            <span className="font-mono text-sm">{current.ip}</span>
+            <span className="font-mono text-sm">{current.target}</span>
             {v && <Badge className={cn('gap-1', v.tone)}>{v.tone.includes('red') ? <ShieldAlert className="w-3.5 h-3.5" /> : <ShieldCheck className="w-3.5 h-3.5" />}{v.label}</Badge>}
           </div>
           {!current.results.length ? (

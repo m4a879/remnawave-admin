@@ -56,3 +56,28 @@ class TestAdapters:
         with patch("httpx.AsyncClient", _patched(h)):
             with pytest.raises(ad.RepError, match="Invalid"):
                 await ad.Ipqs().lookup("1.2.3.4", "bad")
+
+    @pytest.mark.asyncio
+    async def test_cheburcheck(self):
+        def h(r):
+            return httpx.Response(200, json={"blocked": True, "rkn_domain": "rutracker.org",
+                                             "blocked_subnets": [], "ips": ["1.2.3.4"],
+                                             "cdn_providers": {"cloudflare": []},
+                                             "geo": {"asn": 13335, "country_code": "US",
+                                                     "organisation": "Cloudflare"}})
+        with patch("httpx.AsyncClient", _patched(h)):
+            d = await ad.Cheburcheck().lookup("rutracker.org", None)
+        assert d["blocked"] is True and d["rkn_domain"] == "rutracker.org"
+        assert d["asn"] == "AS13335" and d["country"] == "US"
+
+
+class TestLookupAll:
+    @pytest.mark.asyncio
+    async def test_domain_runs_only_domain_providers(self):
+        from web.backend.core.reputation import base as repbase
+
+        def h(r):
+            return httpx.Response(200, json={"blocked": False, "geo": {"country_code": "DE"}})
+        with patch("httpx.AsyncClient", _patched(h)), patch.object(repbase, "get_token", return_value=None):
+            res = await repbase.lookup_all("example.com")
+        assert {r["provider"] for r in res} == {"cheburcheck"}

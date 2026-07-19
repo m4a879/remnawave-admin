@@ -6,17 +6,23 @@ import httpx
 from web.backend.core.reputation.base import RepProvider, RepError, register, normalized
 
 _TIMEOUT = 15.0
+_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
 
 
 async def _get(url: str, *, headers: Optional[Dict[str, str]] = None,
                params: Optional[Dict[str, Any]] = None) -> Any:
+    hdrs = {"User-Agent": _UA, "Accept": "application/json"}
+    if headers:
+        hdrs.update(headers)
     try:
         async with httpx.AsyncClient(timeout=_TIMEOUT, follow_redirects=True) as c:
-            r = await c.get(url, headers=headers, params=params)
+            r = await c.get(url, headers=hdrs, params=params)
     except httpx.HTTPError as e:
         raise RepError(f"сеть: {e}")
     if r.status_code in (401, 403):
         raise RepError("токен отклонён")
+    if r.status_code == 404:
+        raise RepError("не найдено / не резолвится")
     if r.status_code == 429:
         raise RepError("лимит запросов исчерпан")
     try:
@@ -80,6 +86,33 @@ class Ipqs(RepProvider):
                           country=d.get("country_code"),
                           asn=(f"AS{d.get('ASN')}" if d.get("ASN") else None),
                           org=d.get("ISP"), raw=d)
+
+
+@register
+class Cheburcheck(RepProvider):
+    slug = "cheburcheck"
+    name = "CheburCheck (РКН)"
+    needs_token = False
+    handles_domain = True
+    signup_url = "https://cheburcheck.ru"
+
+    async def lookup(self, target: str, token: Optional[str]) -> Dict[str, Any]:
+        d = await _get("https://cheburcheck.ru/api/v1/check", params={"target": target})
+        if not isinstance(d, dict):
+            raise RepError("некорректный ответ")
+        geo = d.get("geo") or {}
+        asn_info = d.get("asn_info") or {}
+        asn_num = geo.get("asn") or asn_info.get("asn")
+        cdn = list((d.get("cdn_providers") or {}).keys())
+        return normalized("cheburcheck", target, blocked=bool(d.get("blocked")),
+                          rkn_domain=d.get("rkn_domain"),
+                          blocked_subnets=d.get("blocked_subnets") or None,
+                          country=geo.get("country_code"),
+                          asn=(f"AS{asn_num}" if asn_num else None),
+                          org=geo.get("organisation") or asn_info.get("organisation"),
+                          raw={"blocked": d.get("blocked"), "rkn_domain": d.get("rkn_domain"),
+                               "blocked_subnets": d.get("blocked_subnets"), "cdn_providers": cdn,
+                               "ips": d.get("ips"), "reverse_lookup": d.get("reverse_lookup")})
 
 
 @register

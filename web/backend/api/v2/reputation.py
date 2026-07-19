@@ -4,11 +4,13 @@
 VPN/proxy/hosting/tor. RBAC-ресурс `reputation` (view — список/lookup,
 check — управление токенами). Токены зашифрованы в bot_config.
 """
-import ipaddress
 import logging
+import re
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field, field_validator
+
+_DOMAIN_RE = re.compile(r"^(?=.{1,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,}$")
 
 from web.backend.api.deps import AdminUser, require_permission
 from web.backend.core import reputation as rep
@@ -23,17 +25,15 @@ class CredsIn(BaseModel):
 
 
 class LookupIn(BaseModel):
-    ip: str = Field(min_length=3, max_length=64)
+    target: str = Field(min_length=3, max_length=255)
 
-    @field_validator("ip")
+    @field_validator("target")
     @classmethod
-    def _ip(cls, v: str) -> str:
-        v = v.strip()
-        try:
-            ipaddress.ip_address(v)
-        except ValueError:
-            raise ValueError("некорректный IP")
-        return v
+    def _target(cls, v: str) -> str:
+        v = v.strip().lower()
+        if rep.looks_ip(v) or _DOMAIN_RE.match(v):
+            return v
+        raise ValueError("нужен IP или домен")
 
 
 @router.get("/providers")
@@ -73,4 +73,4 @@ async def del_creds(slug: str,
 @router.post("/lookup")
 async def lookup(data: LookupIn,
                  admin: AdminUser = Depends(require_permission("reputation", "view"))):
-    return {"ip": data.ip, "results": await rep.lookup_all(data.ip)}
+    return {"target": data.target, "results": await rep.lookup_all(data.target)}
