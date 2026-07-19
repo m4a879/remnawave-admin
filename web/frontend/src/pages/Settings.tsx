@@ -43,7 +43,6 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { cn } from '@/lib/utils'
-import Resources from './Resources'
 
 // Types matching backend ConfigItemResponse
 interface ConfigItem {
@@ -1450,7 +1449,6 @@ export default function Settings() {
         <TabsList>
           <TabsTrigger value="general">{t('settings.tabs.general')}</TabsTrigger>
           <TabsTrigger value="auth">{t('settings.tabs.auth')}</TabsTrigger>
-          <TabsTrigger value="resources">{t('settings.tabs.resources')}</TabsTrigger>
           <TabsTrigger value="faq">{t('settings.tabs.faq')}</TabsTrigger>
         </TabsList>
 
@@ -1461,10 +1459,6 @@ export default function Settings() {
           <PasskeysBlock />
           <OAuthBlock />
           <SessionsBlock />
-        </TabsContent>
-
-        <TabsContent value="resources" className="mt-4">
-          <Resources embedded />
         </TabsContent>
 
         <TabsContent value="faq" className="mt-4">

@@ -50,7 +50,7 @@ const TEMPLATE_TYPE_COLORS: Record<string, string> = {
   SINGBOX: 'bg-orange-500/15 text-orange-400 border-orange-500/20',
 }
 
-export default function Resources({ embedded }: { embedded?: boolean } = {}) {
+export default function Resources() {
   const { t } = useTranslation()
   const { formatDate } = useFormatters()
   const queryClient = useQueryClient()
@@ -237,30 +237,26 @@ export default function Resources({ embedded }: { embedded?: boolean } = {}) {
 
   if (hasError) {
     return (
-      <div className={embedded ? 'space-y-4' : 'space-y-6'}>
-        {!embedded && (
-          <div className="page-header">
-            <div>
-              <h1 className="page-header-title">{t('resources.title')}</h1>
-              <p className="text-dark-200 mt-1">{t('resources.subtitle')}</p>
-            </div>
-          </div>
-        )}
-        <QueryError onRetry={handleRetry} />
-      </div>
-    )
-  }
-
-  return (
-    <div className={embedded ? 'space-y-4' : 'space-y-6'}>
-      {!embedded && (
+      <div className="space-y-6">
         <div className="page-header">
           <div>
             <h1 className="page-header-title">{t('resources.title')}</h1>
             <p className="text-dark-200 mt-1">{t('resources.subtitle')}</p>
           </div>
         </div>
-      )}
+        <QueryError onRetry={handleRetry} />
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-6">
+      <div className="page-header">
+        <div>
+          <h1 className="page-header-title">{t('resources.title')}</h1>
+          <p className="text-dark-200 mt-1">{t('resources.subtitle')}</p>
+        </div>
+      </div>
 
       {/* Tabs */}
       <Tabs value={activeTab} onValueChange={setActiveTab}>

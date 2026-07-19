@@ -3060,7 +3060,6 @@
     "tabs": {
       "general": "Общие",
       "auth": "Методы авторизации",
-      "resources": "Ресурсы Remnawave",
       "faq": "FAQ"
     },
     "searchPlaceholder": "Поиск настроек...",

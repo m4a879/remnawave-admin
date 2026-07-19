@@ -3060,7 +3060,6 @@
     "tabs": {
       "general": "General",
       "auth": "Auth methods",
-      "resources": "Remnawave Resources",
       "faq": "FAQ"
     },
     "searchPlaceholder": "Search settings...",
