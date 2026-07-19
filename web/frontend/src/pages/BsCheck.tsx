@@ -37,7 +37,7 @@ import {
 import {
   ShieldCheck, RefreshCw, Loader2, Check, X, Key, History,
   Crosshair, Network, FileCode, Gauge, Wifi, AlertTriangle,
-  Clock, Plus, Pencil, Trash2,
+  Clock, Plus, Pencil, Trash2, ChevronRight,
 } from '@/components/brand/icons'
 import { cn } from '@/lib/utils'
 
@@ -239,7 +239,7 @@ function OperatorResults({ summary, operators, title }: {
         </span>
         {summary.cost_credits != null && <span className="text-muted-foreground shrink-0">◈ {summary.cost_credits}</span>}
       </div>
-      {summary.operators.map((o) => (
+      {(summary.operators || []).map((o) => (
         <div key={o.op} className="px-3 py-1.5 flex items-center gap-2 text-xs">
           {o.ok ? <Check className="w-4 h-4 text-green-400 shrink-0" /> : <X className="w-4 h-4 text-red-400 shrink-0" />}
           <OperatorTag opKey={o.op} operators={operators} />
@@ -252,7 +252,7 @@ function OperatorResults({ summary, operators, title }: {
           {o.error && <span className="text-red-300 truncate">{o.error}</span>}
         </div>
       ))}
-      {summary.skipped_dpi_off.length > 0 && (
+      {(summary.skipped_dpi_off?.length ?? 0) > 0 && (
         <div className="px-3 py-1.5 text-[11px] text-amber-300">
           {t('bscheck.skippedDpiOff')}: {summary.skipped_dpi_off.join(', ')}
         </div>
@@ -1183,12 +1183,14 @@ function VlessServers({ data, operators }: { data: any; operators: BsOperator[] 
                   const sitesTotal = leg.sites?.total ?? leg.sites_total ?? leg.websites_total
                   const timeMs = leg.time_ms ?? leg.duration_ms ?? leg.elapsed_ms
                   const timeS = leg.time_s ?? (typeof timeMs === 'number' ? Math.round(timeMs / 100) / 10 : undefined)
+                  const speed = leg.speed_mbps ?? leg.speed ?? leg.mbps
                   return (
                     <div key={j} className="px-3 py-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
                       <OperatorTag opKey={op} operators={operators} />
                       {tcpOk != null && <span className={tcpOk ? 'text-green-400' : 'text-red-400'}>TCP {tcpOk ? 'ok' : 'fail'}{tcpMs != null ? ` · ${tcpMs}ms` : ''}</span>}
                       {tunnel != null && <span className={tunnel ? 'text-green-400' : 'text-red-400'}>{t('bscheck.tunnelUp')}: {tunnel ? t('bscheck.up') : t('bscheck.down')}</span>}
                       {sitesTotal != null && <span className="text-muted-foreground">{t('bscheck.sites')}: {sitesOk ?? 0}/{sitesTotal}</span>}
+                      {speed != null && <span className="text-muted-foreground inline-flex items-center gap-1"><Gauge className="w-3 h-3" />{speed} Mbps</span>}
                       {timeS != null && <span className="ml-auto text-muted-foreground tabular-nums">{timeS}s</span>}
                     </div>
                   )
@@ -1374,16 +1376,27 @@ function ConfigTab({ operators }: { operators: BsOperator[] }) {
 
 // ── Вкладка «История» (журнал всех проверок) ─────────────────────
 
+function RawBlock({ data }: { data: any }) {
+  const { t } = useTranslation()
+  return (
+    <details className="text-xs" open>
+      <summary className="cursor-pointer text-muted-foreground">{t('bscheck.raw')}</summary>
+      <pre className="mt-1 max-h-72 overflow-auto rounded bg-black/30 p-2 text-[10px]">{JSON.stringify(data, null, 2)}</pre>
+    </details>
+  )
+}
+
 function HistoryResult({ row, operators }: { row: BsHistoryRow; operators: BsOperator[] }) {
   const r: any = row.result || {}
   if (row.kind === 'vless') return <VlessServers data={r} operators={operators} />
   if (row.kind === 'scan') return <ScanResult data={r} operators={operators} />
   if (row.kind === 'probe') {
     const targets: BsTargetSummary[] = Array.isArray(r.targets) ? r.targets : []
-    if (!targets.length) return <p className="text-sm text-muted-foreground">—</p>
-    return <div className="space-y-2">{targets.map((s) => <OperatorResults key={s.target} summary={s} operators={operators} title={s.target} />)}</div>
+    if (targets.length) return <div className="space-y-2">{targets.map((s) => <OperatorResults key={s.target} summary={s} operators={operators} title={s.target} />)}</div>
+    return <RawBlock data={r} />
   }
-  return r.summary ? <OperatorResults summary={r.summary} operators={operators} /> : <p className="text-sm text-muted-foreground">—</p>
+  if (r.summary) return <OperatorResults summary={r.summary} operators={operators} />
+  return <RawBlock data={r} />
 }
 
 function HistoryDetailDialog({ row, operators, onClose }: {
@@ -1425,13 +1438,14 @@ function HistoryTab({ operators }: { operators: BsOperator[] }) {
               <th className="px-3 py-2">{t('bscheck.histTarget')}</th>
               <th className="px-3 py-2">{t('bscheck.passed')}</th>
               <th className="px-3 py-2 w-16 text-right">◈</th>
+              <th className="px-2 py-2 w-8"></th>
             </tr>
           </thead>
           <tbody>
             {isLoading ? (
-              <tr><td colSpan={5} className="px-3 py-6"><Skeleton className="h-8 w-full" /></td></tr>
+              <tr><td colSpan={6} className="px-3 py-6"><Skeleton className="h-8 w-full" /></td></tr>
             ) : !items.length ? (
-              <tr><td colSpan={5} className="px-3 py-6 text-center text-muted-foreground">{t('bscheck.histEmpty')}</td></tr>
+              <tr><td colSpan={6} className="px-3 py-6 text-center text-muted-foreground">{t('bscheck.histEmpty')}</td></tr>
             ) : items.map((row) => (
               <tr key={row.id} className="border-b border-[var(--glass-border)]/50 hover:bg-white/5 cursor-pointer" onClick={() => setDetail(row)}>
                 <td className="px-3 py-2 text-xs text-muted-foreground whitespace-nowrap">{fmtDate(row.checked_at)}</td>
@@ -1439,6 +1453,7 @@ function HistoryTab({ operators }: { operators: BsOperator[] }) {
                 <td className="px-3 py-2 font-mono text-xs truncate max-w-[220px]">{row.target || '—'}</td>
                 <td className="px-3 py-2"><ResultBadge passed={row.passed} total={row.total} /></td>
                 <td className="px-3 py-2 text-right text-xs text-muted-foreground">{row.cost_credits ?? '—'}</td>
+                <td className="px-2 py-2 text-muted-foreground"><ChevronRight className="w-4 h-4" /></td>
               </tr>
             ))}
           </tbody>
