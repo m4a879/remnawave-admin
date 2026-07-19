@@ -114,11 +114,35 @@ function cfgFields(c: Cfg) {
   }
 }
 
+/** Живой набор op_key операторов, у которых БС сейчас выключен (DPI_OFF). */
+function offKeySet(operators: BsOperator[]): Set<string> {
+  return new Set(operators.filter((o) => o.channel_state === 'DPI_OFF').map((o) => o.op_key))
+}
+
+/** Переключатель «Только через БС» (dpi on↔any) + сброс DPI_OFF из выбора при локе. */
+function BsLockSwitch({ locked, onToggle }: { locked: boolean; onToggle: (v: boolean) => void }) {
+  const { t } = useTranslation()
+  return (
+    <label className="flex items-center gap-2 text-sm cursor-pointer">
+      <Switch checked={locked} onCheckedChange={onToggle} />
+      <span className={cn('flex items-center gap-1', locked ? 'text-primary-300' : 'text-amber-300')}>
+        <ShieldCheck className="w-3.5 h-3.5" />{t('bscheck.lockBs')}
+      </span>
+    </label>
+  )
+}
+
 function ProbeConfig({ cfg, onChange, operators, showOperators = true }: {
   cfg: Cfg; onChange: (c: Cfg) => void; operators: BsOperator[]; showOperators?: boolean
 }) {
   const { t } = useTranslation()
+  const qc = useQueryClient()
   const set = (patch: Partial<Cfg>) => onChange({ ...cfg, ...patch })
+  const locked = cfg.dpi === 'on'
+  const offKeys = offKeySet(operators)
+  const offCount = offKeys.size
+  const setLock = (v: boolean) =>
+    v ? set({ dpi: 'on', ops: cfg.ops.filter((k) => !offKeys.has(k)) }) : set({ dpi: 'any' })
   const toggleOp = (op: string) => set({
     ops: cfg.ops.includes(op) ? cfg.ops.filter((x) => x !== op) : [...cfg.ops, op],
   })
@@ -131,16 +155,11 @@ function ProbeConfig({ cfg, onChange, operators, showOperators = true }: {
             {p.toUpperCase()}
           </label>
         ))}
-        <div className="ml-auto w-52">
-          <Select value={cfg.dpi} onValueChange={(v) => set({ dpi: v })}>
-            <SelectTrigger className="h-8"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="on">{t('bscheck.dpiOn')}</SelectItem>
-              <SelectItem value="any">{t('bscheck.dpiAny')}</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
+        <div className="ml-auto"><BsLockSwitch locked={locked} onToggle={setLock} /></div>
       </div>
+      <p className={cn('text-[11px]', locked ? 'text-muted-foreground' : 'text-amber-400')}>
+        {locked ? t('bscheck.lockBsHint') : t('bscheck.bsAnyWarn')}
+      </p>
 
       {cfg.probes.sni && (
         <div>
@@ -152,22 +171,34 @@ function ProbeConfig({ cfg, onChange, operators, showOperators = true }: {
 
       {showOperators && operators.length > 0 && (
         <div>
-          <Label>{t('bscheck.operators')}</Label>
+          <div className="flex items-center justify-between gap-2">
+            <Label>{t('bscheck.operators')}</Label>
+            <div className="flex items-center gap-2">
+              {offCount > 0 && <span className="text-[11px] text-amber-400">{t('bscheck.bsOffCount', { count: offCount })}</span>}
+              <Button type="button" variant="ghost" size="sm" className="h-6 gap-1 text-[11px]"
+                onClick={() => qc.invalidateQueries({ queryKey: ['bscheck-operators'] })}>
+                <RefreshCw className="w-3 h-3" />{t('bscheck.refreshOps')}
+              </Button>
+            </div>
+          </div>
           <div className="flex flex-wrap gap-1.5 mt-1">
             {operators.map((op) => {
               const b = opBrand(op.id)
               const sel = cfg.ops.includes(op.op_key)
+              const isOff = op.channel_state === 'DPI_OFF'
+              const disabled = locked && isOff
               return (
-                <button key={op.op_key} type="button" onClick={() => toggleOp(op.op_key)}
+                <button key={op.op_key} type="button" disabled={disabled}
+                  onClick={() => !disabled && toggleOp(op.op_key)}
                   className={cn('inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[11px] border transition-colors',
                     sel ? 'border-primary-500/50 bg-primary-500/15 text-primary-200'
                       : 'border-[var(--glass-border)] text-muted-foreground hover:text-white',
-                    op.channel_state === 'DPI_OFF' && 'opacity-70')}
+                    disabled && 'opacity-40 cursor-not-allowed hover:text-muted-foreground')}
                   title={`${op.op_key} · ${op.channel_state}${op.region_label ? ' · ' + op.region_label : ''}`}>
                   <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: b.bg }} />
                   {op.name}
                   {op.region_label && <span className="text-muted-foreground">· {op.region_label}</span>}
-                  {op.channel_state === 'DPI_OFF' ? ' ⚠' : ''}
+                  {isOff && <span className="text-amber-400">· {t('bscheck.bsOff')}</span>}
                 </button>
               )
             })}
@@ -812,6 +843,12 @@ function ConfigTab({ operators }: { operators: BsOperator[] }) {
     },
   })
 
+  const offKeys = offKeySet(operators)
+  const locked = dpi === 'on'
+  const setLock = (v: boolean) => {
+    if (v) { setDpi('on'); setModems((m) => m.filter((k) => !offKeys.has(k))) }
+    else setDpi('any')
+  }
   const toggleModem = (op: string) => setModems((m) => m.includes(op) ? m.filter((x) => x !== op) : [...m, op])
   const data: any = poll.data
   const servers: any[] = Array.isArray(data?.result) ? data.result : (Array.isArray(data?.results) ? data.results : [])
@@ -827,27 +864,26 @@ function ConfigTab({ operators }: { operators: BsOperator[] }) {
         <p className="text-[11px] text-muted-foreground mt-1">{t('bscheck.rawInputHint')}</p>
       </div>
 
-      <div className="flex flex-wrap items-center gap-3">
-        <div className="w-52">
-          <Label className="text-xs">{t('bscheck.dpiMode')}</Label>
-          <Select value={dpi} onValueChange={setDpi}>
-            <SelectTrigger className="h-8 mt-1"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="on">{t('bscheck.dpiOn')}</SelectItem>
-              <SelectItem value="any">{t('bscheck.dpiAny')}</SelectItem>
-            </SelectContent>
-          </Select>
+      <div className="space-y-1">
+        <div className="flex flex-wrap items-end gap-4">
+          <div className="flex flex-col gap-1">
+            <Label className="text-xs">{t('bscheck.dpiMode')}</Label>
+            <div className="h-8 flex items-center"><BsLockSwitch locked={locked} onToggle={setLock} /></div>
+          </div>
+          <div className="w-44">
+            <Label className="text-xs">{t('bscheck.core')}</Label>
+            <Select value={core} onValueChange={setCore}>
+              <SelectTrigger className="h-8 mt-1"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="stable">{t('bscheck.coreStable')}</SelectItem>
+                <SelectItem value="new">{t('bscheck.coreNew')}</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
         </div>
-        <div className="w-44">
-          <Label className="text-xs">{t('bscheck.core')}</Label>
-          <Select value={core} onValueChange={setCore}>
-            <SelectTrigger className="h-8 mt-1"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="stable">{t('bscheck.coreStable')}</SelectItem>
-              <SelectItem value="new">{t('bscheck.coreNew')}</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
+        <p className={cn('text-[11px]', locked ? 'text-muted-foreground' : 'text-amber-400')}>
+          {locked ? t('bscheck.lockBsHint') : t('bscheck.bsAnyWarn')}
+        </p>
       </div>
 
       {operators.length > 0 && (
@@ -857,13 +893,18 @@ function ConfigTab({ operators }: { operators: BsOperator[] }) {
             {operators.map((op) => {
               const b = opBrand(op.id)
               const sel = modems.includes(op.op_key)
+              const isOff = op.channel_state === 'DPI_OFF'
+              const off = locked && isOff
               return (
-                <button key={op.op_key} type="button" onClick={() => toggleModem(op.op_key)}
+                <button key={op.op_key} type="button" disabled={off}
+                  onClick={() => !off && toggleModem(op.op_key)}
                   className={cn('inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[11px] border transition-colors',
                     sel ? 'border-primary-500/50 bg-primary-500/15 text-primary-200'
-                      : 'border-[var(--glass-border)] text-muted-foreground hover:text-white')}>
+                      : 'border-[var(--glass-border)] text-muted-foreground hover:text-white',
+                    off && 'opacity-40 cursor-not-allowed hover:text-muted-foreground')}>
                   <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: b.bg }} />
                   {op.name}{op.region_label && <span className="text-muted-foreground">· {op.region_label}</span>}
+                  {isOff && <span className="text-amber-400">· {t('bscheck.bsOff')}</span>}
                 </button>
               )
             })}
