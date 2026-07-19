@@ -53,6 +53,7 @@ AVAILABLE_RESOURCES = {
     "dns": ["view", "edit"],
     "bscheck": ["view", "check"],
     "reputation": ["view", "check"],
+    "oauth": ["view", "manage"],
     "backups": ["view", "create", "delete"],
     "access_policies": ["view", "create", "edit", "delete"],
     "api_keys": ["view", "create", "edit", "delete"],

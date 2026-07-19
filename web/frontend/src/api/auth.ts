@@ -10,6 +10,21 @@ export interface Passkey {
   transports: string | null
 }
 
+export interface OauthProvider {
+  slug: string
+  name: string
+  configured: boolean
+}
+
+export interface OauthLink {
+  id: number
+  provider: string
+  email: string | null
+  name: string | null
+  created_at: string | null
+  last_used_at: string | null
+}
+
 export interface TelegramUser {
   id: number
   first_name: string
@@ -300,6 +315,32 @@ export const authApi = {
   },
   deletePasskey: async (id: number): Promise<void> => {
     await client.delete(`/auth/webauthn/credentials/${id}`)
+  },
+
+  // ── OAuth2 SSO (Google / GitHub) ─────────────────────────────
+  oauthProviders: async (): Promise<OauthProvider[]> => {
+    const { data } = await client.get('/auth/oauth/providers'); return data.items
+  },
+  oauthLoginUrl: async (provider: string): Promise<string> => {
+    const { data } = await client.post(`/auth/oauth/${provider}/login-url`); return data.url
+  },
+  oauthLinkUrl: async (provider: string): Promise<string> => {
+    const { data } = await client.post(`/auth/oauth/${provider}/link-url`); return data.url
+  },
+  oauthCallback: async (code: string, state: string): Promise<{ mode: string; access_token?: string; provider?: string }> => {
+    const { data } = await client.post('/auth/oauth/callback', { code, state }); return data
+  },
+  oauthLinks: async (): Promise<OauthLink[]> => {
+    const { data } = await client.get('/auth/oauth/links'); return data.items
+  },
+  deleteOauthLink: async (id: number): Promise<void> => {
+    await client.delete(`/auth/oauth/links/${id}`)
+  },
+  setOauthProvider: async (provider: string, clientId: string, clientSecret: string): Promise<void> => {
+    await client.put(`/auth/oauth/providers/${provider}`, { client_id: clientId, client_secret: clientSecret })
+  },
+  deleteOauthProvider: async (provider: string): Promise<void> => {
+    await client.delete(`/auth/oauth/providers/${provider}`)
   },
 
   /**

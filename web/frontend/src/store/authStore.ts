@@ -79,6 +79,7 @@ interface AuthState {
   cancel2fa: () => void
   logout: () => void
   setTokens: (accessToken: string, refreshToken?: string | null) => void
+  completeTokenLogin: (accessToken: string, authMethod: string) => void
   clearError: () => void
   validateSession: () => Promise<void>
 }
@@ -350,6 +351,15 @@ export const useAuthStore = create<AuthState>()(
 
       setTokens: (accessToken: string, refreshToken: string | null = null) => {
         set({ accessToken, refreshToken })
+      },
+
+      completeTokenLogin: (accessToken: string, authMethod: string) => {
+        set({
+          accessToken,
+          refreshToken: null,
+          isAuthenticated: true,
+          user: { username: authMethod, firstName: authMethod, authMethod },
+        })
       },
 
       clearError: () => {

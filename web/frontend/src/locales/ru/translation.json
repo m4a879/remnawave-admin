@@ -244,6 +244,7 @@
     "telegram": "Войти через Telegram",
     "password": "Войти с паролем",
     "passkey": "Войти по passkey",
+    "oauthWith": "Войти через {{provider}}",
     "username": "Имя пользователя",
     "passwordLabel": "Пароль",
     "enterUsername": "Введите имя",
@@ -3176,6 +3177,20 @@
       "empty": "Passkey ещё не добавлены",
       "lastUsed": "исп."
     },
+    "oauth": {
+      "title": "OAuth (Google / GitHub)",
+      "hint": "Привяжи свой Google/GitHub — сможешь входить через него. Вход работает только по привязке (авто-создания аккаунтов нет).",
+      "linked": "Привязанные аккаунты",
+      "noLinks": "Пока ничего не привязано",
+      "connect": "Привязать {{provider}}",
+      "noneConfigured": "Провайдеры не настроены (нужны client_id/secret от superadmin).",
+      "config": "Настройка провайдеров (superadmin)",
+      "redirectHint": "Redirect URI в приложении Google/GitHub: <origin>/oauth/callback",
+      "saved": "Провайдер сохранён",
+      "removed": "Провайдер отключён",
+      "unlinked": "Отвязано",
+      "on": "вкл"
+    },
     "password": {
       "title": "Смена пароля",
       "changeRequired": "Требуется смена",
@@ -4220,6 +4235,12 @@
     "abuse": "Абьюз",
     "flagAbuse": "Жалобы",
     "nodeNote": "Для VPN-ноды флаги VPN / Proxy / Hosting — это норма (нода и есть на хостинге). Тревожит abuse-score и свежие жалобы — именно из-за них IP попадает в блок."
+  },
+  "oauthCallback": {
+    "processing": "Завершаем вход…",
+    "linked": "Аккаунт привязан",
+    "backToLogin": "На страницу входа",
+    "missing": "Нет code/state в ответе провайдера"
   },
   "dns": {
     "title": "DNS",

@@ -5,7 +5,7 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException, Depends, Request, Response
 from pydantic import BaseModel
 
-from web.backend.api.deps import get_current_admin, get_2fa_temp_admin, get_client_ip, AdminUser
+from web.backend.api.deps import get_current_admin, get_2fa_temp_admin, get_client_ip, AdminUser, require_permission
 from web.backend.core.auth_cookies import (
     ACCESS_COOKIE,
     REFRESH_COOKIE,
@@ -13,6 +13,7 @@ from web.backend.core.auth_cookies import (
     clear_auth_cookies,
 )
 from web.backend.core.errors import api_error, E
+from web.backend.core.audit import write_audit_log
 from web.backend.core.config import get_web_settings
 from web.backend.core.login_guard import login_guard
 from web.backend.core.fail2ban_logger import log_auth_failure
@@ -1034,3 +1035,131 @@ async def wa_login_finish(request: Request, response: Response, data: WaLoginFin
     refresh_token = create_refresh_token(subject)
     set_auth_cookies(response, request, access_token, refresh_token)
     return LoginResponse(access_token=access_token, refresh_token=refresh_token)
+
+
+# ── OAuth2 SSO (Google / GitHub) ─────────────────────────────────
+
+
+class OAuthCredsIn(BaseModel):
+    client_id: str
+    client_secret: str
+
+
+class OAuthCallbackIn(BaseModel):
+    code: str
+    state: str
+
+
+@router.get("/oauth/providers")
+async def oauth_providers():
+    """Список провайдеров + настроен ли (без секретов). Публично — для кнопок входа."""
+    from web.backend.core import oauth_svc as oa
+    return {"items": oa.providers()}
+
+
+@router.put("/oauth/providers/{provider}")
+async def oauth_set_provider(provider: str, data: OAuthCredsIn,
+                             admin: AdminUser = Depends(require_permission("oauth", "manage"))):
+    from web.backend.core import oauth_svc as oa
+    if not oa.is_provider(provider):
+        raise api_error(404, E.FORBIDDEN, "Неизвестный провайдер")
+    await oa.save_creds(provider, data.client_id, data.client_secret)
+    await write_audit_log(admin_id=admin.account_id, admin_username=admin.username,
+                          action="oauth.provider.set", resource="oauth", resource_id=provider)
+    return {"configured": oa.is_configured(provider)}
+
+
+@router.delete("/oauth/providers/{provider}")
+async def oauth_del_provider(provider: str,
+                             admin: AdminUser = Depends(require_permission("oauth", "manage"))):
+    from web.backend.core import oauth_svc as oa
+    await oa.clear_creds(provider)
+    await write_audit_log(admin_id=admin.account_id, admin_username=admin.username,
+                          action="oauth.provider.clear", resource="oauth", resource_id=provider)
+    return {"configured": False}
+
+
+@router.post("/oauth/{provider}/login-url")
+@limiter.limit("15/minute")
+async def oauth_login_url(request: Request, provider: str):
+    from web.backend.core import oauth_svc as oa
+    if not oa.is_provider(provider):
+        raise api_error(404, E.FORBIDDEN, "Неизвестный провайдер")
+    try:
+        return {"url": oa.build_authorize_url(request, provider, "login", None)}
+    except oa.OAuthError as e:
+        raise api_error(400, E.FORBIDDEN, str(e))
+
+
+@router.post("/oauth/{provider}/link-url")
+async def oauth_link_url(request: Request, provider: str,
+                         admin: AdminUser = Depends(get_current_admin)):
+    from web.backend.core import oauth_svc as oa
+    if not getattr(admin, "account_id", None):
+        raise api_error(400, E.FORBIDDEN, "OAuth-привязка доступна только для аккаунтов admin_accounts")
+    if not oa.is_provider(provider):
+        raise api_error(404, E.FORBIDDEN, "Неизвестный провайдер")
+    try:
+        return {"url": oa.build_authorize_url(request, provider, "link", admin.account_id)}
+    except oa.OAuthError as e:
+        raise api_error(400, E.FORBIDDEN, str(e))
+
+
+@router.post("/oauth/callback")
+@limiter.limit("15/minute")
+async def oauth_callback(request: Request, response: Response, data: OAuthCallbackIn):
+    from web.backend.core import oauth_svc as oa
+    from web.backend.core.admin_accounts import get_admin_account_by_id
+    try:
+        res = await oa.exchange(request, data.code, data.state)
+    except oa.OAuthError as e:
+        raise api_error(400, E.INVALID_TOKEN, str(e))
+    st, ui, provider = res["state"], res["userinfo"], res["provider"]
+
+    if st.get("mode") == "link":
+        aid = st.get("aid")
+        if not aid:
+            raise api_error(400, E.FORBIDDEN, "Нет аккаунта в state")
+        try:
+            await oa.save_link(int(aid), provider, ui["external_id"], ui.get("email"), ui.get("name"))
+        except oa.OAuthError as e:
+            raise api_error(400, E.FORBIDDEN, str(e))
+        return {"mode": "link", "linked": True, "email": ui.get("email"), "provider": provider}
+
+    # mode=login — только по существующей привязке (авто-создания нет)
+    link = await oa.get_link(provider, ui["external_id"])
+    if not link:
+        raise api_error(403, E.NOT_AN_ADMIN, "Этот аккаунт не привязан ни к одному админу панели")
+    acc = await get_admin_account_by_id(int(link["account_id"]))
+    if not acc:
+        raise api_error(403, E.NOT_AN_ADMIN, "Привязанный аккаунт не найден")
+    await oa.touch_link(provider, ui["external_id"])
+    client_ip = get_client_ip(request)
+    login_guard.record_success(client_ip)
+    username = acc.get("username") or (str(acc.get("telegram_id")) if acc.get("telegram_id") else f"admin{acc['id']}")
+    subject = ("pwd:" + acc["username"]) if acc.get("username") else str(acc.get("telegram_id"))
+    logger.info("OAuth(%s) login for '%s' from %s", provider, username, client_ip)
+    await notify_login_success(ip=client_ip, username=username, auth_method=f"oauth:{provider}")
+    access_token = create_access_token(subject, username, auth_method="oauth")
+    refresh_token = create_refresh_token(subject)
+    set_auth_cookies(response, request, access_token, refresh_token)
+    return {"mode": "login", "access_token": access_token, "refresh_token": refresh_token}
+
+
+@router.get("/oauth/links")
+async def oauth_links(admin: AdminUser = Depends(get_current_admin)):
+    from web.backend.core import oauth_svc as oa
+    if not getattr(admin, "account_id", None):
+        return {"items": []}
+    items = await oa.list_links(admin.account_id)
+    return {"items": [{"id": l["id"], "provider": l["provider"], "email": l.get("email"),
+                       "name": l.get("name"), "created_at": l.get("created_at"),
+                       "last_used_at": l.get("last_used_at")} for l in items]}
+
+
+@router.delete("/oauth/links/{link_id}", response_model=SuccessResponse)
+async def oauth_del_link(link_id: int, admin: AdminUser = Depends(get_current_admin)):
+    from web.backend.core import oauth_svc as oa
+    if getattr(admin, "account_id", None):
+        await oa.delete_link(link_id, admin.account_id)
+    return SuccessResponse(message="Привязка удалена")

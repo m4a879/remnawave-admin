@@ -399,6 +399,27 @@ DEFAULT_CONFIG_DEFINITIONS: List[Dict[str, Any]] = [
         "description": "Управляется на странице BS-Check", "default_value": "",
         "is_secret": True, "is_readonly": True, "sort_order": 98,
     },
+    # OAuth SSO — client_id/secret провайдеров (правятся в настройках OAuth)
+    {
+        "key": "oauth_google_client_id", "value_type": "string", "category": "general",
+        "display_name": "OAuth: Google client_id", "description": "Управляется в настройках OAuth",
+        "default_value": "", "is_readonly": True, "sort_order": 103,
+    },
+    {
+        "key": "oauth_google_client_secret", "value_type": "string", "category": "general",
+        "display_name": "OAuth: Google secret (зашифр.)", "description": "Управляется в настройках OAuth",
+        "default_value": "", "is_secret": True, "is_readonly": True, "sort_order": 104,
+    },
+    {
+        "key": "oauth_github_client_id", "value_type": "string", "category": "general",
+        "display_name": "OAuth: GitHub client_id", "description": "Управляется в настройках OAuth",
+        "default_value": "", "is_readonly": True, "sort_order": 105,
+    },
+    {
+        "key": "oauth_github_client_secret", "value_type": "string", "category": "general",
+        "display_name": "OAuth: GitHub secret (зашифр.)", "description": "Управляется в настройках OAuth",
+        "default_value": "", "is_secret": True, "is_readonly": True, "sort_order": 106,
+    },
     # === SYNC ===
     {
         "key": "sync_interval_seconds",

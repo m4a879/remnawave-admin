@@ -54,6 +54,14 @@ vi.mock('@/api/auth', () => ({
     registerPasskey: vi.fn(),
     deletePasskey: vi.fn(),
     loginPasskey: vi.fn(),
+    oauthProviders: vi.fn().mockResolvedValue([]),
+    oauthLinks: vi.fn().mockResolvedValue([]),
+    oauthLoginUrl: vi.fn(),
+    oauthLinkUrl: vi.fn(),
+    oauthCallback: vi.fn(),
+    deleteOauthLink: vi.fn(),
+    setOauthProvider: vi.fn(),
+    deleteOauthProvider: vi.fn(),
   },
 }))
 

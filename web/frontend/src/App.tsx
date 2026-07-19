@@ -20,6 +20,7 @@ import Layout from './components/layout/Layout'
 import Login from './pages/Login'
 import Dashboard from './pages/Dashboard'
 import ResetPassword from './pages/ResetPassword'
+import OAuthCallback from './pages/OAuthCallback'
 
 // Lazy-loaded pages
 const Users = lazy(() => import('./pages/Users'))
@@ -226,6 +227,7 @@ export default function App() {
             {/* Public routes */}
             <Route path="/login" element={<Login />} />
             <Route path="/reset-password" element={<ResetPassword />} />
+            <Route path="/oauth/callback" element={<OAuthCallback />} />
 
             {/* Standard protected pages (inside admin Layout) */}
             <Route path="/*" element={<ProtectedShell />} />

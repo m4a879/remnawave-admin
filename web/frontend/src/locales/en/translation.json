@@ -244,6 +244,7 @@
     "telegram": "Log in with Telegram",
     "password": "Log in with password",
     "passkey": "Sign in with passkey",
+    "oauthWith": "Sign in with {{provider}}",
     "username": "Username",
     "passwordLabel": "Password",
     "enterUsername": "Enter username",
@@ -3176,6 +3177,20 @@
       "empty": "No passkeys yet",
       "lastUsed": "used"
     },
+    "oauth": {
+      "title": "OAuth (Google / GitHub)",
+      "hint": "Link your Google/GitHub to sign in with it. Login only works via a link (no auto-created accounts).",
+      "linked": "Linked accounts",
+      "noLinks": "Nothing linked yet",
+      "connect": "Link {{provider}}",
+      "noneConfigured": "Providers not configured (need client_id/secret from a superadmin).",
+      "config": "Provider config (superadmin)",
+      "redirectHint": "Redirect URI in the Google/GitHub app: <origin>/oauth/callback",
+      "saved": "Provider saved",
+      "removed": "Provider disabled",
+      "unlinked": "Unlinked",
+      "on": "on"
+    },
     "password": {
       "title": "Change Password",
       "changeRequired": "Change required",
@@ -4220,6 +4235,12 @@
     "abuse": "Abuse",
     "flagAbuse": "Reports",
     "nodeNote": "For a VPN node the VPN / Proxy / Hosting flags are expected (the node lives on hosting). What matters is the abuse score and recent reports — those are what get the IP blocked."
+  },
+  "oauthCallback": {
+    "processing": "Finishing sign-in…",
+    "linked": "Account linked",
+    "backToLogin": "Back to login",
+    "missing": "No code/state in the provider response"
   },
   "dns": {
     "title": "DNS",
