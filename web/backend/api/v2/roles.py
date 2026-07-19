@@ -50,6 +50,7 @@ AVAILABLE_RESOURCES = {
     "finance": ["view", "create", "edit", "delete"],
     "reports": ["view", "create"],
     "mailserver": ["view", "create", "edit", "delete"],
+    "dns": ["view", "edit"],
     "backups": ["view", "create", "delete"],
     "access_policies": ["view", "create", "edit", "delete"],
     "api_keys": ["view", "create", "edit", "delete"],

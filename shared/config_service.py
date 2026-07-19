@@ -336,6 +336,19 @@ DEFAULT_CONFIG_DEFINITIONS: List[Dict[str, Any]] = [
         "sort_order": 8,
     },
 
+    # === INTEGRATIONS ===
+    {
+        "key": "cloudflare_dns_token",
+        "value_type": "string",
+        "category": "general",
+        "display_name": "Cloudflare DNS: API-токен",
+        "description": "Токен Cloudflare с правами Zone:Read + DNS:Edit (хранится зашифрованным). Правится на странице «DNS», не здесь",
+        "default_value": "",
+        "is_secret": True,
+        "is_readonly": True,
+        "sort_order": 90,
+    },
+
     # === SYNC ===
     {
         "key": "sync_interval_seconds",

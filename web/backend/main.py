@@ -50,6 +50,7 @@ from web.backend.api.v2 import snippets as snippets_api
 from web.backend.api.v2 import config_profiles as config_profiles_api
 from web.backend.api.v2 import user_presets as user_presets_api
 from web.backend.api.v2 import finance as finance_api
+from web.backend.api.v2 import dns as dns_api
 from web.backend.api.v2 import reports as reports_api
 from web.backend.api.v2 import asn as asn_api
 from web.backend.api.v2 import collector as collector_api
@@ -1013,6 +1014,7 @@ def create_app() -> FastAPI:
         app.include_router(snippets_api.router, prefix="/api/v2/snippets", tags=["snippets"])
         app.include_router(config_profiles_api.router, prefix="/api/v2/config-profiles", tags=["config-profiles"])
         app.include_router(finance_api.router, prefix="/api/v2/finance", tags=["finance"])
+        app.include_router(dns_api.router, prefix="/api/v2/dns", tags=["dns"])
         app.include_router(user_presets_api.router, prefix="/api/v2/user-presets", tags=["user-presets"])
         app.include_router(reports_api.router, prefix="/api/v2/reports", tags=["reports"])
         app.include_router(asn_api.router, prefix="/api/v2/asn", tags=["asn"])

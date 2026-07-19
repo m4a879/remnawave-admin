@@ -39,6 +39,7 @@ const Automations = lazy(() => import('./pages/automations'))
 const Notifications = lazy(() => import('./pages/Notifications'))
 const MailServer = lazy(() => import('./pages/MailServer'))
 const Finance = lazy(() => import('./pages/Finance'))
+const Dns = lazy(() => import('./pages/Dns'))
 const Backup = lazy(() => import('./pages/Backup'))
 const ApiKeys = lazy(() => import('./pages/ApiKeys'))
 const Reports = lazy(() => import('./pages/Reports'))
@@ -93,6 +94,7 @@ function ProtectedShell() {
             <Route path="/logs" element={<SystemLogs />} />
             <Route path="/analytics" element={<Analytics />} />
             <Route path="/finance" element={<Finance />} />
+            <Route path="/dns" element={<Dns />} />
             <Route path="/billing" element={<Navigate to="/finance" replace />} />
             <Route path="/backups" element={<Backup />} />
             <Route path="/api-keys" element={<ApiKeys />} />
