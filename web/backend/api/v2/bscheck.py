@@ -56,7 +56,7 @@ class ProbeIn(BaseModel):
 
 
 class ScanIn(BaseModel):
-    cidr: str = Field(min_length=9, max_length=32)   # ровно один /24
+    cidr: str = Field(min_length=9, max_length=32)   # bsbord поддерживает РОВНО /24
     operators: List[str] = Field(default_factory=list)
     probes: Dict[str, bool] = Field(default_factory=lambda: {"icmp": True, "tcp": True, "sni": False})
     sni_hosts: List[str] = Field(default_factory=list)
@@ -68,6 +68,21 @@ class ScanIn(BaseModel):
         if v not in ("on", "any"):
             raise ValueError("dpi must be on|any")
         return v
+
+    @field_validator("cidr")
+    @classmethod
+    def _cidr(cls, v: str) -> str:
+        import ipaddress
+        v = v.strip()
+        if not v.endswith("/24"):
+            raise ValueError("bsbord поддерживает только /24")
+        try:
+            net = ipaddress.ip_network(v, strict=False)  # нормализует host-биты → x.x.x.0/24
+        except ValueError:
+            raise ValueError("некорректный CIDR")
+        if net.version != 4 or net.prefixlen != 24:
+            raise ValueError("только IPv4 /24")
+        return str(net)
 
 
 class HistoryIn(BaseModel):

@@ -848,7 +848,12 @@ function ScanMode({ operators, disabled }: { operators: BsOperator[]; disabled: 
   const [scanId, setScanId] = useState<number | null>(null)
 
   const change = (c: Cfg) => { setCfg(c); setCost(null) }
-  const body = () => ({ cidr: cidr.trim(), ...cfgFields(cfg) })
+  // bsbord поддерживает РОВНО /24 — нормализуем host-биты в .0/24
+  const normCidr = () => {
+    const m = cidr.trim().match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.\d{1,3}\/24$/)
+    return m ? `${m[1]}.${m[2]}.${m[3]}.0/24` : cidr.trim()
+  }
+  const body = () => ({ cidr: normCidr(), ...cfgFields(cfg) })
 
   const preview = useMutation({
     mutationFn: () => bscheckApi.scanPreview(body()),
@@ -868,7 +873,8 @@ function ScanMode({ operators, disabled }: { operators: BsOperator[]; disabled: 
     },
   })
 
-  const validCidr = /^\d{1,3}(\.\d{1,3}){3}\/\d{1,2}$/.test(cidr.trim())
+  const octetsOk = (s: string) => s.replace(/\/.*/, '').split('.').every((o) => o !== '' && Number(o) >= 0 && Number(o) <= 255)
+  const validCidr = /^\d{1,3}(\.\d{1,3}){3}\/24$/.test(cidr.trim()) && octetsOk(cidr.trim())
   const scanData: any = poll.data
 
   const saveHist = useSaveHistory()
@@ -895,7 +901,9 @@ function ScanMode({ operators, disabled }: { operators: BsOperator[]; disabled: 
         <Label>{t('bscheck.cidrLabel')}</Label>
         <Input value={cidr} className="mt-1 font-mono" placeholder="1.2.3.0/24"
           onChange={(e) => { setCidr(e.target.value); setCost(null); setScanId(null) }} />
-        <p className="text-[11px] text-muted-foreground mt-1">{t('bscheck.cidrHint')}</p>
+        <p className={cn('text-[11px] mt-1', cidr.trim() && !validCidr ? 'text-amber-400' : 'text-muted-foreground')}>
+          {cidr.trim() && !validCidr ? t('bscheck.cidrInvalid') : t('bscheck.cidrHint')}
+        </p>
       </div>
       <ProbeConfig cfg={cfg} onChange={change} operators={operators} />
 

@@ -173,3 +173,18 @@ class TestScansVless:
             st = await bs.vless_status("88")
         assert sub["test_id"] == 88 and st["result_ready"] is True
         assert st["result"][0]["speed_mbps"] == 42.0
+
+
+# ── Скан: только /24 ─────────────────────────────────────────────
+
+
+class TestScanCidr:
+    def test_normalizes_and_requires_24(self):
+        from web.backend.api.v2.bscheck import ScanIn
+        # host-биты нормализуются в .0/24
+        assert ScanIn(cidr="1.2.3.4/24").cidr == "1.2.3.0/24"
+        assert ScanIn(cidr="10.20.30.0/24").cidr == "10.20.30.0/24"
+        # всё, что не /24 (или мусор), отклоняется
+        for bad in ("1.2.3.0/16", "1.2.3.0/25", "1.2.3.0", "10.0.0.0/8", "300.1.1.0/24"):
+            with pytest.raises(Exception):
+                ScanIn(cidr=bad)
