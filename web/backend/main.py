@@ -546,6 +546,9 @@ async def lifespan(app: FastAPI):
                     from web.backend.core.backup_service import backup_scheduler_loop
                     _bg_tasks.append(asyncio.create_task(backup_scheduler_loop()))
 
+                    from web.backend.core.bscheck_scheduler import bscheck_scheduler_loop
+                    _bg_tasks.append(asyncio.create_task(bscheck_scheduler_loop()))
+
                     from web.backend.core.finance.rates import rates_update_loop
                     _bg_tasks.append(asyncio.create_task(rates_update_loop()))
 

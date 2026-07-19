@@ -746,6 +746,17 @@ async def notify_login_success(ip: str, username: str, auth_method: str) -> None
     asyncio.create_task(_send_to_global_telegram("Admin login", "\n".join(lines), "info", "service"))
 
 
+async def notify_bscheck_drop(node: str, ip: str, passed: int, total: int, prev_passed: int) -> None:
+    """Алерт: у ноды упало число операторов, проходящих БС (авто-проверка)."""
+    lines = [
+        f"<b>Node:</b> {_esc_html(node)}",
+        f"<b>IP:</b> <code>{_esc_html(ip)}</code>",
+        f"<b>БС прошло:</b> {passed}/{total} (было {prev_passed})",
+        f"<b>Time:</b> {_now_str()}",
+    ]
+    asyncio.create_task(_send_to_global_telegram("BS-Check: просадка БС", "\n".join(lines), "warning", "service"))
+
+
 async def notify_ip_blocked(ip: str, lockout_seconds: int, failures: int) -> None:
     lines = [
         f"<b>IP:</b> <code>{_esc_html(ip)}</code>",

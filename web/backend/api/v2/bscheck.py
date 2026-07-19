@@ -107,6 +107,23 @@ class VlessIn(BaseModel):
         return v
 
 
+class ScheduleIn(BaseModel):
+    enabled: bool = False
+    interval_hours: int = Field(default=6, ge=1, le=168)
+    dpi: str = "on"
+    operators: List[str] = Field(default_factory=list)
+    nodes: List[str] = Field(default_factory=list)
+    budget_daily: int = Field(default=500, ge=0, le=1_000_000)
+    alert: bool = True
+
+    @field_validator("dpi")
+    @classmethod
+    def _dpi(cls, v: str) -> str:
+        if v not in ("on", "any"):
+            raise ValueError("dpi must be on|any")
+        return v
+
+
 def _first_target(p: ProbeIn) -> str:
     if p.target and p.target.strip():
         return p.target.strip()
@@ -320,3 +337,35 @@ async def list_history(kind: Optional[str] = None, limit: int = 50,
     limit = max(1, min(limit, 200))
     k = kind if kind in ("node", "probe", "scan", "vless") else None
     return {"items": await db_service.list_bscheck_runs(limit, k)}
+
+
+# ── Расписание авто-проверки нод ─────────────────────────────────
+
+
+async def _schedule_state() -> Dict:
+    cfg = bs.read_schedule()
+    cfg["last_run"] = await db_service.get_bscheck_last_run("scheduler")
+    cfg["spent_today"] = await db_service.get_bscheck_spent_today("scheduler")
+    return cfg
+
+
+@router.get("/schedule")
+async def get_schedule(admin: AdminUser = Depends(require_permission("bscheck", "view"))):
+    return await _schedule_state()
+
+
+@router.put("/schedule")
+async def set_schedule(data: ScheduleIn,
+                       admin: AdminUser = Depends(require_permission("bscheck", "check"))):
+    await bs.save_schedule({
+        "bscheck_auto_enabled": data.enabled,
+        "bscheck_auto_interval_hours": data.interval_hours,
+        "bscheck_auto_dpi": data.dpi,
+        "bscheck_auto_operators": data.operators,
+        "bscheck_auto_nodes": data.nodes,
+        "bscheck_auto_budget_daily": data.budget_daily,
+        "bscheck_auto_alert": data.alert,
+    })
+    await write_audit_log(admin_id=admin.account_id, admin_username=admin.username,
+                          action="bscheck.schedule", resource="bscheck", resource_id="schedule")
+    return await _schedule_state()

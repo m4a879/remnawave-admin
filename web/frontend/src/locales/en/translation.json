@@ -4151,7 +4151,20 @@
     "histEmpty": "No checks yet",
     "vlessEst": "≈ from {{cost}} ◈ for {{n}} srv",
     "vlessEstHint": "Estimate via a TCP+SNI probe over the config's servers × operators",
-    "vlessEstNote": "bsbord has no exact vless price — this is a probe-based estimate (lower bound); tunnel/site tests add on top. Unavailable for a subscription/JSON."
+    "vlessEstNote": "bsbord has no exact vless price — this is a probe-based estimate (lower bound); tunnel/site tests add on top. Unavailable for a subscription/JSON.",
+    "autoTitle": "Auto node checks",
+    "autoOn": "on · every {{h}}h",
+    "autoOff": "off",
+    "autoSpent": "today: {{n}} ◈",
+    "autoNever": "never run yet",
+    "autoEnable": "Enable",
+    "autoAlert": "Alert on BS drop",
+    "autoInterval": "Interval (hours)",
+    "autoBudget": "Credit limit/day",
+    "autoNodes": "Nodes (empty = all)",
+    "autoNodesHint": "Empty = check all fleet nodes",
+    "autoWarn": "Checks are paid — they spend bsbord credits. Daily limit = hard stop (0 = no limit, risky).",
+    "autoSaved": "Schedule saved"
   },
   "dns": {
     "title": "DNS",

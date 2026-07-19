@@ -87,6 +87,25 @@ class BscheckMixin:
                         ORDER BY checked_at DESC LIMIT $1""", limit)
         return [_row(r) for r in rows]
 
+    async def get_bscheck_last_run(self, created_by: str = "scheduler") -> Optional[str]:
+        """Время последней авто-проверки (для интервала шедулера)."""
+        if not self.is_connected:
+            return None
+        async with self.acquire() as conn:
+            ts = await conn.fetchval(
+                f"SELECT MAX(checked_at) FROM {NODE_BSCHECK_TABLE} WHERE created_by = $1", created_by)
+        return ts.isoformat() if ts else None
+
+    async def get_bscheck_spent_today(self, created_by: str = "scheduler") -> int:
+        """Сумма кредитов, потраченных авто-проверкой сегодня (бюджет-гард)."""
+        if not self.is_connected:
+            return 0
+        async with self.acquire() as conn:
+            val = await conn.fetchval(
+                f"""SELECT COALESCE(SUM(cost_credits), 0) FROM {NODE_BSCHECK_TABLE}
+                    WHERE created_by = $1 AND checked_at >= date_trunc('day', NOW())""", created_by)
+        return int(val or 0)
+
     async def get_bscheck_summary_map(self) -> Dict[str, Dict[str, Any]]:
         """Последний результат по каждой ноде — для бейджей в списке нод."""
         if not self.is_connected:

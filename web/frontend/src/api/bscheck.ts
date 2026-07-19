@@ -89,6 +89,18 @@ export interface HistorySave {
   result: any
 }
 
+export interface BsSchedule {
+  enabled: boolean
+  interval_hours: number
+  dpi: string
+  operators: string[]
+  nodes: string[]
+  budget_daily: number
+  alert: boolean
+  last_run: string | null
+  spent_today: number
+}
+
 export interface ProbeBody {
   target?: string
   targets?: string[]
@@ -164,5 +176,11 @@ export const bscheckApi = {
   },
   async history(kind?: string, limit = 50): Promise<BsHistoryRow[]> {
     const { data } = await client.get('/bscheck/history', { params: { kind, limit } }); return data.items
+  },
+  async getSchedule(): Promise<BsSchedule> {
+    const { data } = await client.get('/bscheck/schedule'); return data
+  },
+  async setSchedule(payload: Partial<BsSchedule>): Promise<BsSchedule> {
+    const { data } = await client.put('/bscheck/schedule', payload); return data
   },
 }

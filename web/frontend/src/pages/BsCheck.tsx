@@ -16,7 +16,7 @@ import { useQuery, useMutation, useQueryClient, UseQueryResult } from '@tanstack
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import {
-  bscheckApi, BsOperator, BsSummary, BsTargetSummary, BsNode, BsCheckRecord, BsHistoryRow,
+  bscheckApi, BsOperator, BsSummary, BsTargetSummary, BsNode, BsCheckRecord, BsHistoryRow, BsSchedule,
 } from '@/api/bscheck'
 import { usePermissionStore } from '@/store/permissionStore'
 import { Card } from '@/components/ui/card'
@@ -37,6 +37,7 @@ import {
 import {
   ShieldCheck, RefreshCw, Loader2, Check, X, Key, History,
   Crosshair, Network, FileCode, Gauge, Wifi, AlertTriangle,
+  ChevronDown, ChevronRight, Clock,
 } from '@/components/brand/icons'
 import { cn } from '@/lib/utils'
 
@@ -432,6 +433,105 @@ function Shell({ account }: { account: { balance_credits?: number; balance_total
   )
 }
 
+// ── Авто-проверка нод по расписанию ──────────────────────────────
+
+function AutoScheduleCard({ nodes }: { nodes: BsNode[] }) {
+  const { t } = useTranslation()
+  const qc = useQueryClient()
+  const onErr = useErrToast()
+  const canCheck = usePermissionStore((s) => s.hasPermission)('bscheck', 'check')
+  const [open, setOpen] = useState(false)
+  const { data } = useQuery({ queryKey: ['bscheck-schedule'], queryFn: bscheckApi.getSchedule })
+  const [f, setF] = useState<BsSchedule | null>(null)
+  useEffect(() => { if (data && !f) setF(data) }, [data, f])
+
+  const save = useMutation({
+    mutationFn: () => bscheckApi.setSchedule(f as BsSchedule),
+    onSuccess: (d) => {
+      toast.success(t('bscheck.autoSaved'))
+      setF(d); qc.setQueryData(['bscheck-schedule'], d)
+    },
+    onError: onErr,
+  })
+  const set = (patch: Partial<BsSchedule>) => setF((p) => (p ? { ...p, ...patch } : p))
+  const toggleNode = (uuid: string) => f && set({
+    nodes: f.nodes.includes(uuid) ? f.nodes.filter((x) => x !== uuid) : [...f.nodes, uuid],
+  })
+
+  return (
+    <Card className="p-3">
+      <button type="button" className="flex w-full items-center gap-2 text-left" onClick={() => setOpen((o) => !o)}>
+        {open ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+        <Clock className="w-4 h-4 text-primary-400" />
+        <span className="text-sm font-medium">{t('bscheck.autoTitle')}</span>
+        <Badge className={cn('text-[10px]', data?.enabled ? 'bg-green-500/20 text-green-300' : 'bg-white/10 text-muted-foreground')}>
+          {data?.enabled ? t('bscheck.autoOn', { h: data.interval_hours }) : t('bscheck.autoOff')}
+        </Badge>
+        {data && (
+          <span className="ml-auto text-[11px] text-muted-foreground">
+            {t('bscheck.autoSpent', { n: data.spent_today })} · {data.last_run ? fmtDate(data.last_run) : t('bscheck.autoNever')}
+          </span>
+        )}
+      </button>
+
+      {open && f && (
+        <div className="mt-3 space-y-3 border-t border-[var(--glass-border)] pt-3">
+          <div className="flex flex-wrap items-center gap-4">
+            <label className="flex items-center gap-2 text-sm cursor-pointer">
+              <Switch checked={f.enabled} onCheckedChange={(v) => set({ enabled: v })} disabled={!canCheck} />
+              {t('bscheck.autoEnable')}
+            </label>
+            <BsLockSwitch locked={f.dpi === 'on'} onToggle={(v) => set({ dpi: v ? 'on' : 'any' })} />
+            <label className="flex items-center gap-2 text-sm cursor-pointer">
+              <Switch checked={f.alert} onCheckedChange={(v) => set({ alert: v })} disabled={!canCheck} />
+              {t('bscheck.autoAlert')}
+            </label>
+          </div>
+
+          <div className="flex flex-wrap gap-4">
+            <div className="w-40">
+              <Label className="text-xs">{t('bscheck.autoInterval')}</Label>
+              <Input type="number" min={1} max={168} value={f.interval_hours} className="mt-1 h-8" disabled={!canCheck}
+                onChange={(e) => set({ interval_hours: Math.max(1, Math.min(168, Number(e.target.value) || 1)) })} />
+            </div>
+            <div className="w-44">
+              <Label className="text-xs">{t('bscheck.autoBudget')}</Label>
+              <Input type="number" min={0} value={f.budget_daily} className="mt-1 h-8" disabled={!canCheck}
+                onChange={(e) => set({ budget_daily: Math.max(0, Number(e.target.value) || 0) })} />
+            </div>
+          </div>
+
+          <div>
+            <Label className="text-xs">{t('bscheck.autoNodes')}</Label>
+            <div className="flex flex-wrap gap-1.5 mt-1">
+              {nodes.map((n) => {
+                const sel = f.nodes.includes(n.uuid)
+                return (
+                  <button key={n.uuid} type="button" onClick={() => canCheck && toggleNode(n.uuid)}
+                    className={cn('px-2 py-0.5 rounded-md text-[11px] border transition-colors',
+                      sel ? 'border-primary-500/50 bg-primary-500/15 text-primary-200'
+                        : 'border-[var(--glass-border)] text-muted-foreground hover:text-white')}>
+                    {n.name}
+                  </button>
+                )
+              })}
+            </div>
+            <p className="text-[11px] text-muted-foreground mt-1">{t('bscheck.autoNodesHint')}</p>
+          </div>
+
+          <p className="text-[11px] text-amber-400">{t('bscheck.autoWarn')}</p>
+
+          <div className="flex justify-end">
+            <Button size="sm" disabled={!canCheck || save.isPending} onClick={() => save.mutate()}>
+              {save.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : t('common.save')}
+            </Button>
+          </div>
+        </div>
+      )}
+    </Card>
+  )
+}
+
 // ── Вкладка «Ноды» ───────────────────────────────────────────────
 
 function NodesTab({ operators }: { operators: BsOperator[] }) {
@@ -446,7 +546,9 @@ function NodesTab({ operators }: { operators: BsOperator[] }) {
   const rows = nodes || []
 
   return (
-    <Card className="overflow-hidden">
+    <div className="space-y-3">
+      <AutoScheduleCard nodes={rows} />
+      <Card className="overflow-hidden">
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
@@ -509,6 +611,7 @@ function NodesTab({ operators }: { operators: BsOperator[] }) {
           </tbody>
         </table>
       </div>
+      </Card>
 
       {checkNode && (
         <CheckDialog node={checkNode} operators={operators}
@@ -521,7 +624,7 @@ function NodesTab({ operators }: { operators: BsOperator[] }) {
       {detailNode && (
         <NodeDetailDialog node={detailNode} operators={operators} onClose={() => setDetailNode(null)} />
       )}
-    </Card>
+    </div>
   )
 }
 
