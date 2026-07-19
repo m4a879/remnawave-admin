@@ -27,12 +27,12 @@ class TestRegistry:
         slugs = {a["slug"] for a in list_adapters()}
         expected = {"timeweb", "aeza", "hetzner", "selectel",
                     "vultr", "vdsina", "cloudflare", "porkbun", "regru",
-                    "beget", "linode"}
+                    "beget", "linode", "4vps", "netlen", "hostbill", "yandex"}
         assert expected <= slugs
         for slug in expected:
             a = get_adapter(slug)
             assert a.slug == slug
-            assert a.to_meta()["needs_base_url"] is False
+            assert isinstance(a.to_meta()["needs_base_url"], bool)  # hostbill=True, прочие=False
             assert a.to_meta()["fields"]  # есть хотя бы одно поле
 
 
@@ -523,3 +523,175 @@ class TestLinode:
         s = r.services[0]
         assert s.name == "ln-1" and s.price == 6.0  # region_prices переопределяет базовую
         assert s.ips == ["139.1.2.3"] and "1 vCPU" in s.specs
+
+
+# ── 4VPS ─────────────────────────────────────────────────────────
+
+
+class TestFourVps:
+    @pytest.mark.asyncio
+    async def test_balance_and_servers_skip_deleted(self):
+        from web.backend.core.finance.adapters.fourvps import FourVpsAdapter
+
+        def h(request: httpx.Request) -> httpx.Response:
+            assert request.headers.get("Authorization") == "Bearer VK"
+            assert request.url.params.get("panel_id") == "1"
+            p = request.url.path
+            if p == "/api/userBalance":
+                return httpx.Response(200, json={"error": False, "data": {"userBalance": 1234.5}})
+            if p == "/api/myservers":
+                return httpx.Response(200, json={"error": False, "data": {"serverlist": [
+                    {"id": 7, "name": "ru-vps", "price": 300, "expired": 1786569600,
+                     "ip": "5.1.2.3", "deleted": False},
+                    {"id": 8, "name": "old", "deleted": True}]}})
+            return httpx.Response(404)
+
+        with patch("httpx.AsyncClient", _patched_client(h)):
+            r = await FourVpsAdapter().fetch(None, {"token": "VK"})
+
+        assert r.balance == 1234.5 and r.currency == "RUB"
+        assert len(r.services) == 1
+        s = r.services[0]
+        assert s.name == "ru-vps" and s.price == 300.0 and s.ips == ["5.1.2.3"]
+        assert s.next_due_at is not None
+
+    @pytest.mark.asyncio
+    async def test_error_object_raises(self):
+        from web.backend.core.finance.adapters.fourvps import FourVpsAdapter
+        from web.backend.core.finance.adapters import AdapterError
+
+        def h(request):
+            return httpx.Response(200, json={"error": True, "data": "bad key"})
+
+        with patch("httpx.AsyncClient", _patched_client(h)):
+            with pytest.raises(AdapterError, match="4VPS"):
+                await FourVpsAdapter().fetch(None, {"token": "bad"})
+
+
+# ── Netlen ───────────────────────────────────────────────────────
+
+
+class TestNetlen:
+    @pytest.mark.asyncio
+    async def test_balance_and_servers(self):
+        from web.backend.core.finance.adapters.netlen import NetlenAdapter
+
+        def h(request: httpx.Request) -> httpx.Response:
+            assert request.headers.get("X-API-Key") == "NK"
+            p = request.url.path
+            if p == "/v1/balance":
+                return httpx.Response(200, json={"success": True, "data": {"balance": 88.8}})
+            if p == "/v1/servers":
+                return httpx.Response(200, json={"success": True, "data": [
+                    {"id": 1, "name": "srv", "amount": 12, "ip": "1.2.3.4"}]})
+            return httpx.Response(404)
+
+        with patch("httpx.AsyncClient", _patched_client(h)):
+            r = await NetlenAdapter().fetch(None, {"api_key": "NK"})
+
+        assert r.balance == 88.8 and r.currency == "USD"
+        s = r.services[0]
+        assert s.name == "srv" and s.price == 12.0 and s.ips == ["1.2.3.4"]
+
+    @pytest.mark.asyncio
+    async def test_error_envelope(self):
+        from web.backend.core.finance.adapters.netlen import NetlenAdapter
+        from web.backend.core.finance.adapters import AdapterError
+
+        def h(request):
+            return httpx.Response(200, json={"success": False, "error": "bad key", "code": "AUTH"})
+
+        with patch("httpx.AsyncClient", _patched_client(h)):
+            with pytest.raises(AdapterError, match="Netlen"):
+                await NetlenAdapter().fetch(None, {"api_key": "bad"})
+
+
+# ── HostBill ─────────────────────────────────────────────────────
+
+
+class TestHostbill:
+    @pytest.mark.asyncio
+    async def test_login_balance_services(self):
+        from web.backend.core.finance.adapters.hostbill import HostbillAdapter
+
+        def h(request: httpx.Request) -> httpx.Response:
+            p = request.url.path
+            if p == "/login":
+                body = json.loads(request.content.decode())
+                assert body.get("username") == "u@x.com"
+                return httpx.Response(200, json={"token": "JWT"})
+            assert request.headers.get("Authorization") == "Bearer JWT"
+            if p == "/balance":
+                return httpx.Response(200, json={"details": {"acc_credit": "250.00", "currency": "eur"}})
+            if p == "/service":
+                return httpx.Response(200, json={"services": [
+                    {"id": 3, "name": "vps-eu", "total": "30.00",
+                     "billingcycle": "Monthly", "nextduedate": "2026-09-01"}]})
+            return httpx.Response(404)
+
+        with patch("httpx.AsyncClient", _patched_client(h)):
+            r = await HostbillAdapter().fetch("https://bill.example.com",
+                                              {"username": "u@x.com", "password": "p"})
+
+        assert r.balance == 250.0 and r.currency == "EUR"
+        s = r.services[0]
+        assert s.name == "vps-eu" and s.price == 30.0
+        assert s.period == "monthly" and s.next_due_at == "2026-09-01"
+
+    @pytest.mark.asyncio
+    async def test_login_error_raises(self):
+        from web.backend.core.finance.adapters.hostbill import HostbillAdapter
+        from web.backend.core.finance.adapters import AdapterError
+
+        def h(request):
+            return httpx.Response(200, json={"error": ["Invalid credentials"]})
+
+        with patch("httpx.AsyncClient", _patched_client(h)):
+            with pytest.raises(AdapterError, match="HostBill"):
+                await HostbillAdapter().fetch("https://bill.example.com",
+                                              {"username": "u", "password": "bad"})
+
+    @pytest.mark.asyncio
+    async def test_requires_base_url(self):
+        from web.backend.core.finance.adapters.hostbill import HostbillAdapter
+        from web.backend.core.finance.adapters import AdapterError
+
+        with pytest.raises(AdapterError):
+            await HostbillAdapter().fetch(None, {"username": "u", "password": "p"})
+
+
+# ── Yandex Cloud ─────────────────────────────────────────────────
+
+
+class TestYandex:
+    @pytest.mark.asyncio
+    async def test_iam_exchange_then_balance(self):
+        from web.backend.core.finance.adapters import yandex as ya
+
+        def h(request: httpx.Request) -> httpx.Response:
+            url = str(request.url)
+            if "iam/v1/tokens" in url:
+                body = json.loads(request.content.decode())
+                assert body.get("jwt") == "SIGNED"
+                return httpx.Response(200, json={"iamToken": "IAM123"})
+            if request.url.path.endswith("/billingAccounts"):
+                assert request.headers.get("Authorization") == "Bearer IAM123"
+                return httpx.Response(200, json={"billingAccounts": [
+                    {"id": "b1", "active": True, "balance": "1500.50", "currency": "rub"}]})
+            return httpx.Response(404)
+
+        key = json.dumps({"id": "k1", "service_account_id": "sa1", "private_key": "PEM"})
+        with patch.object(ya.jose_jwt, "encode", return_value="SIGNED"), \
+             patch("httpx.AsyncClient", _patched_client(h)):
+            r = await ya.YandexAdapter().fetch(None, {"authorized_key": key})
+
+        assert r.balance == 1500.5 and r.currency == "RUB"
+        assert r.services == []
+
+    @pytest.mark.asyncio
+    async def test_bad_json_key_raises(self):
+        from web.backend.core.finance.adapters.yandex import YandexAdapter
+        from web.backend.core.finance.adapters import AdapterError
+
+        with pytest.raises(AdapterError):
+            await YandexAdapter().fetch(None, {"authorized_key": "not a json"})

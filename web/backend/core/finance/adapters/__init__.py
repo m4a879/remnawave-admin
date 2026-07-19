@@ -29,6 +29,10 @@ from web.backend.core.finance.adapters import porkbun  # noqa: F401
 from web.backend.core.finance.adapters import regru  # noqa: F401
 from web.backend.core.finance.adapters import beget  # noqa: F401
 from web.backend.core.finance.adapters import linode  # noqa: F401
+from web.backend.core.finance.adapters import fourvps  # noqa: F401
+from web.backend.core.finance.adapters import netlen  # noqa: F401
+from web.backend.core.finance.adapters import hostbill  # noqa: F401
+from web.backend.core.finance.adapters import yandex  # noqa: F401
 
 __all__ = [
     "AdapterError",
