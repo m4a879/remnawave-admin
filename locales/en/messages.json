@@ -1103,7 +1103,8 @@
       "login": {
         "username": "👤 <b>Username:</b> <code>{username}</code>",
         "ip": "🌐 <b>IP:</b> <code>{ip}</code>",
-        "user_agent": "🔍 <b>User Agent:</b> <code>{user_agent}</code>"
+        "user_agent": "🔍 <b>User Agent:</b> <code>{user_agent}</code>",
+        "description": "💬 <b>Description:</b> <code>{description}</code>"
       },
       "panel_unavailable": {
         "error_type": "⚠️ <b>Error:</b> <code>{error_type}</code>",
