@@ -6,7 +6,7 @@
 запускать пробу и управлять токеном).
 """
 import logging
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -67,6 +67,22 @@ class ScanIn(BaseModel):
     def _dpi(cls, v: str) -> str:
         if v not in ("on", "any"):
             raise ValueError("dpi must be on|any")
+        return v
+
+
+class HistoryIn(BaseModel):
+    kind: str                                   # probe | scan | vless
+    target: Optional[str] = Field(default=None, max_length=300)
+    passed: int = 0
+    total: int = 0
+    cost_credits: Optional[int] = None
+    result: Dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("kind")
+    @classmethod
+    def _kind(cls, v: str) -> str:
+        if v not in ("probe", "scan", "vless"):
+            raise ValueError("kind must be probe|scan|vless")
         return v
 
 
@@ -179,7 +195,8 @@ async def check_node(node_uuid: str, data: ProbeIn,
     summary = bs.summarize(result, _first_target(data))
     saved = await db_service.save_bscheck(
         node_uuid, summary["passed"], summary["total"], summary.get("cost_credits"),
-        {"summary": summary, "raw": result}, created_by=admin.username)
+        {"summary": summary, "raw": result}, created_by=admin.username,
+        target=_first_target(data))
     await write_audit_log(admin_id=admin.account_id, admin_username=admin.username,
                           action="bscheck.node.check", resource="bscheck", resource_id=node_uuid)
     return {"summary": summary, "checked_at": saved.get("checked_at") if saved else None}
@@ -282,3 +299,24 @@ async def vless_status(test_id: str,
         return await bs.vless_status(test_id)
     except bs.BscheckError as e:
         raise _upstream(e)
+
+
+# ── Журнал проверок (ноды + ad-hoc) ──────────────────────────────
+
+
+@router.post("/history")
+async def save_history(data: HistoryIn,
+                       admin: AdminUser = Depends(require_permission("bscheck", "check"))):
+    """Записать ad-hoc проверку (probe/scan/vless) в общий журнал. Ноды пишутся сами."""
+    saved = await db_service.save_bscheck_run(
+        data.kind, data.target, data.passed, data.total,
+        data.cost_credits, data.result, created_by=admin.username)
+    return saved or {}
+
+
+@router.get("/history")
+async def list_history(kind: Optional[str] = None, limit: int = 50,
+                       admin: AdminUser = Depends(require_permission("bscheck", "view"))):
+    limit = max(1, min(limit, 200))
+    k = kind if kind in ("node", "probe", "scan", "vless") else None
+    return {"items": await db_service.list_bscheck_runs(limit, k)}

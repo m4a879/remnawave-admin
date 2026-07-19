@@ -4136,7 +4136,19 @@
     "vlessCost": "Тест запущен (◈ {{cost}})",
     "serverCol": "Сервер",
     "tunnelUp": "Туннель",
-    "speed": "Скорость"
+    "speed": "Скорость",
+    "up": "поднят",
+    "down": "нет",
+    "sites": "Сайты",
+    "tabsHistory": "История",
+    "kind_node": "Нода",
+    "kind_probe": "IP",
+    "kind_scan": "Скан",
+    "kind_vless": "VLESS",
+    "histTime": "Время",
+    "histKind": "Тип",
+    "histTarget": "Цель",
+    "histEmpty": "Проверок пока нет"
   },
   "dns": {
     "title": "DNS",

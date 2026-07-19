@@ -11,12 +11,12 @@
  * vless-тест списывает при запуске (кнопка помечена «платно»). Операторы
  * показываются брендовыми бейджами с человеческими именами и регионом.
  */
-import { useState } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient, UseQueryResult } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import {
-  bscheckApi, BsOperator, BsSummary, BsTargetSummary, BsNode, BsCheckRecord,
+  bscheckApi, BsOperator, BsSummary, BsTargetSummary, BsNode, BsCheckRecord, BsHistoryRow,
 } from '@/api/bscheck'
 import { usePermissionStore } from '@/store/permissionStore'
 import { Card } from '@/components/ui/card'
@@ -282,6 +282,19 @@ function useErrToast() {
   return (e: any) => toast.error(e?.response?.data?.detail || t('common.error'))
 }
 
+/** Записать результат ad-hoc проверки в общий журнал (тихо, без тостов). */
+function useSaveHistory() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (p: Parameters<typeof bscheckApi.saveHistory>[0]) => bscheckApi.saveHistory(p),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['bscheck-history'] }),
+  })
+}
+
+function kindLabel(kind: string, t: (k: string, opts?: Record<string, unknown>) => string): string {
+  return t(`bscheck.kind_${kind}`, { defaultValue: kind })
+}
+
 function ResultBadge({ passed, total }: { passed: number; total: number }) {
   return (
     <Badge className={cn('text-[10px] gap-1',
@@ -401,10 +414,12 @@ function Shell({ account }: { account: { balance_credits?: number; balance_total
           <TabsTrigger value="nodes" className="gap-1.5"><ShieldCheck className="w-4 h-4" />{t('bscheck.tabsNodes')}</TabsTrigger>
           <TabsTrigger value="ip" className="gap-1.5"><Crosshair className="w-4 h-4" />{t('bscheck.tabsIp')}</TabsTrigger>
           <TabsTrigger value="config" className="gap-1.5"><FileCode className="w-4 h-4" />{t('bscheck.tabsConfig')}</TabsTrigger>
+          <TabsTrigger value="history" className="gap-1.5"><History className="w-4 h-4" />{t('bscheck.tabsHistory')}</TabsTrigger>
         </TabsList>
         <TabsContent value="nodes"><NodesTab operators={ops} /></TabsContent>
         <TabsContent value="ip"><IpTab operators={ops} /></TabsContent>
         <TabsContent value="config"><ConfigTab operators={ops} /></TabsContent>
+        <TabsContent value="history"><HistoryTab operators={ops} /></TabsContent>
       </Tabs>
 
       <Dialog open={tokenOpen} onOpenChange={(o) => !o && setTokenOpen(false)}>
@@ -664,13 +679,24 @@ function TargetsMode({ operators, disabled }: { operators: BsOperator[]; disable
   const change = (c: Cfg) => { setCfg(c); setCost(null) }
   const body = () => ({ targets: targets(), ...cfgFields(cfg) })
 
+  const saveHist = useSaveHistory()
   const preview = useMutation({
     mutationFn: () => bscheckApi.preview(body()),
     onSuccess: (d) => setCost(d.cost_credits), onError: onErr,
   })
   const run = useMutation({
     mutationFn: () => bscheckApi.probeMulti(body()),
-    onSuccess: (d) => setRows(d.targets), onError: onErr,
+    onSuccess: (d) => {
+      setRows(d.targets)
+      const passed = d.targets.reduce((a, r) => a + r.passed, 0)
+      const total = d.targets.reduce((a, r) => a + r.total, 0)
+      const tg = d.targets.map((r) => r.target)
+      saveHist.mutate({
+        kind: 'probe',
+        target: tg.length > 1 ? `${tg[0]} +${tg.length - 1}` : (tg[0] || ''),
+        passed, total, cost_credits: d.cost_credits, result: { targets: d.targets },
+      })
+    }, onError: onErr,
   })
 
   const n = targets().length
@@ -741,6 +767,24 @@ function ScanMode({ operators, disabled }: { operators: BsOperator[]; disabled: 
 
   const validCidr = /^\d{1,3}(\.\d{1,3}){3}\/\d{1,2}$/.test(cidr.trim())
   const scanData: any = poll.data
+
+  const saveHist = useSaveHistory()
+  const savedRef = useRef<number | null>(null)
+  useEffect(() => {
+    if (scanId == null) return
+    if (scanData?.state === 'done' && savedRef.current !== scanId) {
+      savedRef.current = scanId
+      const r = scanData?.result ?? scanData
+      const byTarget: Record<string, any> = r?.by_target || (scanData?.by_target ?? {})
+      const entries = Object.entries(byTarget).filter(([, v]: [string, any]) => v?.by_operator)
+      const alive = entries.filter(([, v]: [string, any]) => sumByOp(v.by_operator).passed > 0).length
+      saveHist.mutate({
+        kind: 'scan', target: cidr.trim(), passed: alive, total: entries.length,
+        cost_credits: cost?.cost_credits ?? null, result: scanData,
+      })
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scanId, scanData])
 
   return (
     <div className="space-y-3">
@@ -815,6 +859,92 @@ function ScanResult({ data, operators }: { data: any; operators: BsOperator[] })
   )
 }
 
+// ── Рендер результата VLESS-теста (по серверам → по модемам) ─────
+
+function vlessServers(data: any): any[] {
+  if (Array.isArray(data?.result)) return data.result
+  if (Array.isArray(data?.results)) return data.results
+  if (Array.isArray(data?.servers)) return data.servers
+  return []
+}
+
+function vlessLegs(server: any): Array<{ op: string; leg: any }> {
+  const bo = server?.by_operator ?? server?.operators ?? server?.modems ?? server?.results
+  if (bo && typeof bo === 'object' && !Array.isArray(bo)) {
+    return Object.entries(bo).map(([op, leg]) => ({ op, leg: leg as any }))
+  }
+  if (Array.isArray(bo)) {
+    return bo.map((leg: any) => ({ op: String(leg.op || leg.op_key || leg.operator || leg.modem || ''), leg }))
+  }
+  return []
+}
+
+function VlessServers({ data, operators }: { data: any; operators: BsOperator[] }) {
+  const { t } = useTranslation()
+  const servers = vlessServers(data)
+  if (!servers.length) {
+    return (
+      <details className="text-xs">
+        <summary className="cursor-pointer text-muted-foreground">{t('bscheck.raw')}</summary>
+        <pre className="mt-1 max-h-64 overflow-auto rounded bg-black/30 p-2 text-[10px]">{JSON.stringify(data?.result ?? data, null, 2)}</pre>
+      </details>
+    )
+  }
+  return (
+    <div className="space-y-2">
+      {servers.map((s, i) => {
+        const legs = vlessLegs(s)
+        const name = s.server_name || s.name || s.remark || `#${i + 1}`
+        const addr = s.address || s.host || ''
+        const okCnt = legs.filter(({ leg }) => (leg.tunnel_up ?? leg.ok ?? leg.tcp?.ok)).length
+        const total = legs.length || (s.total ?? 0)
+        const passed = total ? okCnt : (s.passed ?? (s.ok ? 1 : 0))
+        return (
+          <div key={i} className="rounded-lg border border-[var(--glass-border)]">
+            <div className="flex items-center gap-2 px-3 py-2 text-xs border-b border-[var(--glass-border)]/50">
+              <span className="font-medium">{name}</span>
+              {addr && <span className="font-mono text-muted-foreground truncate">{addr}</span>}
+              <Badge className={cn('ml-auto text-[10px]',
+                total > 0 && passed === total ? 'bg-green-500/20 text-green-300'
+                  : passed === 0 ? 'bg-red-500/20 text-red-300' : 'bg-amber-500/20 text-amber-300')}>
+                {total ? `${passed}/${total}` : (s.ok ? 'ok' : '—')}
+              </Badge>
+            </div>
+            {legs.length > 0 ? (
+              <div className="divide-y divide-[var(--glass-border)]/40">
+                {legs.map(({ op, leg }, j) => {
+                  const tcpOk = leg.tcp?.ok ?? leg.tcp_ok ?? leg.ok
+                  const tcpMs = leg.tcp?.latency_ms ?? leg.latency_ms ?? leg.tcp_ms
+                  const tunnel = leg.tunnel_up ?? leg.tunnel?.up ?? (typeof leg.tunnel === 'boolean' ? leg.tunnel : undefined)
+                  const sitesOk = leg.sites?.passed ?? leg.sites?.ok ?? leg.sites_ok ?? leg.websites_ok
+                  const sitesTotal = leg.sites?.total ?? leg.sites_total ?? leg.websites_total
+                  const timeMs = leg.time_ms ?? leg.duration_ms ?? leg.elapsed_ms
+                  const timeS = leg.time_s ?? (typeof timeMs === 'number' ? Math.round(timeMs / 100) / 10 : undefined)
+                  return (
+                    <div key={j} className="px-3 py-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
+                      <OperatorTag opKey={op} operators={operators} />
+                      {tcpOk != null && <span className={tcpOk ? 'text-green-400' : 'text-red-400'}>TCP {tcpOk ? 'ok' : 'fail'}{tcpMs != null ? ` · ${tcpMs}ms` : ''}</span>}
+                      {tunnel != null && <span className={tunnel ? 'text-green-400' : 'text-red-400'}>{t('bscheck.tunnelUp')}: {tunnel ? t('bscheck.up') : t('bscheck.down')}</span>}
+                      {sitesTotal != null && <span className="text-muted-foreground">{t('bscheck.sites')}: {sitesOk ?? 0}/{sitesTotal}</span>}
+                      {timeS != null && <span className="ml-auto text-muted-foreground tabular-nums">{timeS}s</span>}
+                    </div>
+                  )
+                })}
+              </div>
+            ) : (
+              <div className="px-3 py-2 text-xs flex items-center gap-2">
+                {(s.tunnel_up ?? s.ok) ? <Check className="w-4 h-4 text-green-400" /> : <X className="w-4 h-4 text-red-400" />}
+                {s.speed_mbps != null && <span className="inline-flex items-center gap-1"><Gauge className="w-3.5 h-3.5" />{s.speed_mbps} Mbps</span>}
+                {s.error && <span className="text-red-300">{s.error}</span>}
+              </div>
+            )}
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
 // ── Вкладка «Тест конфига» (VLESS/Reality) ───────────────────────
 
 function ConfigTab({ operators }: { operators: BsOperator[] }) {
@@ -851,7 +981,24 @@ function ConfigTab({ operators }: { operators: BsOperator[] }) {
   }
   const toggleModem = (op: string) => setModems((m) => m.includes(op) ? m.filter((x) => x !== op) : [...m, op])
   const data: any = poll.data
-  const servers: any[] = Array.isArray(data?.result) ? data.result : (Array.isArray(data?.results) ? data.results : [])
+  const servers: any[] = vlessServers(data)
+
+  const saveHist = useSaveHistory()
+  const savedRef = useRef<number | null>(null)
+  useEffect(() => {
+    if (testId == null) return
+    const done = data?.result_ready || data?.state === 'done'
+    if (done && savedRef.current !== testId) {
+      savedRef.current = testId
+      const passed = servers.filter((s) => (s.ok ?? s.tunnel_up) || vlessLegs(s).some(({ leg }) => leg.tunnel_up ?? leg.ok)).length
+      saveHist.mutate({
+        kind: 'vless',
+        target: servers[0]?.server_name || servers[0]?.name || servers[0]?.remark || `${servers.length} серв.`,
+        passed, total: servers.length, cost_credits: null, result: data,
+      })
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [testId, data])
 
   return (
     <Card className="p-4 space-y-4">
@@ -923,44 +1070,86 @@ function ConfigTab({ operators }: { operators: BsOperator[] }) {
       {testId != null && (
         <div className="space-y-2">
           <PollStatus state={data?.result_ready ? 'done' : data?.state} kind="vless" />
-          {servers.length > 0 && (
-            <div className="rounded-lg border border-[var(--glass-border)] overflow-hidden">
-              <table className="w-full text-xs">
-                <thead>
-                  <tr className="text-left text-muted-foreground border-b border-[var(--glass-border)]">
-                    <th className="px-3 py-1.5">{t('bscheck.serverCol')}</th>
-                    <th className="px-3 py-1.5">{t('bscheck.tunnelUp')}</th>
-                    <th className="px-3 py-1.5 text-right">{t('bscheck.speed')}</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {servers.map((s, i) => (
-                    <tr key={i} className="border-b border-[var(--glass-border)]/50">
-                      <td className="px-3 py-1.5 font-mono">{s.server_name || s.name || `#${i + 1}`}</td>
-                      <td className="px-3 py-1.5">
-                        {(s.tunnel_up ?? s.ok)
-                          ? <Check className="w-4 h-4 text-green-400" /> : <X className="w-4 h-4 text-red-400" />}
-                        {s.error && <span className="ml-2 text-red-300">{s.error}</span>}
-                      </td>
-                      <td className="px-3 py-1.5 text-right tabular-nums">
-                        {s.speed_mbps != null
-                          ? <span className="inline-flex items-center gap-1 justify-end"><Gauge className="w-3.5 h-3.5" />{s.speed_mbps} Mbps</span>
-                          : '—'}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-          {data && data.result_ready && servers.length === 0 && (
-            <details className="text-xs">
-              <summary className="cursor-pointer text-muted-foreground">{t('bscheck.raw')}</summary>
-              <pre className="mt-1 max-h-64 overflow-auto rounded bg-black/30 p-2 text-[10px]">{JSON.stringify(data.result ?? data, null, 2)}</pre>
-            </details>
-          )}
+          {(servers.length > 0 || data?.result_ready) && <VlessServers data={data} operators={operators} />}
         </div>
       )}
+    </Card>
+  )
+}
+
+// ── Вкладка «История» (журнал всех проверок) ─────────────────────
+
+function HistoryResult({ row, operators }: { row: BsHistoryRow; operators: BsOperator[] }) {
+  const r: any = row.result || {}
+  if (row.kind === 'vless') return <VlessServers data={r} operators={operators} />
+  if (row.kind === 'scan') return <ScanResult data={r} operators={operators} />
+  if (row.kind === 'probe') {
+    const targets: BsTargetSummary[] = Array.isArray(r.targets) ? r.targets : []
+    if (!targets.length) return <p className="text-sm text-muted-foreground">—</p>
+    return <div className="space-y-2">{targets.map((s) => <OperatorResults key={s.target} summary={s} operators={operators} title={s.target} />)}</div>
+  }
+  return r.summary ? <OperatorResults summary={r.summary} operators={operators} /> : <p className="text-sm text-muted-foreground">—</p>
+}
+
+function HistoryDetailDialog({ row, operators, onClose }: {
+  row: BsHistoryRow; operators: BsOperator[]; onClose: () => void
+}) {
+  const { t } = useTranslation()
+  return (
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="sm:max-w-xl max-h-[85vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle className="text-base flex items-center gap-2">
+            <History className="w-4 h-4 text-primary-400" />
+            <Badge variant="outline" className="text-[10px]">{kindLabel(row.kind, t)}</Badge>
+            <span className="font-mono text-sm truncate">{row.target || '—'}</span>
+          </DialogTitle>
+        </DialogHeader>
+        <p className="text-[11px] text-muted-foreground">
+          {fmtDate(row.checked_at)}{row.cost_credits != null && ` · ◈ ${row.cost_credits}`}{row.created_by && ` · ${row.created_by}`}
+        </p>
+        <HistoryResult row={row} operators={operators} />
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+function HistoryTab({ operators }: { operators: BsOperator[] }) {
+  const { t } = useTranslation()
+  const { data, isLoading } = useQuery({ queryKey: ['bscheck-history'], queryFn: () => bscheckApi.history() })
+  const [detail, setDetail] = useState<BsHistoryRow | null>(null)
+  const items = data || []
+  return (
+    <Card className="overflow-hidden">
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="text-left text-xs text-muted-foreground border-b border-[var(--glass-border)]">
+              <th className="px-3 py-2">{t('bscheck.histTime')}</th>
+              <th className="px-3 py-2">{t('bscheck.histKind')}</th>
+              <th className="px-3 py-2">{t('bscheck.histTarget')}</th>
+              <th className="px-3 py-2">{t('bscheck.passed')}</th>
+              <th className="px-3 py-2 w-16 text-right">◈</th>
+            </tr>
+          </thead>
+          <tbody>
+            {isLoading ? (
+              <tr><td colSpan={5} className="px-3 py-6"><Skeleton className="h-8 w-full" /></td></tr>
+            ) : !items.length ? (
+              <tr><td colSpan={5} className="px-3 py-6 text-center text-muted-foreground">{t('bscheck.histEmpty')}</td></tr>
+            ) : items.map((row) => (
+              <tr key={row.id} className="border-b border-[var(--glass-border)]/50 hover:bg-white/5 cursor-pointer" onClick={() => setDetail(row)}>
+                <td className="px-3 py-2 text-xs text-muted-foreground whitespace-nowrap">{fmtDate(row.checked_at)}</td>
+                <td className="px-3 py-2"><Badge variant="outline" className="text-[10px]">{kindLabel(row.kind, t)}</Badge></td>
+                <td className="px-3 py-2 font-mono text-xs truncate max-w-[220px]">{row.target || '—'}</td>
+                <td className="px-3 py-2"><ResultBadge passed={row.passed} total={row.total} /></td>
+                <td className="px-3 py-2 text-right text-xs text-muted-foreground">{row.cost_credits ?? '—'}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {detail && <HistoryDetailDialog row={detail} operators={operators} onClose={() => setDetail(null)} />}
     </Card>
   )
 }

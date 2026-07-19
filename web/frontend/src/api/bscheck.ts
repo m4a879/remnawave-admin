@@ -67,6 +67,28 @@ export interface BsCheckRecord {
   created_by: string | null
 }
 
+export interface BsHistoryRow {
+  id: number
+  node_uuid: string | null
+  kind: string
+  target: string | null
+  passed: number
+  total: number
+  cost_credits: number | null
+  result: any
+  created_by: string | null
+  checked_at: string
+}
+
+export interface HistorySave {
+  kind: string
+  target?: string
+  passed: number
+  total: number
+  cost_credits?: number | null
+  result: any
+}
+
 export interface ProbeBody {
   target?: string
   targets?: string[]
@@ -136,5 +158,11 @@ export const bscheckApi = {
   },
   async vlessStatus(id: number | string): Promise<any> {
     const { data } = await client.get(`/bscheck/vless/${id}`); return data
+  },
+  async saveHistory(payload: HistorySave): Promise<BsHistoryRow> {
+    const { data } = await client.post('/bscheck/history', payload); return data
+  },
+  async history(kind?: string, limit = 50): Promise<BsHistoryRow[]> {
+    const { data } = await client.get('/bscheck/history', { params: { kind, limit } }); return data.items
   },
 }
