@@ -3136,7 +3136,7 @@
         },
         "smtp": {
           "q": "How to set up email sending?",
-          "a": "Two options:\n\n1. Built-in mail server — go to Mail Server section, add a domain, configure DNS records (MX, SPF, DKIM, DMARC).\n\n2. External SMTP relay — go to Notifications → SMTP Config and enter your SMTP server details (Gmail, Mailgun, etc.)."
+          "a": "Two options:\n\n1. Built-in mail server — go to Mail Server section, add a domain, configure DNS records (MX, SPF, DKIM, DMARC).\n\n2. External SMTP relay — go to Notifications → Channels → 'SMTP Configuration' (superadmin only) and enter your SMTP server details (Gmail, Mailgun, etc.)."
         },
         "violationQueue": {
           "q": "How to tell if the violation detection pipeline is keeping up?",
