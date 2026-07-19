@@ -57,7 +57,9 @@ class InboundMailHandler:
                     domain,
                 )
             if not is_configured:
-                return "550 Relay denied — domain not configured"
+                # SMTP-статус обязан быть ASCII — aiosmtpd.push кодирует в ascii,
+                # не-ASCII (напр. тире «—») роняет сессию UnicodeEncodeError
+                return "550 Relay denied - domain not configured"
         except Exception as e:
             logger.error("RCPT check error: %s", e)
             return "451 Temporary error, try again later"
