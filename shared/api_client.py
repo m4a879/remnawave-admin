@@ -1097,12 +1097,10 @@ class RemnawaveApiClient(BaseHttpClient):
     async def get_subscription_connection_keys(self, uuid: str) -> dict:
         """Полные ключи подключения (vless://… по хостам), сгруппированные
         enabledKeys/hiddenKeys/disabledKeys. Админский источник Panel API —
-        не гейтится HWID (в отличие от /sub/{short}/info)."""
-        from shared.exceptions import NotFoundError
-        try:
-            return await self._get(f"/api/subscriptions/{uuid}/connection-keys")
-        except NotFoundError:
-            return await self._get(f"/api/subscriptions/by-uuid/{uuid}/connection-keys")
+        не гейтится HWID (в отличие от /sub/{short}/info).
+
+        Путь по контракту Remnawave: uuid ИДЁТ ПОСЛЕ connection-keys."""
+        return await self._get(f"/api/subscriptions/connection-keys/{uuid}")
 
     async def get_raw_subscription_by_short_uuid(self, short_uuid: str) -> dict:
         return await self._get(f"/api/subscriptions/by-short-uuid/{short_uuid}/raw")
