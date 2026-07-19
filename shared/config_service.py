@@ -380,50 +380,6 @@ DEFAULT_CONFIG_DEFINITIONS: List[Dict[str, Any]] = [
         "description": "Токен bsk_live_… (bsbord) для проверки нод через операторов. Правится на странице нод",
         "default_value": "", "is_secret": True, "is_readonly": True, "sort_order": 95,
     },
-    # BS-Check авто-проверка (расписание) — правится на странице BS-Check
-    {
-        "key": "bscheck_auto_enabled", "value_type": "bool", "category": "general",
-        "display_name": "BS-Check: авто-проверка нод",
-        "description": "Периодическая платная проверка нод. Правится на странице BS-Check",
-        "default_value": "false", "is_readonly": True, "sort_order": 96,
-    },
-    {
-        "key": "bscheck_auto_interval_hours", "value_type": "int", "category": "general",
-        "display_name": "BS-Check: интервал (часы)",
-        "description": "Как часто прогонять авто-проверку нод",
-        "default_value": "6", "is_readonly": True, "sort_order": 97,
-    },
-    {
-        "key": "bscheck_auto_dpi", "value_type": "string", "category": "general",
-        "display_name": "BS-Check: режим БС (on/any)",
-        "description": "on = только через БС (DPI_ON)", "default_value": "on",
-        "is_readonly": True, "sort_order": 98,
-    },
-    {
-        "key": "bscheck_auto_operators", "value_type": "string", "category": "general",
-        "display_name": "BS-Check: операторы (csv op_key)",
-        "description": "Пусто = все доступные", "default_value": "",
-        "is_readonly": True, "sort_order": 99,
-    },
-    {
-        "key": "bscheck_auto_nodes", "value_type": "string", "category": "general",
-        "display_name": "BS-Check: ноды (csv uuid)",
-        "description": "Пусто = все ноды флота", "default_value": "",
-        "is_readonly": True, "sort_order": 100,
-    },
-    {
-        "key": "bscheck_auto_budget_daily", "value_type": "int", "category": "general",
-        "display_name": "BS-Check: дневной лимит кредитов",
-        "description": "Стоп авто-проверок при достижении (0 = без лимита, опасно)",
-        "default_value": "500", "is_readonly": True, "sort_order": 101,
-    },
-    {
-        "key": "bscheck_auto_alert", "value_type": "bool", "category": "general",
-        "display_name": "BS-Check: алерт на просадку БС",
-        "description": "Уведомлять в Telegram, когда у ноды упало число прошедших операторов",
-        "default_value": "true", "is_readonly": True, "sort_order": 102,
-    },
-
     # === SYNC ===
     {
         "key": "sync_interval_seconds",

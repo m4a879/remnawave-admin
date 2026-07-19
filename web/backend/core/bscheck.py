@@ -73,67 +73,6 @@ async def _write_value(value: str) -> None:
         logger.debug("bscheck: cache update skipped: %s", e)
 
 
-# ── Расписание авто-проверки ─────────────────────────────────────
-
-_SCHEDULE_KEYS = (
-    "bscheck_auto_enabled", "bscheck_auto_interval_hours", "bscheck_auto_dpi",
-    "bscheck_auto_operators", "bscheck_auto_nodes", "bscheck_auto_budget_daily",
-    "bscheck_auto_alert",
-)
-
-
-def _cfg_str(v: Any) -> str:
-    if isinstance(v, bool):
-        return "true" if v else "false"
-    if isinstance(v, list):
-        return ",".join(str(x).strip() for x in v if str(x).strip())
-    return str(v)
-
-
-def read_schedule() -> Dict[str, Any]:
-    """Текущее расписание авто-проверки из конфигов (типизированно для API/лупа)."""
-    from shared.config_service import config_service
-    g = config_service.get
-
-    def _b(k: str, d: bool) -> bool:
-        return str(g(k, d)).strip().lower() in ("true", "1", "yes", "on")
-
-    def _csv(k: str) -> List[str]:
-        return [s.strip() for s in str(g(k, "") or "").split(",") if s.strip()]
-
-    return {
-        "enabled": _b("bscheck_auto_enabled", False),
-        "interval_hours": int(g("bscheck_auto_interval_hours", 6) or 0),
-        "dpi": str(g("bscheck_auto_dpi", "on") or "on"),
-        "operators": _csv("bscheck_auto_operators"),
-        "nodes": _csv("bscheck_auto_nodes"),
-        "budget_daily": int(g("bscheck_auto_budget_daily", 0) or 0),
-        "alert": _b("bscheck_auto_alert", True),
-    }
-
-
-async def save_schedule(values: Dict[str, Any]) -> None:
-    """Записать ключи расписания в bot_config (только из белого списка) + кэш."""
-    from shared.database import db_service
-    from shared.db_query import update_sql
-    from shared.db_schema import BOT_CONFIG_TABLE
-    from shared.config_service import config_service
-    if not db_service.is_connected:
-        raise BscheckError("База данных недоступна")
-    async with db_service.acquire() as conn:
-        for k, v in values.items():
-            if k not in _SCHEDULE_KEYS:
-                continue
-            sval = _cfg_str(v)
-            await conn.execute(
-                update_sql(BOT_CONFIG_TABLE, "value = $2, updated_at = NOW()", "key = $1"), k, sval)
-            try:
-                if k in config_service._cache:
-                    config_service._cache[k].value = sval
-            except Exception:  # noqa: BLE001
-                pass
-
-
 # ── HTTP ─────────────────────────────────────────────────────────
 
 async def _request(method: str, path: str, *, token: Optional[str] = None,

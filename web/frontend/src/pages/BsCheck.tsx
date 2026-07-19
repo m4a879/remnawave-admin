@@ -16,7 +16,7 @@ import { useQuery, useMutation, useQueryClient, UseQueryResult } from '@tanstack
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import {
-  bscheckApi, BsOperator, BsSummary, BsTargetSummary, BsNode, BsCheckRecord, BsHistoryRow, BsSchedule,
+  bscheckApi, BsOperator, BsSummary, BsTargetSummary, BsNode, BsCheckRecord, BsHistoryRow, BsJob,
 } from '@/api/bscheck'
 import { usePermissionStore } from '@/store/permissionStore'
 import { Card } from '@/components/ui/card'
@@ -37,7 +37,7 @@ import {
 import {
   ShieldCheck, RefreshCw, Loader2, Check, X, Key, History,
   Crosshair, Network, FileCode, Gauge, Wifi, AlertTriangle,
-  ChevronDown, ChevronRight, Clock,
+  Clock, Plus, Pencil, Trash2,
 } from '@/components/brand/icons'
 import { cn } from '@/lib/utils'
 
@@ -415,11 +415,13 @@ function Shell({ account }: { account: { balance_credits?: number; balance_total
           <TabsTrigger value="nodes" className="gap-1.5"><ShieldCheck className="w-4 h-4" />{t('bscheck.tabsNodes')}</TabsTrigger>
           <TabsTrigger value="ip" className="gap-1.5"><Crosshair className="w-4 h-4" />{t('bscheck.tabsIp')}</TabsTrigger>
           <TabsTrigger value="config" className="gap-1.5"><FileCode className="w-4 h-4" />{t('bscheck.tabsConfig')}</TabsTrigger>
+          <TabsTrigger value="schedule" className="gap-1.5"><Clock className="w-4 h-4" />{t('bscheck.tabsSchedule')}</TabsTrigger>
           <TabsTrigger value="history" className="gap-1.5"><History className="w-4 h-4" />{t('bscheck.tabsHistory')}</TabsTrigger>
         </TabsList>
         <TabsContent value="nodes"><NodesTab operators={ops} /></TabsContent>
         <TabsContent value="ip"><IpTab operators={ops} /></TabsContent>
         <TabsContent value="config"><ConfigTab operators={ops} /></TabsContent>
+        <TabsContent value="schedule"><ScheduleTab operators={ops} /></TabsContent>
         <TabsContent value="history"><HistoryTab operators={ops} /></TabsContent>
       </Tabs>
 
@@ -433,102 +435,246 @@ function Shell({ account }: { account: { balance_credits?: number; balance_total
   )
 }
 
-// ── Авто-проверка нод по расписанию ──────────────────────────────
+// ── Вкладка «Расписание» (сохранённые авто-тесты) ────────────────
 
-function AutoScheduleCard({ nodes }: { nodes: BsNode[] }) {
+function jobTargetSummary(job: BsJob, t: (k: string, o?: Record<string, unknown>) => string): string {
+  const c = job.config || {}
+  if (job.kind === 'node') return c.nodes?.length ? t('bscheck.jobNodesN', { n: c.nodes.length }) : t('bscheck.jobAllNodes')
+  if (job.kind === 'probe') return (c.targets || []).join(', ') || '—'
+  if (job.kind === 'scan') return c.cidr || '—'
+  if (job.kind === 'vless') return t('bscheck.jobLinksN', { n: String(c.raw_input || '').split(/\s+/).filter(Boolean).length })
+  return '—'
+}
+
+function ScheduleTab({ operators }: { operators: BsOperator[] }) {
   const { t } = useTranslation()
   const qc = useQueryClient()
   const onErr = useErrToast()
   const canCheck = usePermissionStore((s) => s.hasPermission)('bscheck', 'check')
-  const [open, setOpen] = useState(false)
-  const { data } = useQuery({ queryKey: ['bscheck-schedule'], queryFn: bscheckApi.getSchedule })
-  const [f, setF] = useState<BsSchedule | null>(null)
-  useEffect(() => { if (data && !f) setF(data) }, [data, f])
+  const { data, isLoading } = useQuery({ queryKey: ['bscheck-jobs'], queryFn: bscheckApi.jobs })
+  const { data: nodesData } = useQuery({ queryKey: ['bscheck-nodes'], queryFn: bscheckApi.nodes })
+  const [editing, setEditing] = useState<BsJob | 'new' | null>(null)
+  const jobs = data || []
+  const nodes = nodesData || []
 
-  const save = useMutation({
-    mutationFn: () => bscheckApi.setSchedule(f as BsSchedule),
-    onSuccess: (d) => {
-      toast.success(t('bscheck.autoSaved'))
-      setF(d); qc.setQueryData(['bscheck-schedule'], d)
-    },
-    onError: onErr,
+  const toggle = useMutation({
+    mutationFn: ({ job, enabled }: { job: BsJob; enabled: boolean }) => bscheckApi.updateJob(job.id, {
+      name: job.name, kind: job.kind, enabled, interval_minutes: job.interval_minutes,
+      config: job.config, budget_daily: job.budget_daily, alert: job.alert,
+    }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['bscheck-jobs'] }), onError: onErr,
   })
-  const set = (patch: Partial<BsSchedule>) => setF((p) => (p ? { ...p, ...patch } : p))
-  const toggleNode = (uuid: string) => f && set({
-    nodes: f.nodes.includes(uuid) ? f.nodes.filter((x) => x !== uuid) : [...f.nodes, uuid],
+  const del = useMutation({
+    mutationFn: (id: number) => bscheckApi.deleteJob(id),
+    onSuccess: () => { toast.success(t('bscheck.jobDeleted')); qc.invalidateQueries({ queryKey: ['bscheck-jobs'] }) },
+    onError: onErr,
   })
 
   return (
-    <Card className="p-3">
-      <button type="button" className="flex w-full items-center gap-2 text-left" onClick={() => setOpen((o) => !o)}>
-        {open ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
-        <Clock className="w-4 h-4 text-primary-400" />
-        <span className="text-sm font-medium">{t('bscheck.autoTitle')}</span>
-        <Badge className={cn('text-[10px]', data?.enabled ? 'bg-green-500/20 text-green-300' : 'bg-white/10 text-muted-foreground')}>
-          {data?.enabled ? t('bscheck.autoOn', { h: data.interval_hours }) : t('bscheck.autoOff')}
-        </Badge>
-        {data && (
-          <span className="ml-auto text-[11px] text-muted-foreground">
-            {t('bscheck.autoSpent', { n: data.spent_today })} · {data.last_run ? fmtDate(data.last_run) : t('bscheck.autoNever')}
-          </span>
+    <div className="space-y-3">
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-[11px] text-amber-400">{t('bscheck.autoWarn')}</p>
+        {canCheck && (
+          <Button size="sm" className="gap-1.5 shrink-0" onClick={() => setEditing('new')}>
+            <Plus className="w-4 h-4" />{t('bscheck.jobNew')}
+          </Button>
         )}
-      </button>
+      </div>
 
-      {open && f && (
-        <div className="mt-3 space-y-3 border-t border-[var(--glass-border)] pt-3">
-          <div className="flex flex-wrap items-center gap-4">
-            <label className="flex items-center gap-2 text-sm cursor-pointer">
-              <Switch checked={f.enabled} onCheckedChange={(v) => set({ enabled: v })} disabled={!canCheck} />
-              {t('bscheck.autoEnable')}
-            </label>
-            <BsLockSwitch locked={f.dpi === 'on'} onToggle={(v) => set({ dpi: v ? 'on' : 'any' })} />
-            <label className="flex items-center gap-2 text-sm cursor-pointer">
-              <Switch checked={f.alert} onCheckedChange={(v) => set({ alert: v })} disabled={!canCheck} />
-              {t('bscheck.autoAlert')}
-            </label>
+      {isLoading ? <Skeleton className="h-24 w-full" />
+        : !jobs.length ? <Card className="p-6 text-center text-sm text-muted-foreground">{t('bscheck.jobsEmpty')}</Card>
+          : jobs.map((job) => (
+            <Card key={job.id} className="p-3">
+              <div className="flex flex-wrap items-center gap-2">
+                <Switch checked={job.enabled} disabled={!canCheck} onCheckedChange={(v) => toggle.mutate({ job, enabled: v })} />
+                <span className="font-medium text-sm">{job.name}</span>
+                <Badge variant="outline" className="text-[10px]">{kindLabel(job.kind, t)}</Badge>
+                <span className="text-[11px] text-muted-foreground">{t('bscheck.jobEvery', { m: job.interval_minutes })}</span>
+                {job.budget_daily > 0 && <span className="text-[11px] text-muted-foreground">≤ {job.budget_daily} ◈</span>}
+                <span className="ml-auto text-[11px] text-muted-foreground">{job.last_run_at ? fmtDate(job.last_run_at) : t('bscheck.autoNever')}</span>
+              </div>
+              <div className="mt-1 flex items-center gap-2">
+                <span className="text-[11px] font-mono text-muted-foreground truncate flex-1">{jobTargetSummary(job, t)}</span>
+                {canCheck && (
+                  <>
+                    <Button size="sm" variant="ghost" className="h-7 w-7" onClick={() => setEditing(job)} aria-label={t('bscheck.jobEdit')}><Pencil className="w-3.5 h-3.5" /></Button>
+                    <Button size="sm" variant="ghost" className="h-7 w-7 text-red-400" onClick={() => del.mutate(job.id)} aria-label={t('common.delete')}><Trash2 className="w-3.5 h-3.5" /></Button>
+                  </>
+                )}
+              </div>
+            </Card>
+          ))}
+
+      {editing && (
+        <JobDialog job={editing === 'new' ? null : editing} operators={operators} nodes={nodes}
+          onClose={() => setEditing(null)}
+          onSaved={() => { setEditing(null); qc.invalidateQueries({ queryKey: ['bscheck-jobs'] }) }} />
+      )}
+    </div>
+  )
+}
+
+function JobDialog({ job, operators, nodes, onClose, onSaved }: {
+  job: BsJob | null; operators: BsOperator[]; nodes: BsNode[]; onClose: () => void; onSaved: () => void
+}) {
+  const { t } = useTranslation()
+  const onErr = useErrToast()
+  const c = job?.config || {}
+  const [name, setName] = useState(job?.name || '')
+  const [kind, setKind] = useState(job?.kind || 'node')
+  const [enabled, setEnabled] = useState(job?.enabled ?? true)
+  const [intervalMin, setIntervalMin] = useState(job?.interval_minutes || 360)
+  const [budget, setBudget] = useState(job?.budget_daily || 0)
+  const [alert, setAlert] = useState(job?.alert ?? true)
+  const [dpi, setDpi] = useState<string>(c.dpi || 'on')
+  const [ops, setOps] = useState<string[]>(c.operators || [])
+  const [selNodes, setSelNodes] = useState<string[]>(c.nodes || [])
+  const [targets, setTargets] = useState<string>((c.targets || []).join('\n'))
+  const [cidr, setCidr] = useState<string>(c.cidr || '')
+  const [raw, setRaw] = useState<string>(c.raw_input || '')
+
+  const offKeys = offKeySet(operators)
+  const validScan = /^\d{1,3}(\.\d{1,3}){3}\/24$/.test(cidr.trim())
+  const canSave = !!name.trim()
+    && (kind !== 'scan' || validScan)
+    && (kind !== 'vless' || !!raw.trim())
+    && (kind !== 'probe' || !!targets.trim())
+
+  const buildConfig = () => {
+    const base: any = { dpi, operators: ops }
+    if (kind === 'node') base.nodes = selNodes
+    if (kind === 'probe') base.targets = targets.split(/[\n,]/).map((s) => s.trim()).filter(Boolean).slice(0, 10)
+    if (kind === 'scan') { const m = cidr.trim().match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.\d{1,3}\/24$/); base.cidr = m ? `${m[1]}.${m[2]}.${m[3]}.0/24` : cidr.trim() }
+    if (kind === 'vless') base.raw_input = raw
+    return base
+  }
+
+  const save = useMutation({
+    mutationFn: () => {
+      const payload = { name: name.trim(), kind, enabled, interval_minutes: intervalMin, config: buildConfig(), budget_daily: budget, alert }
+      return job ? bscheckApi.updateJob(job.id, payload) : bscheckApi.createJob(payload)
+    },
+    onSuccess: () => { toast.success(t('bscheck.jobSaved')); onSaved() },
+    onError: onErr,
+  })
+
+  return (
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="sm:max-w-xl max-h-[85vh] overflow-y-auto">
+        <DialogHeader><DialogTitle className="text-base">{job ? t('bscheck.jobEdit') : t('bscheck.jobNew')}</DialogTitle></DialogHeader>
+        <div className="space-y-3">
+          <div className="flex flex-wrap gap-3">
+            <div className="flex-1 min-w-[180px]">
+              <Label>{t('bscheck.jobName')}</Label>
+              <Input value={name} className="mt-1" onChange={(e) => setName(e.target.value)} />
+            </div>
+            <div className="w-40">
+              <Label>{t('bscheck.jobKind')}</Label>
+              <Select value={kind} onValueChange={setKind}>
+                <SelectTrigger className="mt-1 h-9"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="node">{t('bscheck.kind_node')}</SelectItem>
+                  <SelectItem value="probe">{t('bscheck.kind_probe')}</SelectItem>
+                  <SelectItem value="scan">{t('bscheck.kind_scan')}</SelectItem>
+                  <SelectItem value="vless">{t('bscheck.kind_vless')}</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
           </div>
 
-          <div className="flex flex-wrap gap-4">
+          {kind === 'node' && (
+            <div>
+              <Label>{t('bscheck.autoNodes')}</Label>
+              <div className="flex flex-wrap gap-1.5 mt-1">
+                {nodes.map((n) => {
+                  const sel = selNodes.includes(n.uuid)
+                  return (
+                    <button key={n.uuid} type="button"
+                      onClick={() => setSelNodes((p) => p.includes(n.uuid) ? p.filter((x) => x !== n.uuid) : [...p, n.uuid])}
+                      className={cn('px-2 py-0.5 rounded-md text-[11px] border transition-colors',
+                        sel ? 'border-primary-500/50 bg-primary-500/15 text-primary-200' : 'border-[var(--glass-border)] text-muted-foreground hover:text-white')}>
+                      {n.name}
+                    </button>
+                  )
+                })}
+              </div>
+              <p className="text-[11px] text-muted-foreground mt-1">{t('bscheck.autoNodesHint')}</p>
+            </div>
+          )}
+          {kind === 'probe' && (
+            <div>
+              <Label>{t('bscheck.targetsLabel')}</Label>
+              <Textarea value={targets} rows={3} className="mt-1 font-mono text-xs" placeholder={'1.2.3.4:443\n5.6.7.8:443'} onChange={(e) => setTargets(e.target.value)} />
+            </div>
+          )}
+          {kind === 'scan' && (
+            <div>
+              <Label>{t('bscheck.cidrLabel')}</Label>
+              <Input value={cidr} className="mt-1 font-mono" placeholder="1.2.3.0/24" onChange={(e) => setCidr(e.target.value)} />
+              <p className={cn('text-[11px] mt-1', cidr.trim() && !validScan ? 'text-amber-400' : 'text-muted-foreground')}>
+                {cidr.trim() && !validScan ? t('bscheck.cidrInvalid') : t('bscheck.cidrHint')}
+              </p>
+            </div>
+          )}
+          {kind === 'vless' && (
+            <div>
+              <Label>{t('bscheck.rawInput')}</Label>
+              <Textarea value={raw} rows={4} className="mt-1 font-mono text-xs" placeholder={'vless://…\nvless://…'} onChange={(e) => setRaw(e.target.value)} />
+              <p className="text-[11px] text-muted-foreground mt-1">{t('bscheck.rawInputHint')}</p>
+            </div>
+          )}
+
+          <div className="flex flex-wrap gap-3">
             <div className="w-40">
-              <Label className="text-xs">{t('bscheck.autoInterval')}</Label>
-              <Input type="number" min={1} max={168} value={f.interval_hours} className="mt-1 h-8" disabled={!canCheck}
-                onChange={(e) => set({ interval_hours: Math.max(1, Math.min(168, Number(e.target.value) || 1)) })} />
+              <Label>{t('bscheck.jobInterval')}</Label>
+              <Input type="number" min={5} value={intervalMin} className="mt-1 h-9" onChange={(e) => setIntervalMin(Math.max(5, Number(e.target.value) || 5))} />
             </div>
             <div className="w-44">
-              <Label className="text-xs">{t('bscheck.autoBudget')}</Label>
-              <Input type="number" min={0} value={f.budget_daily} className="mt-1 h-8" disabled={!canCheck}
-                onChange={(e) => set({ budget_daily: Math.max(0, Number(e.target.value) || 0) })} />
+              <Label>{t('bscheck.autoBudget')}</Label>
+              <Input type="number" min={0} value={budget} className="mt-1 h-9" onChange={(e) => setBudget(Math.max(0, Number(e.target.value) || 0))} />
             </div>
           </div>
 
-          <div>
-            <Label className="text-xs">{t('bscheck.autoNodes')}</Label>
-            <div className="flex flex-wrap gap-1.5 mt-1">
-              {nodes.map((n) => {
-                const sel = f.nodes.includes(n.uuid)
-                return (
-                  <button key={n.uuid} type="button" onClick={() => canCheck && toggleNode(n.uuid)}
-                    className={cn('px-2 py-0.5 rounded-md text-[11px] border transition-colors',
-                      sel ? 'border-primary-500/50 bg-primary-500/15 text-primary-200'
-                        : 'border-[var(--glass-border)] text-muted-foreground hover:text-white')}>
-                    {n.name}
-                  </button>
-                )
-              })}
+          {operators.length > 0 && (
+            <div>
+              <Label>{t('bscheck.operators')}</Label>
+              <div className="flex flex-wrap gap-1.5 mt-1">
+                {operators.map((op) => {
+                  const b = opBrand(op.id)
+                  const sel = ops.includes(op.op_key)
+                  const isOff = op.channel_state === 'DPI_OFF'
+                  const off = dpi === 'on' && isOff
+                  return (
+                    <button key={op.op_key} type="button" disabled={off}
+                      onClick={() => !off && setOps((p) => p.includes(op.op_key) ? p.filter((x) => x !== op.op_key) : [...p, op.op_key])}
+                      className={cn('inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[11px] border transition-colors',
+                        sel ? 'border-primary-500/50 bg-primary-500/15 text-primary-200' : 'border-[var(--glass-border)] text-muted-foreground hover:text-white',
+                        off && 'opacity-40 cursor-not-allowed hover:text-muted-foreground')}>
+                      <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: b.bg }} />
+                      {op.name}{op.region_label && <span className="text-muted-foreground">· {op.region_label}</span>}
+                      {isOff && <span className="text-amber-400">· {t('bscheck.bsOff')}</span>}
+                    </button>
+                  )
+                })}
+              </div>
+              <p className="text-[11px] text-muted-foreground mt-1">{t('bscheck.operatorsHint')}</p>
             </div>
-            <p className="text-[11px] text-muted-foreground mt-1">{t('bscheck.autoNodesHint')}</p>
-          </div>
+          )}
 
-          <p className="text-[11px] text-amber-400">{t('bscheck.autoWarn')}</p>
-
-          <div className="flex justify-end">
-            <Button size="sm" disabled={!canCheck || save.isPending} onClick={() => save.mutate()}>
-              {save.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : t('common.save')}
-            </Button>
+          <div className="flex flex-wrap items-center gap-4">
+            <BsLockSwitch locked={dpi === 'on'} onToggle={(v) => { setDpi(v ? 'on' : 'any'); if (v) setOps((p) => p.filter((k) => !offKeys.has(k))) }} />
+            <label className="flex items-center gap-2 text-sm cursor-pointer"><Switch checked={alert} onCheckedChange={setAlert} />{t('bscheck.autoAlert')}</label>
+            <label className="flex items-center gap-2 text-sm cursor-pointer"><Switch checked={enabled} onCheckedChange={setEnabled} />{t('bscheck.autoEnable')}</label>
           </div>
         </div>
-      )}
-    </Card>
+        <DialogFooter className="gap-2">
+          <Button variant="outline" onClick={onClose}>{t('common.close')}</Button>
+          <Button disabled={!canSave || save.isPending} onClick={() => save.mutate()}>
+            {save.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : t('common.save')}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   )
 }
 
@@ -547,7 +693,6 @@ function NodesTab({ operators }: { operators: BsOperator[] }) {
 
   return (
     <div className="space-y-3">
-      <AutoScheduleCard nodes={rows} />
       <Card className="overflow-hidden">
       <div className="overflow-x-auto">
         <table className="w-full text-sm">

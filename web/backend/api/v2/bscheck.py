@@ -122,20 +122,20 @@ class VlessIn(BaseModel):
         return v
 
 
-class ScheduleIn(BaseModel):
-    enabled: bool = False
-    interval_hours: int = Field(default=6, ge=1, le=168)
-    dpi: str = "on"
-    operators: List[str] = Field(default_factory=list)
-    nodes: List[str] = Field(default_factory=list)
-    budget_daily: int = Field(default=500, ge=0, le=1_000_000)
+class JobIn(BaseModel):
+    name: str = Field(min_length=1, max_length=100)
+    kind: str                                     # node | probe | scan | vless
+    enabled: bool = True
+    interval_minutes: int = Field(default=360, ge=5, le=100_000)
+    config: Dict[str, Any] = Field(default_factory=dict)
+    budget_daily: int = Field(default=0, ge=0, le=1_000_000)
     alert: bool = True
 
-    @field_validator("dpi")
+    @field_validator("kind")
     @classmethod
-    def _dpi(cls, v: str) -> str:
-        if v not in ("on", "any"):
-            raise ValueError("dpi must be on|any")
+    def _kind(cls, v: str) -> str:
+        if v not in ("node", "probe", "scan", "vless"):
+            raise ValueError("kind must be node|probe|scan|vless")
         return v
 
 
@@ -347,40 +347,51 @@ async def save_history(data: HistoryIn,
 
 
 @router.get("/history")
-async def list_history(kind: Optional[str] = None, limit: int = 50,
+async def list_history(kind: Optional[str] = None, limit: int = 50, job_id: Optional[int] = None,
                        admin: AdminUser = Depends(require_permission("bscheck", "view"))):
     limit = max(1, min(limit, 200))
     k = kind if kind in ("node", "probe", "scan", "vless") else None
-    return {"items": await db_service.list_bscheck_runs(limit, k)}
+    return {"items": await db_service.list_bscheck_runs(limit, k, job_id)}
 
 
-# ── Расписание авто-проверки нод ─────────────────────────────────
+# ── Авто-тесты (jobs) ────────────────────────────────────────────
 
 
-async def _schedule_state() -> Dict:
-    cfg = bs.read_schedule()
-    cfg["last_run"] = await db_service.get_bscheck_last_run("scheduler")
-    cfg["spent_today"] = await db_service.get_bscheck_spent_today("scheduler")
-    return cfg
+@router.get("/jobs")
+async def list_jobs(admin: AdminUser = Depends(require_permission("bscheck", "view"))):
+    return {"items": await db_service.list_bscheck_jobs()}
 
 
-@router.get("/schedule")
-async def get_schedule(admin: AdminUser = Depends(require_permission("bscheck", "view"))):
-    return await _schedule_state()
-
-
-@router.put("/schedule")
-async def set_schedule(data: ScheduleIn,
-                       admin: AdminUser = Depends(require_permission("bscheck", "check"))):
-    await bs.save_schedule({
-        "bscheck_auto_enabled": data.enabled,
-        "bscheck_auto_interval_hours": data.interval_hours,
-        "bscheck_auto_dpi": data.dpi,
-        "bscheck_auto_operators": data.operators,
-        "bscheck_auto_nodes": data.nodes,
-        "bscheck_auto_budget_daily": data.budget_daily,
-        "bscheck_auto_alert": data.alert,
-    })
+@router.post("/jobs")
+async def create_job(data: JobIn,
+                     admin: AdminUser = Depends(require_permission("bscheck", "check"))):
+    job = await db_service.create_bscheck_job(
+        data.name.strip(), data.kind, data.interval_minutes, data.config,
+        data.budget_daily, data.alert, enabled=data.enabled, created_by=admin.username)
     await write_audit_log(admin_id=admin.account_id, admin_username=admin.username,
-                          action="bscheck.schedule", resource="bscheck", resource_id="schedule")
-    return await _schedule_state()
+                          action="bscheck.job.create", resource="bscheck",
+                          resource_id=str(job.get("id") if job else ""))
+    return job or {}
+
+
+@router.put("/jobs/{job_id}")
+async def update_job(job_id: int, data: JobIn,
+                     admin: AdminUser = Depends(require_permission("bscheck", "check"))):
+    job = await db_service.update_bscheck_job(
+        job_id, name=data.name.strip(), kind=data.kind, enabled=data.enabled,
+        interval_minutes=data.interval_minutes, config=data.config,
+        budget_daily=data.budget_daily, alert=data.alert)
+    if not job:
+        raise HTTPException(status_code=404, detail="job not found")
+    await write_audit_log(admin_id=admin.account_id, admin_username=admin.username,
+                          action="bscheck.job.update", resource="bscheck", resource_id=str(job_id))
+    return job
+
+
+@router.delete("/jobs/{job_id}")
+async def delete_job(job_id: int,
+                     admin: AdminUser = Depends(require_permission("bscheck", "check"))):
+    ok = await db_service.delete_bscheck_job(job_id)
+    await write_audit_log(admin_id=admin.account_id, admin_username=admin.username,
+                          action="bscheck.job.delete", resource="bscheck", resource_id=str(job_id))
+    return {"ok": ok}

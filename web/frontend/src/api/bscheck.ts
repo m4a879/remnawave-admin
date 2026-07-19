@@ -89,16 +89,29 @@ export interface HistorySave {
   result: any
 }
 
-export interface BsSchedule {
+export interface BsJob {
+  id: number
+  name: string
+  kind: string
   enabled: boolean
-  interval_hours: number
-  dpi: string
-  operators: string[]
-  nodes: string[]
+  interval_minutes: number
+  config: any
   budget_daily: number
   alert: boolean
-  last_run: string | null
-  spent_today: number
+  last_run_at: string | null
+  created_by: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface BsJobInput {
+  name: string
+  kind: string
+  enabled: boolean
+  interval_minutes: number
+  config: any
+  budget_daily: number
+  alert: boolean
 }
 
 export interface ProbeBody {
@@ -174,13 +187,19 @@ export const bscheckApi = {
   async saveHistory(payload: HistorySave): Promise<BsHistoryRow> {
     const { data } = await client.post('/bscheck/history', payload); return data
   },
-  async history(kind?: string, limit = 50): Promise<BsHistoryRow[]> {
-    const { data } = await client.get('/bscheck/history', { params: { kind, limit } }); return data.items
+  async history(kind?: string, limit = 50, jobId?: number): Promise<BsHistoryRow[]> {
+    const { data } = await client.get('/bscheck/history', { params: { kind, limit, job_id: jobId } }); return data.items
   },
-  async getSchedule(): Promise<BsSchedule> {
-    const { data } = await client.get('/bscheck/schedule'); return data
+  async jobs(): Promise<BsJob[]> {
+    const { data } = await client.get('/bscheck/jobs'); return data.items
   },
-  async setSchedule(payload: Partial<BsSchedule>): Promise<BsSchedule> {
-    const { data } = await client.put('/bscheck/schedule', payload); return data
+  async createJob(payload: BsJobInput): Promise<BsJob> {
+    const { data } = await client.post('/bscheck/jobs', payload); return data
+  },
+  async updateJob(id: number, payload: BsJobInput): Promise<BsJob> {
+    const { data } = await client.put(`/bscheck/jobs/${id}`, payload); return data
+  },
+  async deleteJob(id: number): Promise<void> {
+    await client.delete(`/bscheck/jobs/${id}`)
   },
 }
