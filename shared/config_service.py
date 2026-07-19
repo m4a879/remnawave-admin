@@ -336,17 +336,28 @@ DEFAULT_CONFIG_DEFINITIONS: List[Dict[str, Any]] = [
         "sort_order": 8,
     },
 
-    # === INTEGRATIONS ===
+    # === INTEGRATIONS (DNS) ===
+    # Креды DNS-провайдеров — зашифрованный JSON, правятся на странице «DNS».
     {
-        "key": "cloudflare_dns_token",
-        "value_type": "string",
-        "category": "general",
-        "display_name": "Cloudflare DNS: API-токен",
-        "description": "Токен Cloudflare с правами Zone:Read + DNS:Edit (хранится зашифрованным). Правится на странице «DNS», не здесь",
-        "default_value": "",
-        "is_secret": True,
-        "is_readonly": True,
-        "sort_order": 90,
+        "key": "dns_creds_cloudflare",
+        "value_type": "string", "category": "general",
+        "display_name": "DNS: Cloudflare (зашифр.)",
+        "description": "Управляется на странице «DNS», не здесь",
+        "default_value": "", "is_secret": True, "is_readonly": True, "sort_order": 90,
+    },
+    {
+        "key": "dns_creds_timeweb",
+        "value_type": "string", "category": "general",
+        "display_name": "DNS: Timeweb Cloud (зашифр.)",
+        "description": "Управляется на странице «DNS», не здесь",
+        "default_value": "", "is_secret": True, "is_readonly": True, "sort_order": 91,
+    },
+    {
+        "key": "dns_creds_regru",
+        "value_type": "string", "category": "general",
+        "display_name": "DNS: reg.ru (зашифр.)",
+        "description": "Управляется на странице «DNS», не здесь",
+        "default_value": "", "is_secret": True, "is_readonly": True, "sort_order": 92,
     },
 
     # === SYNC ===

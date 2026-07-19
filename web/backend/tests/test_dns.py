@@ -1,12 +1,9 @@
-"""Тесты Cloudflare DNS клиента (core/cloudflare_dns.py)."""
+"""Тесты DNS-провайдеров (core/dns/*): Cloudflare, Timeweb, reg.ru + реестр/креды."""
 import json
 
 import httpx
 import pytest
 from unittest.mock import patch
-
-from web.backend.core import cloudflare_dns as cf
-from web.backend.core.cloudflare_dns import CloudflareDnsError
 
 
 _REAL_ASYNC_CLIENT = httpx.AsyncClient
@@ -19,119 +16,195 @@ def _patched_client(handler):
     return factory
 
 
-def _token():
-    return patch.object(cf, "_stored_token", return_value="TESTTOKEN")
+# ── Реестр ───────────────────────────────────────────────────────
 
 
-# ── Сборка тела запроса ──────────────────────────────────────────
+class TestRegistry:
+    def test_providers_registered(self):
+        from web.backend.core import dns
+
+        slugs = {p.slug for p in dns.list_providers()}
+        assert {"cloudflare", "timeweb", "regru"} <= slugs
+        assert dns.get_provider("cloudflare").proxyable == ["A", "AAAA", "CNAME"]
+        assert dns.get_provider("regru").supports_ttl is False
+        assert dns.get_provider("timeweb").proxyable == []
+
+    def test_unknown_raises(self):
+        from web.backend.core import dns
+        with pytest.raises(dns.DnsProviderError):
+            dns.get_provider("nope")
 
 
-class TestBuildPayload:
-    def test_txt_has_no_proxied(self):
-        p = cf._build_payload({"type": "TXT", "name": "x.com", "content": "v=spf1", "ttl": 1})
-        assert "proxied" not in p and p["ttl"] == 1 and p["type"] == "TXT"
-
-    def test_a_carries_proxied(self):
-        p = cf._build_payload({"type": "A", "name": "x.com", "content": "1.2.3.4", "proxied": True})
-        assert p["proxied"] is True
-
-    def test_mx_carries_priority(self):
-        p = cf._build_payload({"type": "MX", "name": "x.com", "content": "mail.x.com", "priority": 10})
-        assert p["priority"] == 10
+# ── Cloudflare ───────────────────────────────────────────────────
 
 
-# ── Проверка токена ──────────────────────────────────────────────
-
-
-class TestVerify:
+class TestCloudflare:
     @pytest.mark.asyncio
-    async def test_active(self):
-        def h(r):
-            return httpx.Response(200, json={"success": True, "result": {"status": "active"}})
-        with patch("httpx.AsyncClient", _patched_client(h)):
-            assert await cf.verify_token("T") is True
+    async def test_verify_zones_records(self):
+        from web.backend.core.dns.cloudflare import CloudflareProvider
 
-    @pytest.mark.asyncio
-    async def test_inactive(self):
-        def h(r):
-            return httpx.Response(200, json={"success": True, "result": {"status": "disabled"}})
-        with patch("httpx.AsyncClient", _patched_client(h)):
-            assert await cf.verify_token("T") is False
-
-    @pytest.mark.asyncio
-    async def test_forbidden_token(self):
-        def h(r):
-            return httpx.Response(403, json={"success": False, "errors": [{"message": "bad"}]})
-        with patch("httpx.AsyncClient", _patched_client(h)):
-            assert await cf.verify_token("bad") is False
-
-
-# ── Зоны и записи ────────────────────────────────────────────────
-
-
-class TestZonesRecords:
-    @pytest.mark.asyncio
-    async def test_list_zones(self):
-        def h(r):
-            assert r.headers.get("Authorization") == "Bearer TESTTOKEN"
-            return httpx.Response(200, json={"success": True, "result": [
-                {"id": "z1", "name": "a.com", "status": "active", "paused": False}]})
-        with _token(), patch("httpx.AsyncClient", _patched_client(h)):
-            zs = await cf.list_zones()
-        assert len(zs) == 1 and zs[0]["name"] == "a.com" and zs[0]["id"] == "z1"
-
-    @pytest.mark.asyncio
-    async def test_list_records_paginated(self):
-        def h(r):
-            page = r.url.params.get("page")
-            if page == "1":
+        def h(request: httpx.Request) -> httpx.Response:
+            assert request.headers.get("Authorization") == "Bearer T"
+            p = request.url.path
+            if p == "/client/v4/user/tokens/verify":
+                return httpx.Response(200, json={"success": True, "result": {"status": "active"}})
+            if p == "/client/v4/zones":
+                return httpx.Response(200, json={"success": True, "result": [
+                    {"id": "z1", "name": "a.com"}]})
+            if p == "/client/v4/zones/z1/dns_records":
                 return httpx.Response(200, json={"success": True, "result": [
                     {"id": "r1", "type": "A", "name": "a.com", "content": "1.2.3.4",
-                     "ttl": 1, "proxied": False}],
-                    "result_info": {"page": 1, "total_pages": 2}})
-            return httpx.Response(200, json={"success": True, "result": [
-                {"id": "r2", "type": "TXT", "name": "a.com", "content": "v", "ttl": 300}],
-                "result_info": {"page": 2, "total_pages": 2}})
-        with _token(), patch("httpx.AsyncClient", _patched_client(h)):
-            rs = await cf.list_records("z1")
-        assert len(rs) == 2 and rs[0]["type"] == "A" and rs[1]["type"] == "TXT"
+                     "ttl": 1, "proxied": True}], "result_info": {"page": 1, "total_pages": 1}})
+            return httpx.Response(404)
+
+        prov = CloudflareProvider()
+        with patch("httpx.AsyncClient", _patched_client(h)):
+            assert await prov.verify({"token": "T"}) is True
+            zs = await prov.list_zones({"token": "T"})
+            rs = await prov.list_records({"token": "T"}, "z1")
+        assert zs[0].name == "a.com"
+        assert rs[0].type == "A" and rs[0].proxied is True
 
     @pytest.mark.asyncio
-    async def test_create_record_sends_proxied(self):
+    async def test_create_sends_proxied(self):
+        from web.backend.core.dns.cloudflare import CloudflareProvider
+
         seen = {}
 
-        def h(r):
-            seen.update(json.loads(r.content.decode()))
+        def h(request):
+            seen.update(json.loads(request.content.decode()))
             return httpx.Response(200, json={"success": True, "result": {
-                "id": "new", "type": "A", "name": "n.a.com", "content": "5.6.7.8",
-                "ttl": 1, "proxied": True}})
-        with _token(), patch("httpx.AsyncClient", _patched_client(h)):
-            rec = await cf.create_record("z1", {
-                "type": "A", "name": "n.a.com", "content": "5.6.7.8", "proxied": True, "ttl": 1})
-        assert rec["id"] == "new" and seen["proxied"] is True and seen["type"] == "A"
+                "id": "n", "type": "A", "name": "x.a.com", "content": "5.6.7.8",
+                "proxied": True, "ttl": 1}})
+
+        with patch("httpx.AsyncClient", _patched_client(h)):
+            rec = await CloudflareProvider().create_record({"token": "T"}, "z1", {
+                "type": "A", "name": "x.a.com", "content": "5.6.7.8", "proxied": True, "ttl": 1})
+        assert rec.id == "n" and seen["proxied"] is True and seen["type"] == "A"
 
     @pytest.mark.asyncio
-    async def test_delete_record_uses_delete(self):
-        called = {}
+    async def test_verify_false_on_forbidden(self):
+        from web.backend.core.dns.cloudflare import CloudflareProvider
 
-        def h(r):
-            called["method"] = r.method
-            return httpx.Response(200, json={"success": True, "result": {"id": "r1"}})
-        with _token(), patch("httpx.AsyncClient", _patched_client(h)):
-            await cf.delete_record("z1", "r1")
-        assert called["method"] == "DELETE"
+        def h(request):
+            return httpx.Response(403, json={"success": False, "errors": [{"message": "bad"}]})
+
+        with patch("httpx.AsyncClient", _patched_client(h)):
+            assert await CloudflareProvider().verify({"token": "bad"}) is False
+
+
+# ── Timeweb Cloud ────────────────────────────────────────────────
+
+
+class TestTimeweb:
+    @pytest.mark.asyncio
+    async def test_zones_records_create(self):
+        from web.backend.core.dns.timeweb import TimewebProvider
+
+        seen = {}
+
+        def h(request: httpx.Request) -> httpx.Response:
+            assert request.headers.get("Authorization") == "Bearer T"
+            p, m = request.url.path, request.method
+            if p == "/api/v1/domains":
+                return httpx.Response(200, json={"domains": [{"fqdn": "a.com"}]})
+            if p == "/api/v1/domains/a.com/dns-records" and m == "GET":
+                return httpx.Response(200, json={"dns_records": [
+                    {"id": 55, "type": "A", "data": {"value": "1.2.3.4", "subdomain": "www"}, "ttl": 3600}]})
+            if p == "/api/v1/domains/a.com/dns-records" and m == "POST":
+                seen.update(json.loads(request.content.decode()))
+                return httpx.Response(201, json={"dns_record": {
+                    "id": 66, "type": "A", "data": {"value": "5.6.7.8", "subdomain": "api"}, "ttl": 300}})
+            return httpx.Response(404)
+
+        prov = TimewebProvider()
+        with patch("httpx.AsyncClient", _patched_client(h)):
+            zs = await prov.list_zones({"token": "T"})
+            rs = await prov.list_records({"token": "T"}, "a.com")
+            rec = await prov.create_record({"token": "T"}, "a.com", {
+                "type": "A", "name": "api", "content": "5.6.7.8", "ttl": 300})
+        assert zs[0].id == "a.com"
+        assert rs[0].name == "www" and rs[0].content == "1.2.3.4"
+        assert seen["subdomain"] == "api" and seen["value"] == "5.6.7.8" and seen["ttl"] == 300
+        assert rec.id == "66"
+
+
+# ── reg.ru ───────────────────────────────────────────────────────
+
+
+class TestRegru:
+    @pytest.mark.asyncio
+    async def test_zones_records_synthetic_id(self):
+        from web.backend.core.dns.regru import RegruProvider, _unid
+
+        def h(request: httpx.Request) -> httpx.Response:
+            p = request.url.path
+            assert dict(request.url.params).get("username") == "u"
+            if p.endswith("/domain/get_list"):
+                return httpx.Response(200, json={"result": "success",
+                                                 "answer": {"domains": [{"dname": "a.com"}]}})
+            if p.endswith("/zone/get_resource_records"):
+                return httpx.Response(200, json={"result": "success", "answer": {"domains": [
+                    {"dname": "a.com", "rrs": [
+                        {"subname": "www", "rectype": "A", "content": "1.2.3.4"}]}]}})
+            return httpx.Response(404)
+
+        prov = RegruProvider()
+        with patch("httpx.AsyncClient", _patched_client(h)):
+            zs = await prov.list_zones({"username": "u", "password": "p"})
+            rs = await prov.list_records({"username": "u", "password": "p"}, "a.com")
+        assert zs[0].name == "a.com"
+        r = rs[0]
+        assert r.type == "A" and r.name == "www" and r.content == "1.2.3.4"
+        assert _unid(r.id) == ("www", "A", "1.2.3.4")
 
     @pytest.mark.asyncio
-    async def test_api_error_raises(self):
-        def h(r):
-            return httpx.Response(200, json={"success": False,
-                                             "errors": [{"message": "Record already exists"}]})
-        with _token(), patch("httpx.AsyncClient", _patched_client(h)):
-            with pytest.raises(CloudflareDnsError, match="already exists"):
-                await cf.create_record("z1", {"type": "A", "name": "x", "content": "1.1.1.1"})
+    async def test_create_a_then_delete(self):
+        from web.backend.core.dns.regru import RegruProvider
+
+        calls = []
+
+        def h(request):
+            p = request.url.path
+            input_data = json.loads(dict(request.url.params).get("input_data", "{}"))
+            calls.append((p.split("/")[-1], input_data))
+            return httpx.Response(200, json={"result": "success", "answer": {}})
+
+        prov = RegruProvider()
+        with patch("httpx.AsyncClient", _patched_client(h)):
+            rec = await prov.create_record({"username": "u", "password": "p"}, "a.com", {
+                "type": "A", "name": "www", "content": "9.9.9.9"})
+            await prov.delete_record({"username": "u", "password": "p"}, "a.com", rec.id)
+
+        assert calls[0][0] == "add_alias" and calls[0][1]["ipaddr"] == "9.9.9.9"
+        assert calls[1][0] == "remove_record" and calls[1][1]["content"] == "9.9.9.9"
 
     @pytest.mark.asyncio
-    async def test_not_configured_raises(self):
-        with patch.object(cf, "_stored_token", return_value=None):
-            with pytest.raises(CloudflareDnsError, match="не настроен"):
-                await cf.list_zones()
+    async def test_result_error_raises(self):
+        from web.backend.core.dns.regru import RegruProvider
+        from web.backend.core.dns import DnsProviderError
+
+        def h(request):
+            return httpx.Response(200, json={"result": "error", "error_text": "Auth"})
+
+        with patch("httpx.AsyncClient", _patched_client(h)):
+            with pytest.raises(DnsProviderError):
+                await RegruProvider().list_zones({"username": "u", "password": "bad"})
+
+
+# ── Хранение кредов ──────────────────────────────────────────────
+
+
+class TestCredsStorage:
+    def test_get_creds_decrypts_json(self):
+        from web.backend.core import dns
+        with patch("web.backend.core.dns.base.decrypt_field", return_value='{"token":"X"}'), \
+             patch("shared.config_service.config_service") as cfg:
+            cfg.get.return_value = "ENC"
+            assert dns.get_creds("cloudflare") == {"token": "X"}
+
+    def test_get_creds_none_when_empty(self):
+        from web.backend.core import dns
+        with patch("shared.config_service.config_service") as cfg:
+            cfg.get.return_value = None
+            assert dns.get_creds("cloudflare") is None
