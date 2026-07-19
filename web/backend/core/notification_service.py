@@ -757,6 +757,16 @@ async def notify_bscheck_drop(node: str, ip: str, passed: int, total: int, prev_
     asyncio.create_task(_send_to_global_telegram("BS-Check: просадка БС", "\n".join(lines), "warning", "service"))
 
 
+async def notify_rkn_blocked(target: str, rkn_domain) -> None:
+    """Алерт: цель попала в реестр РКН (авто-проверка репутации)."""
+    lines = [
+        f"<b>Target:</b> <code>{_esc_html(target)}</code>",
+        f"<b>РКН:</b> в реестре{(' · ' + _esc_html(str(rkn_domain))) if rkn_domain else ''}",
+        f"<b>Time:</b> {_now_str()}",
+    ]
+    asyncio.create_task(_send_to_global_telegram("BS-Check: блокировка РКН", "\n".join(lines), "warning", "service"))
+
+
 async def notify_ip_blocked(ip: str, lockout_seconds: int, failures: int) -> None:
     lines = [
         f"<b>IP:</b> <code>{_esc_html(ip)}</code>",

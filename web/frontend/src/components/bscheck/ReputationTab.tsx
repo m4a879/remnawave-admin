@@ -47,7 +47,7 @@ function Flag({ on, label, tone }: { on: boolean | null | undefined; label: stri
   return <Badge className={cn('text-[10px]', tone)}>{label}</Badge>
 }
 
-function RepCard({ r }: { r: RepResult }) {
+export function RepCard({ r }: { r: RepResult }) {
   const { t } = useTranslation()
   const providerName: Record<string, string> = {
     ipapi: 'ip-api', ipinfo: 'ipinfo', ipqs: 'IPQualityScore',

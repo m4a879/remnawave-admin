@@ -4146,6 +4146,7 @@
     "kind_probe": "IP",
     "kind_scan": "Скан",
     "kind_vless": "VLESS",
+    "kind_reputation": "Репутация",
     "histTime": "Время",
     "histKind": "Тип",
     "histTarget": "Цель",
@@ -4174,7 +4175,15 @@
     "jobNodesN": "{{n}} нод",
     "jobAllNodes": "все ноды",
     "jobLinksN": "{{n}} ссылок",
-    "jobConfirmDel": "Точно?"
+    "jobConfirmDel": "Точно?",
+    "jobRepTargets": "Доп. цели (IP / домены)",
+    "jobRepTargetsHint": "Плюс к нодам — свои IP или домены (по одному в строке)",
+    "jobProviders": "Провайдеры",
+    "jobProvidersHint": "Пусто = все настроенные. Для дешёвого мониторинга РКН оставь только CheburCheck.",
+    "jobBatch": "За прогон (0 = все)",
+    "jobBatchHint": "Если целей много — проверять по N за прогон, ротацией (least-recently, обходит лимит 30/мин cheburcheck). Так разные ноды проверяются в разное время.",
+    "jobTargetsN": "{{n}} целей",
+    "autoAlertRkn": "Алерт при блокировке РКН"
   },
   "reputation": {
     "providers": "Провайдеры",

@@ -147,7 +147,51 @@ async def _run_vless(bs, db, job, cfg) -> None:
                               sub.get("cost_credits"), data, created_by="scheduler", job_id=job["id"])
 
 
-_RUNNERS = {"probe": _run_probe, "scan": _run_scan, "vless": _run_vless}
+async def _run_reputation(bs, db, job, cfg) -> None:
+    from web.backend.core import reputation as rep
+    node_filter = set(cfg.get("nodes") or [])
+    targets = []
+    for n in await db.get_all_nodes():
+        if node_filter and n.get("uuid") not in node_filter:
+            continue
+        ip = n.get("agent_ip") or n.get("address")
+        if ip:
+            targets.append(ip)
+    targets += [str(t).strip() for t in (cfg.get("targets") or []) if str(t).strip()]
+    targets = list(dict.fromkeys(targets))
+    if not targets:
+        return
+    providers = set(cfg.get("providers") or []) or None
+    batch = int(cfg.get("batch") or 0)
+    if batch > 0 and len(targets) > batch:
+        last = await db.get_bscheck_last_by_target(job["id"], "reputation")
+        targets.sort(key=lambda x: last.get(x) or "")   # никогда/давно проверенные — первыми (ротация)
+        targets = targets[:batch]
+    for target in targets:
+        try:
+            results = await rep.lookup_all(target, only=providers)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("bscheck job %s: репутация %s: %s", job["id"], target, e)
+            await asyncio.sleep(2.5)
+            continue
+        clean = [r for r in results if not r.get("error")]
+        blocked = any(r.get("blocked") for r in clean)
+        maxscore = max([0] + [int(r.get("score") or 0) for r in clean])
+        passed = sum(1 for r in clean if not r.get("blocked") and int(r.get("score") or 0) < 50)
+        await db.save_bscheck_run("reputation", target, passed, len(clean), None,
+                                  {"results": results, "blocked": blocked, "score": maxscore},
+                                  created_by="scheduler", job_id=job["id"])
+        if job.get("alert") and blocked:
+            try:
+                from web.backend.core.notification_service import notify_rkn_blocked
+                rkn = next((r.get("rkn_domain") for r in clean if r.get("blocked")), None)
+                await notify_rkn_blocked(target, rkn)
+            except Exception as e:  # noqa: BLE001
+                logger.debug("bscheck rkn alert: %s", e)
+        await asyncio.sleep(2.5)   # троттлинг cheburcheck (~30/мин на IP)
+
+
+_RUNNERS = {"probe": _run_probe, "scan": _run_scan, "vless": _run_vless, "reputation": _run_reputation}
 
 
 async def run_bscheck_jobs_tick() -> None:

@@ -129,8 +129,8 @@ async def _write_value(key: str, value: str) -> None:
 
 # ── Проверка ─────────────────────────────────────────────────────
 
-async def lookup_all(target: str) -> List[Dict[str, Any]]:
-    """Прогнать IP/домен через всех НАСТРОЕННЫХ провайдеров.
+async def lookup_all(target: str, only: Optional[set] = None) -> List[Dict[str, Any]]:
+    """Прогнать IP/домен через всех НАСТРОЕННЫХ провайдеров (или только `only`).
 
     Домен — только через провайдеров с handles_domain (остальные умеют лишь IP).
     """
@@ -138,6 +138,8 @@ async def lookup_all(target: str) -> List[Dict[str, Any]]:
     is_ip = looks_ip(target)
     out: List[Dict[str, Any]] = []
     for slug, prov in _REGISTRY.items():
+        if only and slug not in only:
+            continue
         if not is_ip and not prov.handles_domain:
             continue
         if prov.needs_token and not get_token(slug):

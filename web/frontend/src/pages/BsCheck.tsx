@@ -40,7 +40,8 @@ import {
   Clock, Plus, Pencil, Trash2, ChevronRight, ShieldAlert,
 } from '@/components/brand/icons'
 import { cn } from '@/lib/utils'
-import ReputationTab from '@/components/bscheck/ReputationTab'
+import ReputationTab, { RepCard } from '@/components/bscheck/ReputationTab'
+import { reputationApi } from '@/api/reputation'
 
 // ── Бренды операторов (цвет = фон бейджа, fg = текст) ─────────────
 
@@ -446,6 +447,12 @@ function jobTargetSummary(job: BsJob, t: (k: string, o?: Record<string, unknown>
   if (job.kind === 'probe') return (c.targets || []).join(', ') || '—'
   if (job.kind === 'scan') return c.cidr || '—'
   if (job.kind === 'vless') return t('bscheck.jobLinksN', { n: String(c.raw_input || '').split(/\s+/).filter(Boolean).length })
+  if (job.kind === 'reputation') {
+    const n = (c.nodes?.length || 0) + (c.targets?.length || 0)
+    const p = (c.providers || []).length
+    const who = n ? t('bscheck.jobTargetsN', { n }) : t('bscheck.jobAllNodes')
+    return p ? `${who} · ${p} пров.` : who
+  }
   return '—'
 }
 
@@ -542,6 +549,9 @@ function JobDialog({ job, operators, nodes, onClose, onSaved }: {
   const [targets, setTargets] = useState<string>((c.targets || []).join('\n'))
   const [cidr, setCidr] = useState<string>(c.cidr || '')
   const [raw, setRaw] = useState<string>(c.raw_input || '')
+  const [repProviders, setRepProviders] = useState<string[]>(c.providers || [])
+  const [batch, setBatch] = useState<number>(c.batch || 0)
+  const { data: repProvs } = useQuery({ queryKey: ['rep-providers'], queryFn: reputationApi.providers, enabled: kind === 'reputation' })
 
   const offKeys = offKeySet(operators)
   const validScan = /^\d{1,3}(\.\d{1,3}){3}\/24$/.test(cidr.trim())
@@ -551,6 +561,13 @@ function JobDialog({ job, operators, nodes, onClose, onSaved }: {
     && (kind !== 'probe' || !!targets.trim())
 
   const buildConfig = () => {
+    if (kind === 'reputation') {
+      return {
+        nodes: selNodes,
+        targets: targets.split(/[\n,]/).map((s) => s.trim()).filter(Boolean),
+        providers: repProviders, batch: Number(batch) || 0,
+      }
+    }
     const base: any = { dpi, operators: ops }
     if (kind === 'node') base.nodes = selNodes
     if (kind === 'probe') base.targets = targets.split(/[\n,]/).map((s) => s.trim()).filter(Boolean).slice(0, 10)
@@ -587,12 +604,13 @@ function JobDialog({ job, operators, nodes, onClose, onSaved }: {
                   <SelectItem value="probe">{t('bscheck.kind_probe')}</SelectItem>
                   <SelectItem value="scan">{t('bscheck.kind_scan')}</SelectItem>
                   <SelectItem value="vless">{t('bscheck.kind_vless')}</SelectItem>
+                  <SelectItem value="reputation">{t('bscheck.kind_reputation')}</SelectItem>
                 </SelectContent>
               </Select>
             </div>
           </div>
 
-          {kind === 'node' && (
+          {(kind === 'node' || kind === 'reputation') && (
             <div>
               <Label>{t('bscheck.autoNodes')}</Label>
               <div className="flex flex-wrap gap-2 mt-1">
@@ -633,19 +651,54 @@ function JobDialog({ job, operators, nodes, onClose, onSaved }: {
               <p className="text-[11px] text-muted-foreground mt-1">{t('bscheck.rawInputHint')}</p>
             </div>
           )}
+          {kind === 'reputation' && (
+            <>
+              <div>
+                <Label>{t('bscheck.jobRepTargets')}</Label>
+                <Textarea value={targets} rows={2} className="mt-1 font-mono text-xs" placeholder={'1.2.3.4\nexample.com'} onChange={(e) => setTargets(e.target.value)} />
+                <p className="text-[11px] text-muted-foreground mt-1">{t('bscheck.jobRepTargetsHint')}</p>
+              </div>
+              <div>
+                <Label>{t('bscheck.jobProviders')}</Label>
+                <div className="flex flex-wrap gap-2 mt-1">
+                  {(repProvs || []).map((p) => {
+                    const sel = repProviders.includes(p.slug)
+                    return (
+                      <button key={p.slug} type="button"
+                        onClick={() => setRepProviders((prev) => prev.includes(p.slug) ? prev.filter((x) => x !== p.slug) : [...prev, p.slug])}
+                        className={cn('px-2.5 py-1 rounded-md text-[11px] border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/40',
+                          sel ? 'border-primary-500/50 bg-primary-500/15 text-primary-200' : 'border-[var(--glass-border)] text-muted-foreground hover:text-white',
+                          p.needs_token && !p.configured && 'opacity-50')}>
+                        {p.name}
+                      </button>
+                    )
+                  })}
+                </div>
+                <p className="text-[11px] text-muted-foreground mt-1">{t('bscheck.jobProvidersHint')}</p>
+              </div>
+            </>
+          )}
 
           <div className="flex flex-wrap gap-3">
             <div className="w-40">
               <Label>{t('bscheck.jobInterval')}</Label>
               <Input type="number" min={5} value={intervalMin} className="mt-1 h-9" onChange={(e) => setIntervalMin(Math.max(5, Number(e.target.value) || 5))} />
             </div>
-            <div className="w-44">
-              <Label>{t('bscheck.autoBudget')}</Label>
-              <Input type="number" min={0} value={budget} className="mt-1 h-9" onChange={(e) => setBudget(Math.max(0, Number(e.target.value) || 0))} />
-            </div>
+            {kind === 'reputation' ? (
+              <div className="w-44">
+                <Label>{t('bscheck.jobBatch')}</Label>
+                <Input type="number" min={0} value={batch} className="mt-1 h-9" onChange={(e) => setBatch(Math.max(0, Number(e.target.value) || 0))} />
+                <p className="text-[11px] text-muted-foreground mt-1">{t('bscheck.jobBatchHint')}</p>
+              </div>
+            ) : (
+              <div className="w-44">
+                <Label>{t('bscheck.autoBudget')}</Label>
+                <Input type="number" min={0} value={budget} className="mt-1 h-9" onChange={(e) => setBudget(Math.max(0, Number(e.target.value) || 0))} />
+              </div>
+            )}
           </div>
 
-          {operators.length > 0 && (
+          {kind !== 'reputation' && operators.length > 0 && (
             <div>
               <Label>{t('bscheck.operators')}</Label>
               <div className="flex flex-wrap gap-2 mt-1">
@@ -672,8 +725,10 @@ function JobDialog({ job, operators, nodes, onClose, onSaved }: {
           )}
 
           <div className="flex flex-wrap items-center gap-4">
-            <BsLockSwitch locked={dpi === 'on'} onToggle={(v) => { setDpi(v ? 'on' : 'any'); if (v) setOps((p) => p.filter((k) => !offKeys.has(k))) }} />
-            <label className="flex items-center gap-2 text-sm cursor-pointer"><Switch checked={alert} onCheckedChange={setAlert} />{t('bscheck.autoAlert')}</label>
+            {kind !== 'reputation' && (
+              <BsLockSwitch locked={dpi === 'on'} onToggle={(v) => { setDpi(v ? 'on' : 'any'); if (v) setOps((p) => p.filter((k) => !offKeys.has(k))) }} />
+            )}
+            <label className="flex items-center gap-2 text-sm cursor-pointer"><Switch checked={alert} onCheckedChange={setAlert} />{kind === 'reputation' ? t('bscheck.autoAlertRkn') : t('bscheck.autoAlert')}</label>
             <label className="flex items-center gap-2 text-sm cursor-pointer"><Switch checked={enabled} onCheckedChange={setEnabled} />{t('bscheck.autoEnable')}</label>
           </div>
         </div>
@@ -1393,6 +1448,11 @@ function HistoryResult({ row, operators }: { row: BsHistoryRow; operators: BsOpe
   const r: any = row.result || {}
   if (row.kind === 'vless') return <VlessServers data={r} operators={operators} />
   if (row.kind === 'scan') return <ScanResult data={r} operators={operators} />
+  if (row.kind === 'reputation') {
+    const results = Array.isArray(r.results) ? r.results : []
+    if (!results.length) return <RawBlock data={r} />
+    return <div className="grid gap-2 sm:grid-cols-2">{results.map((x: any, i: number) => <RepCard key={i} r={x} />)}</div>
+  }
   if (row.kind === 'probe') {
     const targets: BsTargetSummary[] = Array.isArray(r.targets) ? r.targets : []
     if (targets.length) return <div className="space-y-2">{targets.map((s) => <OperatorResults key={s.target} summary={s} operators={operators} title={s.target} />)}</div>

@@ -196,3 +196,14 @@ class BscheckMixin:
                 f"""SELECT COALESCE(SUM(cost_credits), 0) FROM {NODE_BSCHECK_TABLE}
                     WHERE job_id = $1 AND checked_at >= date_trunc('day', NOW())""", job_id)
         return int(val or 0)
+
+    async def get_bscheck_last_by_target(self, job_id: int, kind: str) -> Dict[str, str]:
+        """Время последней проверки по каждой цели данного job/kind — для ротации батчей."""
+        if not self.is_connected:
+            return {}
+        async with self.acquire() as conn:
+            rows = await conn.fetch(
+                f"""SELECT target, MAX(checked_at) AS last FROM {NODE_BSCHECK_TABLE}
+                    WHERE job_id = $1 AND kind = $2 AND target IS NOT NULL
+                    GROUP BY target""", job_id, kind)
+        return {r["target"]: r["last"].isoformat() for r in rows if r["last"]}

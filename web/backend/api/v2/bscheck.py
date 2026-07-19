@@ -134,8 +134,8 @@ class JobIn(BaseModel):
     @field_validator("kind")
     @classmethod
     def _kind(cls, v: str) -> str:
-        if v not in ("node", "probe", "scan", "vless"):
-            raise ValueError("kind must be node|probe|scan|vless")
+        if v not in ("node", "probe", "scan", "vless", "reputation"):
+            raise ValueError("kind must be node|probe|scan|vless|reputation")
         return v
 
 
@@ -350,7 +350,7 @@ async def save_history(data: HistoryIn,
 async def list_history(kind: Optional[str] = None, limit: int = 50, job_id: Optional[int] = None,
                        admin: AdminUser = Depends(require_permission("bscheck", "view"))):
     limit = max(1, min(limit, 200))
-    k = kind if kind in ("node", "probe", "scan", "vless") else None
+    k = kind if kind in ("node", "probe", "scan", "vless", "reputation") else None
     return {"items": await db_service.list_bscheck_runs(limit, k, job_id)}
 
 

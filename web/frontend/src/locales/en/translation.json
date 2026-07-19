@@ -4146,6 +4146,7 @@
     "kind_probe": "IP",
     "kind_scan": "Scan",
     "kind_vless": "VLESS",
+    "kind_reputation": "Reputation",
     "histTime": "Time",
     "histKind": "Type",
     "histTarget": "Target",
@@ -4174,7 +4175,15 @@
     "jobNodesN": "{{n}} nodes",
     "jobAllNodes": "all nodes",
     "jobLinksN": "{{n}} links",
-    "jobConfirmDel": "Sure?"
+    "jobConfirmDel": "Sure?",
+    "jobRepTargets": "Extra targets (IP / domains)",
+    "jobRepTargetsHint": "In addition to nodes — your own IPs or domains (one per line)",
+    "jobProviders": "Providers",
+    "jobProvidersHint": "Empty = all configured. For cheap RKN monitoring keep only CheburCheck.",
+    "jobBatch": "Per run (0 = all)",
+    "jobBatchHint": "If there are many targets — check N per run, rotating (least-recently, stays under cheburcheck's 30/min). Different nodes get checked at different times.",
+    "jobTargetsN": "{{n}} targets",
+    "autoAlertRkn": "Alert on RKN block"
   },
   "reputation": {
     "providers": "Providers",
