@@ -1,5 +1,14 @@
 import axios, { AxiosError } from 'axios'
+import { startRegistration, startAuthentication } from '@simplewebauthn/browser'
 import client from './client'
+
+export interface Passkey {
+  id: number
+  name: string | null
+  created_at: string | null
+  last_used_at: string | null
+  transports: string | null
+}
 
 export interface TelegramUser {
   id: number
@@ -270,6 +279,27 @@ export const authApi = {
    */
   logout: async (): Promise<void> => {
     await client.post('/auth/logout')
+  },
+
+  // ── Passkeys / WebAuthn ──────────────────────────────────────
+  /** Зарегистрировать passkey (требует активной сессии) */
+  registerPasskey: async (name: string): Promise<void> => {
+    const { data } = await client.post('/auth/webauthn/register/begin', {})
+    const credential = await startRegistration({ optionsJSON: JSON.parse(data.options) })
+    await client.post('/auth/webauthn/register/finish', { token: data.token, credential, name })
+  },
+  /** Вход по passkey (Face ID / отпечаток / ключ) */
+  loginPasskey: async (username?: string): Promise<LoginResponse> => {
+    const { data } = await client.post('/auth/webauthn/login/begin', { username: username || null })
+    const credential = await startAuthentication({ optionsJSON: JSON.parse(data.options) })
+    const res = await client.post<LoginResponse>('/auth/webauthn/login/finish', { token: data.token, credential })
+    return res.data
+  },
+  listPasskeys: async (): Promise<Passkey[]> => {
+    const { data } = await client.get('/auth/webauthn/credentials'); return data.items
+  },
+  deletePasskey: async (id: number): Promise<void> => {
+    await client.delete(`/auth/webauthn/credentials/${id}`)
   },
 
   /**

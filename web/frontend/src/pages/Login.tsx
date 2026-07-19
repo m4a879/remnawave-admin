@@ -313,6 +313,7 @@ export default function Login() {
   const {
     login,
     loginWithPassword,
+    loginWithPasskey,
     register,
     totpSetup,
     totpConfirmSetup,
@@ -469,6 +470,17 @@ export default function Login() {
       }
     } catch (err) {
       console.error('Password login failed:', err)
+    }
+  }
+
+  const passkeySupported = typeof window !== 'undefined' && typeof window.PublicKeyCredential !== 'undefined'
+
+  const handlePasskeyLogin = async () => {
+    try {
+      await loginWithPasskey(showPasswordForm && username.trim() ? username.trim() : undefined)
+      navigate('/')
+    } catch (err) {
+      console.error('Passkey login failed:', err)
     }
   }
 
@@ -1040,6 +1052,17 @@ export default function Login() {
                           )}
                         </button>
                       </div>
+                    )}
+
+                    {passkeySupported && (
+                      <button
+                        type="button"
+                        onClick={handlePasskeyLogin}
+                        className="w-full h-10 mt-3 rounded-xl border border-[var(--glass-border)] text-sm text-dark-100 hover:text-white hover:border-teal-500/40 transition-colors inline-flex items-center justify-center gap-2"
+                      >
+                        <KeyRound className="h-4 w-4" />
+                        {t('login.passkey')}
+                      </button>
                     )}
                   </>
                 )}

@@ -50,6 +50,10 @@ vi.mock('@/api/auth', () => ({
     refreshToken: vi.fn(),
     changePassword: vi.fn(),
     logout: vi.fn(),
+    listPasskeys: vi.fn().mockResolvedValue([]),
+    registerPasskey: vi.fn(),
+    deletePasskey: vi.fn(),
+    loginPasskey: vi.fn(),
   },
 }))
 

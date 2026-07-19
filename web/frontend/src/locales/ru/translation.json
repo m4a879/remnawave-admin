@@ -243,6 +243,7 @@
     "loggingIn": "Вход...",
     "telegram": "Войти через Telegram",
     "password": "Войти с паролем",
+    "passkey": "Войти по passkey",
     "username": "Имя пользователя",
     "passwordLabel": "Пароль",
     "enterUsername": "Введите имя",
@@ -3163,6 +3164,17 @@
         "node_traffic": "Трафик по нодам",
         "asn": "ASN база"
       }
+    },
+    "passkeys": {
+      "title": "Passkeys",
+      "hint": "Вход по Face ID / отпечатку / аппаратному ключу — без пароля, фишинг-устойчиво. Можно добавить несколько устройств.",
+      "unsupported": "Браузер не поддерживает WebAuthn / passkeys.",
+      "namePlaceholder": "Название (напр. «MacBook»)",
+      "add": "Добавить passkey",
+      "added": "Passkey добавлен",
+      "removed": "Passkey удалён",
+      "empty": "Passkey ещё не добавлены",
+      "lastUsed": "исп."
     },
     "password": {
       "title": "Смена пароля",

@@ -243,6 +243,7 @@
     "loggingIn": "Logging in...",
     "telegram": "Log in with Telegram",
     "password": "Log in with password",
+    "passkey": "Sign in with passkey",
     "username": "Username",
     "passwordLabel": "Password",
     "enterUsername": "Enter username",
@@ -3163,6 +3164,17 @@
         "node_traffic": "Node Traffic",
         "asn": "ASN Database"
       }
+    },
+    "passkeys": {
+      "title": "Passkeys",
+      "hint": "Sign in with Face ID / fingerprint / a security key — passwordless and phishing-resistant. You can add several devices.",
+      "unsupported": "This browser does not support WebAuthn / passkeys.",
+      "namePlaceholder": "Name (e.g. \"MacBook\")",
+      "add": "Add passkey",
+      "added": "Passkey added",
+      "removed": "Passkey removed",
+      "empty": "No passkeys yet",
+      "lastUsed": "used"
     },
     "password": {
       "title": "Change Password",

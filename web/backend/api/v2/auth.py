@@ -3,6 +3,7 @@ import json
 import logging
 from typing import Optional
 from fastapi import APIRouter, HTTPException, Depends, Request, Response
+from pydantic import BaseModel
 
 from web.backend.api.deps import get_current_admin, get_2fa_temp_admin, get_client_ip, AdminUser
 from web.backend.core.auth_cookies import (
@@ -940,3 +941,96 @@ async def reset_password(request: Request, data: ResetPasswordRequest):
     logger.info("Password reset completed for user '%s' (id=%d) from %s", account["username"], admin_id, client_ip)
 
     return SuccessResponse(message="Password has been reset successfully. You can now log in.")
+
+
+# ── Passkeys / WebAuthn ──────────────────────────────────────────
+
+
+class WaRegisterFinish(BaseModel):
+    token: str
+    credential: dict
+    name: Optional[str] = None
+
+
+class WaLoginBegin(BaseModel):
+    username: Optional[str] = None
+
+
+class WaLoginFinish(BaseModel):
+    token: str
+    credential: dict
+
+
+@router.post("/webauthn/register/begin")
+async def wa_register_begin(request: Request, admin: AdminUser = Depends(get_current_admin)):
+    from web.backend.core.admin_accounts import get_admin_account_by_id
+    from web.backend.core import webauthn_svc as wa
+    account = await get_admin_account_by_id(admin.account_id) if getattr(admin, "account_id", None) else None
+    if not account:
+        raise api_error(400, E.FORBIDDEN, "Passkey доступен только для аккаунтов admin_accounts")
+    try:
+        return await wa.begin_registration(request, account)
+    except wa.WebAuthnError as e:
+        raise api_error(400, E.FORBIDDEN, str(e))
+
+
+@router.post("/webauthn/register/finish", response_model=SuccessResponse)
+async def wa_register_finish(request: Request, data: WaRegisterFinish,
+                             admin: AdminUser = Depends(get_current_admin)):
+    from web.backend.core import webauthn_svc as wa
+    try:
+        await wa.finish_registration(request, data.token, data.credential, data.name)
+    except wa.WebAuthnError as e:
+        raise api_error(400, E.FORBIDDEN, str(e))
+    return SuccessResponse(message="Passkey добавлен")
+
+
+@router.get("/webauthn/credentials")
+async def wa_credentials(admin: AdminUser = Depends(get_current_admin)):
+    from web.backend.core import webauthn_svc as wa
+    if not getattr(admin, "account_id", None):
+        return {"items": []}
+    items = await wa.list_credentials(admin.account_id)
+    return {"items": [{"id": c["id"], "name": c.get("name"), "created_at": c.get("created_at"),
+                       "last_used_at": c.get("last_used_at"), "transports": c.get("transports")}
+                      for c in items]}
+
+
+@router.delete("/webauthn/credentials/{cred_id}", response_model=SuccessResponse)
+async def wa_delete_credential(cred_id: int, admin: AdminUser = Depends(get_current_admin)):
+    from web.backend.core import webauthn_svc as wa
+    if getattr(admin, "account_id", None):
+        await wa.delete_credential(cred_id, admin.account_id)
+    return SuccessResponse(message="Passkey удалён")
+
+
+@router.post("/webauthn/login/begin")
+@limiter.limit("10/minute")
+async def wa_login_begin(request: Request, data: WaLoginBegin):
+    from web.backend.core import webauthn_svc as wa
+    try:
+        return await wa.begin_authentication(request, data.username)
+    except wa.WebAuthnError as e:
+        raise api_error(400, E.FORBIDDEN, str(e))
+
+
+@router.post("/webauthn/login/finish", response_model=LoginResponse)
+@limiter.limit("10/minute")
+async def wa_login_finish(request: Request, response: Response, data: WaLoginFinish):
+    from web.backend.core import webauthn_svc as wa
+    client_ip = get_client_ip(request)
+    try:
+        acc = await wa.finish_authentication(request, data.token, data.credential)
+    except wa.WebAuthnError as e:
+        login_guard.record_failure(client_ip)
+        log_auth_failure(client_ip, "passkey", "passkey", str(e))
+        raise api_error(401, E.INVALID_TOKEN, str(e))
+    login_guard.record_success(client_ip)
+    username = acc.get("username") or (str(acc.get("telegram_id")) if acc.get("telegram_id") else f"admin{acc['id']}")
+    subject = ("pwd:" + acc["username"]) if acc.get("username") else str(acc.get("telegram_id"))
+    logger.info("Passkey login for '%s' from %s", username, client_ip)
+    await notify_login_success(ip=client_ip, username=username, auth_method="passkey")
+    access_token = create_access_token(subject, username, auth_method="passkey")
+    refresh_token = create_refresh_token(subject)
+    set_auth_cookies(response, request, access_token, refresh_token)
+    return LoginResponse(access_token=access_token, refresh_token=refresh_token)

@@ -18,6 +18,7 @@ psycopg2-binary==2.9.9  # Sync driver for alembic migrations
 bcrypt==4.2.1  # Used by scripts/admin_cli.py
 # 2FA (TOTP)
 pyotp>=2.9.0
+webauthn>=3.0.0
 qrcode[pil]>=7.4
 cryptography>=42.0
 # Testing

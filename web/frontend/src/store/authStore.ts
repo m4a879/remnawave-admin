@@ -71,6 +71,7 @@ interface AuthState {
   // Actions
   login: (telegramUser: TelegramUser) => Promise<void>
   loginWithPassword: (credentials: LoginCredentials) => Promise<void>
+  loginWithPasskey: (username?: string) => Promise<void>
   register: (credentials: RegisterCredentials) => Promise<void>
   totpSetup: () => Promise<void>
   totpConfirmSetup: (code: string) => Promise<void>
@@ -197,6 +198,30 @@ export const useAuthStore = create<AuthState>()(
           set({
             isLoading: false,
             error: error instanceof Error ? error.message : 'Login failed',
+          })
+          throw error
+        }
+      },
+
+      loginWithPasskey: async (username?: string) => {
+        set({ isLoading: true, error: null })
+        try {
+          const response = await authApi.loginPasskey(username)
+          set({
+            user: {
+              username: username || 'passkey',
+              firstName: username || 'passkey',
+              authMethod: 'passkey',
+            },
+            accessToken: response.access_token || null,
+            refreshToken: null,
+            isAuthenticated: true,
+            isLoading: false,
+          })
+        } catch (error) {
+          set({
+            isLoading: false,
+            error: error instanceof Error ? error.message : 'Passkey login failed',
           })
           throw error
         }
