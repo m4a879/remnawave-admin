@@ -131,11 +131,22 @@ class BillmanagerAdapter(HosterAdapter):
         try:
             resp = await client.get(endpoint, params=params)
             resp.raise_for_status()
-            data = resp.json()
         except httpx.HTTPError as e:
             raise AdapterError(f"Сеть/HTTP: {e}")
+        try:
+            data = resp.json()
         except ValueError:
-            raise AdapterError("Биллинг вернул не JSON (проверьте адрес)")
+            # диагностика: что именно пришло вместо JSON (HTML логина/визитки,
+            # Cloudflare-челлендж, неверный адрес) — видно content-type и начало тела
+            ct = resp.headers.get("content-type", "?")
+            snippet = " ".join((resp.text or "").split())[:140]
+            hint = ""
+            if "<html" in snippet.lower() or "<!doctype" in snippet.lower():
+                hint = (" — пришла HTML-страница, а не API. Проверьте адрес: нужен корень "
+                        "BILLmanager (напр. https://my.ВАШ-ХОСТ), не сайт-визитка; либо панель "
+                        "за Cloudflare/WAF")
+            raise AdapterError(
+                f"Биллинг вернул не JSON (content-type={ct}){hint}. Начало ответа: {snippet!r}")
 
         doc = data.get("doc", data) if isinstance(data, dict) else {}
         err = doc.get("error") if isinstance(doc, dict) else None
@@ -152,7 +163,16 @@ class BillmanagerAdapter(HosterAdapter):
 
     async def fetch(self, base_url: Optional[str], credentials: Dict[str, str]) -> SyncResult:
         endpoint = self._endpoint(base_url)
-        async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT, follow_redirects=True) as client:
+        # часть инстансов BILLmanager стоит за Cloudflare/WAF, который отдаёт
+        # HTML-челлендж на не-браузерный User-Agent (дефолтный python-httpx) —
+        # притворяемся браузером и явно просим JSON
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                          "(KHTML, like Gecko) Chrome/124.0 Safari/537.36",
+            "Accept": "application/json, */*",
+        }
+        async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT, follow_redirects=True,
+                                     headers=headers) as client:
             balance, currency = await self._fetch_balance(client, endpoint, credentials)
             services = await self._fetch_services(client, endpoint, credentials)
         return SyncResult(balance=balance, currency=currency, services=services)
