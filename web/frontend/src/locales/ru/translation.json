@@ -3989,7 +3989,59 @@
       "diffWarnNodes": "⚠️ Профиль активен на {{count}} нодах — после сохранения панель применит новый конфиг",
       "confirmSave": "Сохранить в панель",
       "saved": "Конфиг сохранён в панель",
-      "saveError": "Не удалось сохранить конфиг"
+      "saveError": "Не удалось сохранить конфиг",
+      "hints": "Подсказок: {{count}}",
+      "hintsHint": "Смысловые замечания (не блокируют сохранение) — смотри подчёркнутое в редакторе",
+      "lint": {
+        "dupOutboundTag": "Тег outbound «{{tag}}» дублируется — xray возьмёт первый",
+        "dupInboundTag": "Тег inbound «{{tag}}» дублируется",
+        "dupPort": "Порт {{port}} занят несколькими inbound — конфликт привязки",
+        "unknownOutboundTag": "Правило ссылается на неизвестный outboundTag «{{tag}}»",
+        "unknownBalancerTag": "Правило ссылается на неизвестный balancerTag «{{tag}}»",
+        "ruleNoAction": "Правило маршрутизации без действия (нет outboundTag/balancerTag)",
+        "routingNoOutbounds": "Есть правила маршрутизации, но нет ни одного outbound",
+        "noInbounds": "Нет ни одного inbound — ноде нечего слушать",
+        "noOutbounds": "Нет ни одного outbound — обычно нужен хотя бы freedom",
+        "realityNoSettings": "Reality без блока realitySettings ({{tag}})",
+        "realityNoPrivateKey": "Reality без privateKey ({{tag}}) — сгенерируй пару ключей",
+        "realityNoServerNames": "Reality без serverNames ({{tag}}) — нужен домен маскировки",
+        "realityNoShortIds": "Reality без shortIds ({{tag}}) — добавь хотя бы один",
+        "realityNoTarget": "Reality без target/dest ({{tag}}) — куда проксировать рукопожатие",
+        "tlsNoCert": "TLS без сертификата ({{tag}}) — заполни certificates",
+        "wsNoPath": "WebSocket без path ({{tag}})",
+        "grpcNoService": "gRPC без serviceName ({{tag}})",
+        "httpupgradeNoPath": "HTTPUpgrade без path ({{tag}})",
+        "wgNoSecretKey": "WireGuard без secretKey ({{tag}})",
+        "wgNoPeers": "WireGuard без peers ({{tag}})"
+      },
+      "blocks": {
+        "button": "Блоки",
+        "hint": "Вставить готовый блок конфига",
+        "inserted": "Добавлен блок: {{name}}",
+        "insertedRaw": "Вставлено в позицию курсора (JSON невалиден — структуру не разобрал)",
+        "cat": {
+          "inbounds": "Inbounds",
+          "outbounds": "Outbounds",
+          "routing": "Маршрутизация",
+          "dns": "DNS"
+        },
+        "items": {
+          "freedomDirect": { "label": "Freedom (прямой)", "desc": "Прямой выход, tag: direct" },
+          "blackhole": { "label": "Blackhole (блок)", "desc": "Глушилка трафика, tag: block" },
+          "dnsOut": { "label": "DNS outbound", "desc": "Обработчик DNS-запросов, tag: dns-out" },
+          "warp": { "label": "WARP (WireGuard)", "desc": "Cloudflare WARP; впиши secretKey/address" },
+          "fragment": { "label": "Freedom + fragment", "desc": "Дробление TLS-hello против DPI" },
+          "vlessReality": { "label": "VLESS + Reality", "desc": "Selfsteal-инбаунд; задай target/serverNames/ключ" },
+          "ss2022": { "label": "Shadowsocks 2022", "desc": "2022-blake3; впиши password" },
+          "dokodemoDns": { "label": "Dokodemo (DNS)", "desc": "Перехват DNS на 1.1.1.1" },
+          "blockTorrent": { "label": "Блок BitTorrent", "desc": "Резать torrent → block" },
+          "blockAds": { "label": "Блок рекламы", "desc": "geosite:category-ads-all → block" },
+          "blockPrivate": { "label": "Блок private IP", "desc": "geoip:private → block" },
+          "openaiWarp": { "label": "OpenAI → WARP", "desc": "geosite:openai через WARP" },
+          "googleWarp": { "label": "Google → WARP", "desc": "geosite:google через WARP" },
+          "dnsBasic": { "label": "Базовый DNS", "desc": "servers 1.1.1.1/8.8.8.8, UseIP" }
+        }
+      }
     },
     "position": "Позиция:",
     "uuid": "UUID:"

@@ -25,7 +25,9 @@ import { json, jsonLanguage, jsonParseLinter } from '@codemirror/lang-json'
 import { yaml } from '@codemirror/lang-yaml'
 import { oneDark } from '@codemirror/theme-one-dark'
 import Ajv, { ValidateFunction } from 'ajv'
+import i18n from '@/i18n'
 import xraySchema from './xray.schema.json'
+import { lintXray } from './xray.semantics'
 
 const ajv = new Ajv({ allErrors: true, strict: false })
 
@@ -41,8 +43,8 @@ interface CodeEditorProps {
   readOnly?: boolean
   schema?: CodeEditorSchema
   className?: string
-  /** колбэк числа ошибок валидации (для индикатора в тулбаре) */
-  onDiagnostics?: (count: number) => void
+  /** ошибки (блокируют сохранение) и подсказки-advisory (не блокируют) */
+  onDiagnostics?: (errors: number, hints: number) => void
   /** доступ к EditorView (навигация по секциям и т.п.) */
   viewRef?: React.MutableRefObject<EditorView | null>
 }
@@ -80,34 +82,61 @@ function schemaFor(schema: CodeEditorSchema): object | null {
   return null
 }
 
-/** Линтер: синтаксис через jsonParseLinter (точная позиция) + ajv по схеме. */
-function makeLinter(validate: ValidateFunction | null) {
+/** Позиция подсветки по подстроке-якорю (пропуская `skip` первых вхождений). */
+function locate(doc: string, anchor?: string, skip = 0): { from: number; to: number } {
+  if (!anchor) return { from: 0, to: 0 }
+  let idx = -1
+  for (let n = 0; n <= skip; n++) {
+    idx = doc.indexOf(anchor, idx + 1)
+    if (idx < 0) break
+  }
+  if (idx < 0) return { from: 0, to: 0 }
+  return { from: idx, to: idx + anchor.length }
+}
+
+/**
+ * Линтер: синтаксис (jsonParseLinter, точная позиция) → схема (ajv, warning)
+ * → семантика xray (severity info — advisory, НЕ блокирует сохранение).
+ */
+function makeLinter(validate: ValidateFunction | null, isXray: boolean) {
   const syntax = jsonParseLinter()
   return linter((view) => {
     const doc = view.state.doc.toString()
     if (!doc.trim()) return []
     const syntaxErrors = syntax(view)
-    if (syntaxErrors.length || !validate) return syntaxErrors
-    const diagnostics: Diagnostic[] = []
+    if (syntaxErrors.length) return syntaxErrors
+    let parsed: unknown
     try {
-      const parsed = JSON.parse(doc)
-      if (!validate(parsed) && validate.errors) {
-        for (const err of validate.errors.slice(0, 20)) {
-          // позиционируем ошибку на ключе из instancePath, если найдём
-          const seg = err.instancePath.split('/').filter(Boolean).pop()
-          let from = 0
-          let to = 0
-          if (seg && !/^\d+$/.test(seg)) {
-            const idx = doc.indexOf(`"${seg}"`)
-            if (idx >= 0) { from = idx; to = idx + seg.length + 2 }
-          }
-          diagnostics.push({
-            from, to, severity: 'warning',
-            message: `${err.instancePath || '/'} ${err.message || ''}`.trim(),
-          })
+      parsed = JSON.parse(doc)
+    } catch {
+      return [] // синтаксис уже отловлен выше
+    }
+    const diagnostics: Diagnostic[] = []
+    if (validate && !validate(parsed) && validate.errors) {
+      for (const err of validate.errors.slice(0, 20)) {
+        // позиционируем ошибку на ключе из instancePath, если найдём
+        const seg = err.instancePath.split('/').filter(Boolean).pop()
+        let from = 0
+        let to = 0
+        if (seg && !/^\d+$/.test(seg)) {
+          const idx = doc.indexOf(`"${seg}"`)
+          if (idx >= 0) { from = idx; to = idx + seg.length + 2 }
         }
+        diagnostics.push({
+          from, to, severity: 'warning',
+          message: `${err.instancePath || '/'} ${err.message || ''}`.trim(),
+        })
       }
-    } catch { /* синтаксис уже отловлен выше */ }
+    }
+    if (isXray) {
+      for (const issue of lintXray(parsed).slice(0, 30)) {
+        const { from, to } = locate(doc, issue.anchor, issue.anchorSkip)
+        diagnostics.push({
+          from, to, severity: 'info', source: 'xray',
+          message: String(i18n.t(`resources.editor.lint.${issue.code}`, issue.params ?? {})),
+        })
+      }
+    }
     return diagnostics
   })
 }
@@ -252,7 +281,8 @@ export function CodeEditor({ value, onChange, readOnly = false, schema = 'json',
   const viewRef = useRef<EditorView | null>(null)
   const onChangeRef = useRef(onChange)
   const onDiagRef = useRef(onDiagnostics)
-  const lastDiagCount = useRef(-1)
+  const lastErr = useRef(-1)
+  const lastHint = useRef(-1)
   onChangeRef.current = onChange
   onDiagRef.current = onDiagnostics
 
@@ -267,13 +297,19 @@ export function CodeEditor({ value, onChange, readOnly = false, schema = 'json',
 
     const reportDiagnostics = EditorView.updateListener.of((update) => {
       if (update.docChanged) onChangeRef.current(update.state.doc.toString())
-      // счётчик ошибок для индикатора (линтер приходит отдельной транзакцией)
+      // счётчики для индикаторов (линтер приходит отдельной транзакцией):
+      // ошибки+схема (блокируют сохранение) отдельно от advisory-подсказок
       if (onDiagRef.current) {
-        let count = 0
-        forEachDiagnostic(update.state, () => { count++ })
-        if (count !== lastDiagCount.current) {
-          lastDiagCount.current = count
-          onDiagRef.current(count)
+        let errors = 0
+        let hints = 0
+        forEachDiagnostic(update.state, (d) => {
+          if (d.severity === 'info' || d.severity === 'hint') hints++
+          else errors++
+        })
+        if (errors !== lastErr.current || hints !== lastHint.current) {
+          lastErr.current = errors
+          lastHint.current = hints
+          onDiagRef.current(errors, hints)
         }
       }
     })
@@ -307,7 +343,7 @@ export function CodeEditor({ value, onChange, readOnly = false, schema = 'json',
     if (schema === 'yaml') {
       extensions.push(yaml())
     } else if (schema !== 'none') {
-      extensions.push(json(), lintGutter(), makeLinter(validate))
+      extensions.push(json(), lintGutter(), makeLinter(validate, schema === 'xray'))
       extensions.push(autocompletion({ activateOnTyping: true, icons: true }))
       const completion = makeCompletion(jsonSchema)
       if (completion) extensions.push(completion)

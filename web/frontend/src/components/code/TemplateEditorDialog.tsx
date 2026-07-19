@@ -203,7 +203,7 @@ export function TemplateEditorDialog({ template, onClose }: { template: Template
                   key={`${template?.uuid}-${isYaml ? 'yaml' : 'json'}`}
                   value={text} onChange={setText}
                   schema={isYaml ? 'yaml' : 'json'}
-                  onDiagnostics={setErrorCount} viewRef={cmRef}
+                  onDiagnostics={(e) => setErrorCount(e)} viewRef={cmRef}
                 />
               )}
             </div>

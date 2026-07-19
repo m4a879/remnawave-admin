@@ -14,6 +14,7 @@ import { toast } from 'sonner'
 import { resourcesApi, ConfigProfile, ConfigVersion } from '@/api/resources'
 import { CodeEditor } from './CodeEditor'
 import { CodeDiff } from './CodeDiff'
+import { XRAY_SNIPPETS, SNIPPET_CATEGORIES, XraySnippet } from './xray.snippets'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -21,7 +22,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
-import { Server, History, AlertTriangle, Check, RotateCcw, Key } from '@/components/brand/icons'
+import { Server, History, AlertTriangle, Check, RotateCcw, Key, Boxes, Sparkles } from '@/components/brand/icons'
 import { cn } from '@/lib/utils'
 
 interface Props {
@@ -41,6 +42,7 @@ export function ProfileEditorDialog({ profile, onClose }: Props) {
   const [original, setOriginal] = useState('')
   const [diffOpen, setDiffOpen] = useState(false)
   const [errorCount, setErrorCount] = useState(0)
+  const [hintCount, setHintCount] = useState(0)
   // «Исходник» — редактируемый конфиг; «Вычисленный» — раскрытый панелью (read-only)
   const [view, setView] = useState<'source' | 'computed'>('source')
   // предпросмотр версии из истории: дифф с текущим текстом до загрузки
@@ -170,6 +172,39 @@ export function ProfileEditorDialog({ profile, onClose }: Props) {
     setKeysOpen(false)
   }
 
+  // Умная вставка готового блока: parse → добавить в нужную секцию → stringify.
+  // Если JSON невалиден — кладём блок сырым текстом в позицию курсора.
+  const insertSnippet = (snip: XraySnippet) => {
+    const block = snip.build()
+    let cfg: Record<string, any>
+    try {
+      cfg = JSON.parse(text)
+    } catch {
+      insertAtCursor(JSON.stringify(block, null, 2))
+      toast.info(t('resources.editor.blocks.insertedRaw'))
+      return
+    }
+    if (!cfg || typeof cfg !== 'object' || Array.isArray(cfg)) {
+      toast.error(t('resources.editor.invalidJson'))
+      return
+    }
+    if (snip.target === 'outbounds' || snip.target === 'inbounds') {
+      const arr = Array.isArray(cfg[snip.target]) ? cfg[snip.target] : []
+      cfg[snip.target] = [...arr, block]
+    } else if (snip.target === 'routingRules') {
+      const routing = cfg.routing && typeof cfg.routing === 'object' ? cfg.routing : {}
+      const rules = Array.isArray(routing.rules) ? routing.rules : []
+      cfg.routing = { ...routing, rules: [...rules, block] }
+    } else {
+      const dns = cfg.dns && typeof cfg.dns === 'object' ? cfg.dns : {}
+      cfg.dns = { ...dns, ...block }
+    }
+    setText(JSON.stringify(cfg, null, 2))
+    toast.success(t('resources.editor.blocks.inserted', {
+      name: t(`resources.editor.blocks.items.${snip.id}.label`),
+    }))
+  }
+
   const copyText = (value: string) => {
     navigator.clipboard.writeText(value)
     toast.success(t('common.copied'))
@@ -257,6 +292,12 @@ export function ProfileEditorDialog({ profile, onClose }: Props) {
                   <Check className="w-3 h-3" /> {t('resources.editor.valid')}
                 </Badge>
               ) : null)}
+              {view === 'source' && errorCount === 0 && hintCount > 0 && (
+                <Badge className="bg-amber-500/20 text-amber-300 text-[10px] gap-1"
+                  title={t('resources.editor.hintsHint')}>
+                  <Sparkles className="w-3 h-3" /> {t('resources.editor.hints', { count: hintCount })}
+                </Badge>
+              )}
             </div>
             <p className="text-[11px] text-muted-foreground">
               {profileNodes.length > 0 && `${t('resources.editor.nodesHint', { nodes: profileNodes.join(', ') })} · `}
@@ -293,7 +334,8 @@ export function ProfileEditorDialog({ profile, onClose }: Props) {
               ) : isLoading ? (
                 <Skeleton className="h-full w-full" />
               ) : (
-                <CodeEditor value={text} onChange={setText} schema="xray" onDiagnostics={setErrorCount} viewRef={cmRef} />
+                <CodeEditor value={text} onChange={setText} schema="xray"
+                  onDiagnostics={(e, h) => { setErrorCount(e); setHintCount(h) }} viewRef={cmRef} />
               )}
             </div>
           </div>
@@ -316,6 +358,34 @@ export function ProfileEditorDialog({ profile, onClose }: Props) {
                 title={t('resources.editor.keysHint')}>
                 <Key className="w-4 h-4" /> {t('resources.editor.keys')}
               </Button>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="outline" size="sm" className="gap-1.5"
+                    title={t('resources.editor.blocks.hint')}>
+                    <Boxes className="w-4 h-4" /> {t('resources.editor.blocks.button')}
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start" className="max-h-80 w-72 overflow-y-auto">
+                  {SNIPPET_CATEGORIES.map((cat) => (
+                    <div key={cat}>
+                      <div className="px-2 py-1 text-[10px] uppercase tracking-wide text-muted-foreground">
+                        {t(`resources.editor.blocks.cat.${cat}`)}
+                      </div>
+                      {XRAY_SNIPPETS.filter((s) => s.category === cat).map((s) => (
+                        <DropdownMenuItem key={s.id} onClick={() => insertSnippet(s)}
+                          className="flex flex-col items-start gap-0.5 cursor-pointer">
+                          <span className="text-xs font-medium">
+                            {t(`resources.editor.blocks.items.${s.id}.label`)}
+                          </span>
+                          <span className="text-[10px] text-muted-foreground">
+                            {t(`resources.editor.blocks.items.${s.id}.desc`)}
+                          </span>
+                        </DropdownMenuItem>
+                      ))}
+                    </div>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <Button variant="outline" size="sm" className="gap-1.5">

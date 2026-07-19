@@ -3989,7 +3989,59 @@
       "diffWarnNodes": "⚠️ Profile is active on {{count}} nodes — the panel will apply the new config after saving",
       "confirmSave": "Save to panel",
       "saved": "Config saved to panel",
-      "saveError": "Failed to save config"
+      "saveError": "Failed to save config",
+      "hints": "Hints: {{count}}",
+      "hintsHint": "Semantic advisories (do not block saving) — see underlined spots in the editor",
+      "lint": {
+        "dupOutboundTag": "Duplicate outbound tag \"{{tag}}\" — xray uses the first one",
+        "dupInboundTag": "Duplicate inbound tag \"{{tag}}\"",
+        "dupPort": "Port {{port}} is used by several inbounds — bind conflict",
+        "unknownOutboundTag": "Rule references unknown outboundTag \"{{tag}}\"",
+        "unknownBalancerTag": "Rule references unknown balancerTag \"{{tag}}\"",
+        "ruleNoAction": "Routing rule has no action (no outboundTag/balancerTag)",
+        "routingNoOutbounds": "Routing rules exist but there are no outbounds",
+        "noInbounds": "No inbounds — the node has nothing to listen on",
+        "noOutbounds": "No outbounds — usually at least freedom is required",
+        "realityNoSettings": "Reality without a realitySettings block ({{tag}})",
+        "realityNoPrivateKey": "Reality without privateKey ({{tag}}) — generate a keypair",
+        "realityNoServerNames": "Reality without serverNames ({{tag}}) — a masking domain is required",
+        "realityNoShortIds": "Reality without shortIds ({{tag}}) — add at least one",
+        "realityNoTarget": "Reality without target/dest ({{tag}}) — where to proxy the handshake",
+        "tlsNoCert": "TLS without a certificate ({{tag}}) — fill in certificates",
+        "wsNoPath": "WebSocket without path ({{tag}})",
+        "grpcNoService": "gRPC without serviceName ({{tag}})",
+        "httpupgradeNoPath": "HTTPUpgrade without path ({{tag}})",
+        "wgNoSecretKey": "WireGuard without secretKey ({{tag}})",
+        "wgNoPeers": "WireGuard without peers ({{tag}})"
+      },
+      "blocks": {
+        "button": "Blocks",
+        "hint": "Insert a ready-made config block",
+        "inserted": "Block added: {{name}}",
+        "insertedRaw": "Inserted at cursor (invalid JSON — couldn't parse structure)",
+        "cat": {
+          "inbounds": "Inbounds",
+          "outbounds": "Outbounds",
+          "routing": "Routing",
+          "dns": "DNS"
+        },
+        "items": {
+          "freedomDirect": { "label": "Freedom (direct)", "desc": "Direct egress, tag: direct" },
+          "blackhole": { "label": "Blackhole (block)", "desc": "Traffic sink, tag: block" },
+          "dnsOut": { "label": "DNS outbound", "desc": "DNS query handler, tag: dns-out" },
+          "warp": { "label": "WARP (WireGuard)", "desc": "Cloudflare WARP; fill secretKey/address" },
+          "fragment": { "label": "Freedom + fragment", "desc": "TLS-hello fragmentation vs DPI" },
+          "vlessReality": { "label": "VLESS + Reality", "desc": "Selfsteal inbound; set target/serverNames/key" },
+          "ss2022": { "label": "Shadowsocks 2022", "desc": "2022-blake3; fill password" },
+          "dokodemoDns": { "label": "Dokodemo (DNS)", "desc": "DNS intercept to 1.1.1.1" },
+          "blockTorrent": { "label": "Block BitTorrent", "desc": "Cut torrent → block" },
+          "blockAds": { "label": "Block ads", "desc": "geosite:category-ads-all → block" },
+          "blockPrivate": { "label": "Block private IP", "desc": "geoip:private → block" },
+          "openaiWarp": { "label": "OpenAI → WARP", "desc": "geosite:openai via WARP" },
+          "googleWarp": { "label": "Google → WARP", "desc": "geosite:google via WARP" },
+          "dnsBasic": { "label": "Basic DNS", "desc": "servers 1.1.1.1/8.8.8.8, UseIP" }
+        }
+      }
     },
     "position": "Position:",
     "uuid": "UUID:"
