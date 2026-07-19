@@ -26,7 +26,8 @@ class TestRegistry:
 
         slugs = {a["slug"] for a in list_adapters()}
         expected = {"timeweb", "aeza", "hetzner", "selectel",
-                    "vultr", "vdsina", "cloudflare", "porkbun", "regru"}
+                    "vultr", "vdsina", "cloudflare", "porkbun", "regru",
+                    "beget", "linode"}
         assert expected <= slugs
         for slug in expected:
             a = get_adapter(slug)
@@ -426,3 +427,99 @@ class TestRegru:
         with patch("httpx.AsyncClient", _patched_client(handler)):
             with pytest.raises(AdapterError, match="reg.ru"):
                 await RegruAdapter().fetch(None, {"username": "u", "password": "bad"})
+
+
+# ── Beget ────────────────────────────────────────────────────────
+
+
+class TestBeget:
+    @pytest.mark.asyncio
+    async def test_balance_legacy_and_vps_via_cloud(self):
+        from web.backend.core.finance.adapters.beget import BegetAdapter
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            p = request.url.path
+            if p == "/api/user/getAccountInfo":
+                params = dict(request.url.params)
+                assert params.get("login") == "l" and params.get("passwd") == "pw"
+                return httpx.Response(200, json={"status": "success", "answer": {
+                    "status": "success", "result": {"user_balance": 512.3, "plan_name": "X"}}})
+            if p == "/v1/auth":
+                return httpx.Response(200, json={"token": "JWT"})
+            if p == "/v1/vps/server/list":
+                assert request.headers.get("Authorization") == "Bearer JWT"
+                return httpx.Response(200, json={"vps": [{
+                    "id": "v1", "display_name": "beget-vps", "status": "running",
+                    "ip_address": "5.101.1.2", "price_month": 650}]})
+            return httpx.Response(404)
+
+        with patch("httpx.AsyncClient", _patched_client(handler)):
+            r = await BegetAdapter().fetch(None, {"login": "l", "passwd": "pw"})
+
+        assert r.balance == 512.3 and r.currency == "RUB"
+        s = r.services[0]
+        assert s.name == "beget-vps" and s.price == 650.0 and s.ips == ["5.101.1.2"]
+
+    @pytest.mark.asyncio
+    async def test_balance_survives_vps_auth_fail(self):
+        from web.backend.core.finance.adapters.beget import BegetAdapter
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            p = request.url.path
+            if p == "/api/user/getAccountInfo":
+                return httpx.Response(200, json={"status": "success", "answer": {
+                    "status": "success", "result": {"user_balance": 10}}})
+            if p == "/v1/auth":
+                return httpx.Response(200, json={"error": "invalid"})  # нет token
+            return httpx.Response(404)
+
+        with patch("httpx.AsyncClient", _patched_client(handler)):
+            r = await BegetAdapter().fetch(None, {"login": "l", "passwd": "pw"})
+
+        assert r.balance == 10.0 and r.services == []
+
+    @pytest.mark.asyncio
+    async def test_bad_password_raises(self):
+        from web.backend.core.finance.adapters.beget import BegetAdapter
+        from web.backend.core.finance.adapters import AdapterError
+
+        def handler(request):
+            return httpx.Response(200, json={"status": "success", "answer": {
+                "status": "error", "errors": [{"error_text": "auth"}]}})
+
+        with patch("httpx.AsyncClient", _patched_client(handler)):
+            with pytest.raises(AdapterError):
+                await BegetAdapter().fetch(None, {"login": "l", "passwd": "bad"})
+
+
+# ── Linode ───────────────────────────────────────────────────────
+
+
+class TestLinode:
+    @pytest.mark.asyncio
+    async def test_balance_negated_and_price_by_region(self):
+        from web.backend.core.finance.adapters.linode import LinodeAdapter
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            assert request.headers.get("Authorization") == "Bearer LT"
+            p = request.url.path
+            if p == "/v4/account":
+                return httpx.Response(200, json={"balance": -15.5})  # кредит → покажем +15.5
+            if p == "/v4/linode/types":
+                return httpx.Response(200, json={"data": [{
+                    "id": "g6-nanode-1", "price": {"monthly": 5},
+                    "region_prices": [{"id": "eu-central", "monthly": 6}]}]})
+            if p == "/v4/linode/instances":
+                return httpx.Response(200, json={"data": [{
+                    "id": 123, "label": "ln-1", "type": "g6-nanode-1", "region": "eu-central",
+                    "status": "running", "ipv4": ["139.1.2.3"],
+                    "specs": {"vcpus": 1, "memory": 1024}}], "page": 1, "pages": 1})
+            return httpx.Response(404)
+
+        with patch("httpx.AsyncClient", _patched_client(handler)):
+            r = await LinodeAdapter().fetch(None, {"token": "LT"})
+
+        assert r.balance == 15.5 and r.currency == "USD"
+        s = r.services[0]
+        assert s.name == "ln-1" and s.price == 6.0  # region_prices переопределяет базовую
+        assert s.ips == ["139.1.2.3"] and "1 vCPU" in s.specs
