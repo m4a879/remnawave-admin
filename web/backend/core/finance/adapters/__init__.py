@@ -18,6 +18,15 @@ from web.backend.core.finance.adapters.base import (
 # Регистрация конкретных адаптеров (импорт = регистрация)
 from web.backend.core.finance.adapters import billmanager  # noqa: F401
 from web.backend.core.finance.adapters import hostkey  # noqa: F401
+from web.backend.core.finance.adapters import timeweb  # noqa: F401
+from web.backend.core.finance.adapters import aeza  # noqa: F401
+from web.backend.core.finance.adapters import hetzner  # noqa: F401
+from web.backend.core.finance.adapters import selectel  # noqa: F401
+from web.backend.core.finance.adapters import vultr  # noqa: F401
+from web.backend.core.finance.adapters import vdsina  # noqa: F401
+from web.backend.core.finance.adapters import cloudflare  # noqa: F401
+from web.backend.core.finance.adapters import porkbun  # noqa: F401
+from web.backend.core.finance.adapters import regru  # noqa: F401
 
 __all__ = [
     "AdapterError",
