@@ -24,7 +24,7 @@ class TestRegistry:
         from web.backend.core import dns
 
         slugs = {p.slug for p in dns.list_providers()}
-        assert {"cloudflare", "timeweb", "regru"} <= slugs
+        assert {"cloudflare", "timeweb", "regru", "selectel"} <= slugs
         assert dns.get_provider("cloudflare").proxyable == ["A", "AAAA", "CNAME"]
         assert dns.get_provider("regru").supports_ttl is False
         assert dns.get_provider("timeweb").proxyable == []
@@ -190,6 +190,52 @@ class TestRegru:
         with patch("httpx.AsyncClient", _patched_client(h)):
             with pytest.raises(DnsProviderError):
                 await RegruProvider().list_zones({"username": "u", "password": "bad"})
+
+
+# ── Selectel ─────────────────────────────────────────────────────
+
+
+class TestSelectelDns:
+    @pytest.mark.asyncio
+    async def test_zones_records_create(self):
+        from web.backend.core.dns.selectel import SelectelProvider
+
+        seen = {}
+
+        def h(request: httpx.Request) -> httpx.Response:
+            assert request.headers.get("X-Token") == "STATIC"
+            p, m = request.url.path, request.method
+            if p == "/domains/v1/" and m == "GET":
+                return httpx.Response(200, json=[{"id": 101, "name": "a.com"}])
+            if p == "/domains/v1/101/records/" and m == "GET":
+                return httpx.Response(200, json=[
+                    {"id": 9, "type": "A", "name": "www.a.com", "content": "1.2.3.4", "ttl": 3600}])
+            if p == "/domains/v1/101/records/" and m == "POST":
+                seen.update(json.loads(request.content.decode()))
+                return httpx.Response(200, json={
+                    "id": 10, "type": "A", "name": "api.a.com", "content": "5.6.7.8", "ttl": 300})
+            return httpx.Response(404)
+
+        prov = SelectelProvider()
+        with patch("httpx.AsyncClient", _patched_client(h)):
+            zs = await prov.list_zones({"token": "STATIC"})
+            rs = await prov.list_records({"token": "STATIC"}, "101")
+            rec = await prov.create_record({"token": "STATIC"}, "101", {
+                "type": "A", "name": "api.a.com", "content": "5.6.7.8", "ttl": 300})
+        assert zs[0].id == "101" and zs[0].name == "a.com"
+        assert rs[0].name == "www.a.com" and rs[0].content == "1.2.3.4"
+        assert seen["type"] == "A" and seen["content"] == "5.6.7.8" and seen["ttl"] == 300
+        assert rec.id == "10"
+
+    @pytest.mark.asyncio
+    async def test_verify_false_on_forbidden(self):
+        from web.backend.core.dns.selectel import SelectelProvider
+
+        def h(request):
+            return httpx.Response(401, json={"error": "bad"})
+
+        with patch("httpx.AsyncClient", _patched_client(h)):
+            assert await SelectelProvider().verify({"token": "bad"}) is False
 
 
 # ── Хранение кредов ──────────────────────────────────────────────

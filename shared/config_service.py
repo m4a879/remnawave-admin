@@ -359,6 +359,13 @@ DEFAULT_CONFIG_DEFINITIONS: List[Dict[str, Any]] = [
         "description": "Управляется на странице «DNS», не здесь",
         "default_value": "", "is_secret": True, "is_readonly": True, "sort_order": 92,
     },
+    {
+        "key": "dns_creds_selectel",
+        "value_type": "string", "category": "general",
+        "display_name": "DNS: Selectel (зашифр.)",
+        "description": "Управляется на странице «DNS», не здесь",
+        "default_value": "", "is_secret": True, "is_readonly": True, "sort_order": 93,
+    },
 
     # === SYNC ===
     {

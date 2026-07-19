@@ -184,50 +184,40 @@ class TestHetzner:
 
 class TestSelectel:
     @pytest.mark.asyncio
-    async def test_keystone_then_balance(self):
+    async def test_balance_via_xtoken(self):
         from web.backend.core.finance.adapters.selectel import SelectelAdapter
 
         def handler(request: httpx.Request) -> httpx.Response:
-            url = str(request.url)
-            if "identity/v3/auth/tokens" in url:
-                return httpx.Response(201, headers={"X-Subject-Token": "KTOKEN"},
-                                      json={"token": {}})
+            assert request.headers.get("X-Token") == "STATIC"
             if request.url.path == "/v3/balances":
-                assert request.headers.get("X-Auth-Token") == "KTOKEN"
                 return httpx.Response(200, json={"data": {
                     "billings": [{"final_sum": 250000}],
-                    "settings": {"currency": "rub"},
-                }})
+                    "settings": {"currency": "rub"}}})
             return httpx.Response(404)
 
-        adapter = SelectelAdapter()
         with patch("httpx.AsyncClient", _patched_client(handler)):
-            r = await adapter.fetch(None, {
-                "account_id": "123456", "username": "svc", "password": "p"})
-
-        assert r.balance == 2500.0 and r.currency == "RUB"
-        assert r.services == []
+            r = await SelectelAdapter().fetch(None, {"token": "STATIC"})
+        assert r.balance == 2500.0 and r.currency == "RUB" and r.services == []
 
     @pytest.mark.asyncio
-    async def test_keystone_auth_error(self):
+    async def test_auth_error(self):
         from web.backend.core.finance.adapters.selectel import SelectelAdapter
         from web.backend.core.finance.adapters import AdapterError
 
         def handler(request):
-            return httpx.Response(401, json={"error": {"message": "bad creds"}})
+            return httpx.Response(401, json={"error": "bad token"})
 
         with patch("httpx.AsyncClient", _patched_client(handler)):
             with pytest.raises(AdapterError, match="[Аа]вториз"):
-                await SelectelAdapter().fetch(None, {
-                    "account_id": "1", "username": "u", "password": "bad"})
+                await SelectelAdapter().fetch(None, {"token": "bad"})
 
     @pytest.mark.asyncio
-    async def test_missing_credentials(self):
+    async def test_missing_token(self):
         from web.backend.core.finance.adapters.selectel import SelectelAdapter
         from web.backend.core.finance.adapters import AdapterError
 
         with pytest.raises(AdapterError):
-            await SelectelAdapter().fetch(None, {"account_id": "1"})
+            await SelectelAdapter().fetch(None, {})
 
 
 # ── Vultr ────────────────────────────────────────────────────────

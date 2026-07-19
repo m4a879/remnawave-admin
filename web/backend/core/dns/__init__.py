@@ -22,6 +22,7 @@ from web.backend.core.dns.base import (
 from web.backend.core.dns import cloudflare  # noqa: F401
 from web.backend.core.dns import timeweb  # noqa: F401
 from web.backend.core.dns import regru  # noqa: F401
+from web.backend.core.dns import selectel  # noqa: F401
 
 __all__ = [
     "DnsField", "DnsProvider", "DnsProviderError", "DnsRecord", "DnsZone",
