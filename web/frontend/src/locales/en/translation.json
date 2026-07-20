@@ -3113,15 +3113,15 @@
       "items": {
         "dockerNetwork": {
           "q": "After docker compose up, services can't see each other",
-          "a": "Make sure the shared network exists:\ndocker network create remnawave-network\n\nThen restart the stack:\ndocker compose down && docker compose up -d\n\nIf you run several compose files (panel + Remnawave + bot), they must all attach to the same external network remnawave-network — otherwise the containers land in separate networks and can't resolve each other's names."
+          "a": "Make sure the shared network exists:\n```\ndocker network create remnawave-network\n```\nThen restart the stack:\n```\ndocker compose down && docker compose up -d\n```\nIf you run several compose files (panel + Remnawave + bot), they must all attach to the same external network `remnawave-network` — otherwise the containers land in separate networks and can't resolve each other's names."
         },
         "panelPort": {
           "q": "Panel only opens with port :3000, doesn't work by domain",
-          "a": "The frontend listens on port 3000 (WEB_FRONTEND_PORT:3000 mapped to port 80 inside the container). To open the panel by domain without a port, put a reverse proxy in front.\n\nCaddy (Caddyfile):\nyour-domain.com {\n    reverse_proxy web-frontend:80 {\n        lb_try_duration 30s\n    }\n}\nlb_try_duration is needed because after a server reboot the proxy starts before the containers and can't immediately resolve their DNS names.\n\nNginx — add to the upstream/location block:\nresolver 127.0.0.11 valid=10s;\n\nIf the panel broke right after a server reboot — docker restart caddy (or nginx) helps."
+          "a": "The frontend listens on port 3000 (WEB_FRONTEND_PORT:3000 mapped to port 80 inside the container). To open the panel by domain without a port, put a reverse proxy in front.\n\nCaddy (Caddyfile):\n```\nyour-domain.com {\n    reverse_proxy web-frontend:80 {\n        lb_try_duration 30s\n    }\n}\n```\n`lb_try_duration` is needed because after a server reboot the proxy starts before the containers and can't immediately resolve their DNS names.\n\nNginx — add to the upstream/location block:\n```\nresolver 127.0.0.11 valid=10s;\n```\nIf the panel broke right after a server reboot — `docker restart caddy` (or nginx) helps."
         },
         "update": {
           "q": "How do I update the panel to a new version?",
-          "a": "1. Back up the DB (Backups → Create) just in case.\n2. Pull new images and restart:\ndocker compose pull\ndocker compose up -d\nDB migrations apply automatically on backend start.\n3. Check the version in the panel footer and the logs: docker compose logs -f web-backend.\n\nRollback: docker compose down, restore the previous image tag in .env/compose, docker compose up -d again, restore the DB backup if needed."
+          "a": "1. Back up the DB (Backups → Create) just in case.\n2. Pull new images and restart:\n```\ndocker compose pull\ndocker compose up -d\n```\nDB migrations apply automatically on backend start.\n3. Check the version in the panel footer and the logs: `docker compose logs -f web-backend`.\n\nRollback: `docker compose down`, restore the previous image tag in .env/compose, `docker compose up -d` again, restore the DB backup if needed."
         },
         "backup": {
           "q": "How do I back up and restore the database?",
@@ -3129,7 +3129,7 @@
         },
         "resourceLimits": {
           "q": "How do I limit CPU/RAM consumption?",
-          "a": "Hard limits are set at the Docker level, not the application level.\n\nIn docker-compose.yml for a service:\nservices:\n  web-backend:\n    deploy:\n      resources:\n        limits:\n          cpus: '2.0'\n          memory: 1G\n        reservations:\n          cpus: '0.5'\n          memory: 256M\n\nAt the app level, load is tuned via: DB pool size, sync intervals, violation pipeline parameters — see Settings → Performance."
+          "a": "Hard limits are set at the Docker level, not the application level.\n\nIn `docker-compose.yml` for a service:\n```\nservices:\n  web-backend:\n    deploy:\n      resources:\n        limits:\n          cpus: '2.0'\n          memory: 1G\n        reservations:\n          cpus: '0.5'\n          memory: 256M\n```\nAt the app level, load is tuned via: DB pool size, sync intervals, violation pipeline parameters — see Settings → Performance."
         },
         "authMethods": {
           "q": "What login methods are there and where do I enable them?",
@@ -3149,7 +3149,7 @@
         },
         "passwordReset": {
           "q": "How do I reset the admin password?",
-          "a": "Method 1 — via email (if SMTP is configured): on the login page click 'Forgot password?', enter your email — a reset link will arrive.\n\nMethod 2 — via CLI on the server:\ndocker exec -it <container> python3 scripts/admin_cli.py reset-password --username admin\n\nMethod 3 — create a new superadmin:\ndocker exec -it <container> python3 scripts/admin_cli.py create-superadmin --username newadmin\n\n<container> is the backend container name (check with docker ps)."
+          "a": "Method 1 — via email (if SMTP is configured): on the login page click 'Forgot password?', enter your email — a reset link will arrive.\n\nMethod 2 — via CLI on the server:\n```\ndocker exec -it <container> python3 scripts/admin_cli.py reset-password --username admin\n```\nMethod 3 — create a new superadmin:\n```\ndocker exec -it <container> python3 scripts/admin_cli.py create-superadmin --username newadmin\n```\n`<container>` is the backend container name (check with `docker ps`)."
         },
         "passwordLogin": {
           "q": "Can't log in with password",
@@ -3169,23 +3169,23 @@
         },
         "highCpu": {
           "q": "PostgreSQL running at near 100% CPU",
-          "a": "1. Check indexes on hot tables (created by migrations):\n- users: idx_users_username_lower, idx_users_email_lower\n- user_connections: idx_user_connections_user_active\nIf migrations didn't apply — a backend restart applies them automatically.\n\n2. Configure Settings → Performance:\n- DB Pool: max connections (default 50);\n- DB: statement timeout (default 60s).\n\n3. Find heavy queries:\nSELECT * FROM pg_stat_user_tables ORDER BY seq_scan DESC;\nLots of seq_scan on a large table → a missing index.\n\n4. With a large online count, lower the sync and violation-check frequency (see the violation queue question)."
+          "a": "1. Check indexes on hot tables (created by migrations):\n- users: `idx_users_username_lower`, `idx_users_email_lower`\n- user_connections: `idx_user_connections_user_active`\nIf migrations didn't apply — a backend restart applies them automatically.\n\n2. Configure Settings → Performance:\n- DB Pool: max connections (default 50);\n- DB: statement timeout (default 60s).\n\n3. Find heavy queries:\n```\nSELECT * FROM pg_stat_user_tables ORDER BY seq_scan DESC;\n```\nLots of `seq_scan` on a large table → a missing index.\n\n4. With a large online count, lower the sync and violation-check frequency (see the violation queue question)."
         },
         "dbPool": {
           "q": "'Too many connections' errors in logs",
-          "a": "PostgreSQL has a connection limit (default 100), and each service (backend, bot) keeps its own pool.\n\n1. Reduce 'DB Pool: max connections' in Settings → Performance (the sum of all service pools must fit the PostgreSQL limit).\n2. Or raise the DB limit:\nALTER SYSTEM SET max_connections = 200;\nand restart PostgreSQL.\n3. Check for stray external connections (pgAdmin, scripts, old containers)."
+          "a": "PostgreSQL has a connection limit (default 100), and each service (backend, bot) keeps its own pool.\n\n1. Reduce 'DB Pool: max connections' in Settings → Performance (the sum of all service pools must fit the PostgreSQL limit).\n2. Or raise the DB limit:\n```\nALTER SYSTEM SET max_connections = 200;\n```\nand restart PostgreSQL.\n3. Check for stray external connections (pgAdmin, scripts, old containers)."
         },
         "violationQueue": {
           "q": "How can I tell if the violation detection pipeline is keeping up?",
-          "a": "Open /api/v2/collector/stats — it shows:\n- pending_users — users waiting for a check;\n- health — idle / ok / busy / overloaded;\n- backlog — difference between enqueued and processed;\n- last_drain_duration_ms — last processing cycle time.\n\nIf health = overloaded (over 2000 in queue):\n1. Increase 'Violation queue: chunk size' in Settings → Performance → Pipeline.\n2. Decrease 'Violation queue: drain interval' (e.g. from 3 to 1 sec).\n3. Increase 'Check cooldown' in the Violation Detection section.\n\nQueue grows while resources are free — raise the chunk size. CPU maxed out — raise the interval and cooldown."
+          "a": "Open `/api/v2/collector/stats` — it shows:\n- pending_users — users waiting for a check;\n- health — idle / ok / busy / overloaded;\n- backlog — difference between enqueued and processed;\n- last_drain_duration_ms — last processing cycle time.\n\nIf health = overloaded (over 2000 in queue):\n1. Increase 'Violation queue: chunk size' in Settings → Performance → Pipeline.\n2. Decrease 'Violation queue: drain interval' (e.g. from 3 to 1 sec).\n3. Increase 'Check cooldown' in the Violation Detection section.\n\nQueue grows while resources are free — raise the chunk size. CPU maxed out — raise the interval and cooldown."
         },
         "nodeOffline": {
           "q": "Node shows as offline but is actually running",
-          "a": "Check in order:\n1. The agent container on the node is running: docker ps on the node's server (the agent is installed via docker compose).\n2. AGENT_COLLECTOR_URL points to your web-backend (port 8081, usually via the same domain/proxy over https).\n3. The agent token matches the node's token in the panel.\n4. No firewall / port block between the node and the backend.\n5. Server time is synchronized (NTP) — clock drift breaks agent auth.\nThe agent logs on the node usually show the cause right away (DNS, TLS, 401)."
+          "a": "Check in order:\n1. The agent container on the node is running: `docker ps` on the node's server (the agent is installed via docker compose).\n2. `AGENT_COLLECTOR_URL` points to your web-backend (port 8081, usually via the same domain/proxy over https).\n3. The agent token matches the node's token in the panel.\n4. No firewall / port block between the node and the backend.\n5. Server time is synchronized (NTP) — clock drift breaks agent auth.\nThe agent logs on the node usually show the cause right away (DNS, TLS, 401)."
         },
         "agentInstall": {
           "q": "How do I install the agent on a new node?",
-          "a": "1. Create the node in the panel and copy its UUID and token.\n2. On the node's server run the agent installer:\nbash install.sh --uuid <NODE_UUID> --url https://admin.yourdomain.com --token <AUTH_TOKEN>\n(--url is your web-backend address: port 8081 or via a reverse proxy).\n3. Within a minute the node goes online in the panel.\nStill offline — see 'Node shows as offline but is actually running'."
+          "a": "1. Create the node in the panel and copy its UUID and token.\n2. On the node's server run the agent installer:\n```\nbash install.sh --uuid <NODE_UUID> --url https://admin.yourdomain.com --token <AUTH_TOKEN>\n```\n(--url is your web-backend address: port 8081 or via a reverse proxy).\n3. Within a minute the node goes online in the panel.\nStill offline — see 'Node shows as offline but is actually running'."
         },
         "alertSpam": {
           "q": "Alerts keep spamming about long-disconnected nodes",

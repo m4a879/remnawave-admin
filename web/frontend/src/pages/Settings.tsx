@@ -849,6 +849,48 @@ function IpWhitelistBlock() {
 }
 
 
+// Код-блок в ответе FAQ (моноширинный, с рамкой и копированием)
+function FaqCode({ code }: { code: string }) {
+  const [copied, setCopied] = useState(false)
+  return (
+    <div className="relative group">
+      <pre className="text-xs font-mono text-primary-100 bg-black/40 border border-[var(--glass-border)] rounded-lg p-3 pr-10 overflow-x-auto">
+        <code>{code}</code>
+      </pre>
+      <button
+        type="button"
+        onClick={() => { navigator.clipboard.writeText(code); setCopied(true); setTimeout(() => setCopied(false), 1500) }}
+        className="absolute top-2 right-2 p-1.5 rounded-md bg-white/5 hover:bg-white/10 text-dark-300 hover:text-white transition-colors"
+        aria-label="copy"
+      >
+        {copied ? <Check className="w-3.5 h-3.5 text-green-400" /> : <Copy className="w-3.5 h-3.5" />}
+      </button>
+    </div>
+  )
+}
+
+// Прозаический сегмент ответа с поддержкой инлайн-кода в одинарных backticks
+function FaqProse({ text }: { text: string }) {
+  const segs = text.split('`')
+  return (
+    <p className="text-sm text-dark-300 whitespace-pre-line leading-relaxed">
+      {segs.map((s, i) => (i % 2 === 1
+        ? <code key={i} className="px-1 py-0.5 rounded bg-white/5 text-primary-200 font-mono text-[12px]">{s}</code>
+        : <span key={i}>{s}</span>))}
+    </p>
+  )
+}
+
+// Ответ FAQ: ```…``` → код-блок, остальное → проза (с инлайн-кодом)
+function renderFaqAnswer(text: string) {
+  return text.split('```').map((part, i) => {
+    const trimmed = part.replace(/^\n+/, '').replace(/\n+$/, '')
+    if (i % 2 === 1) return <FaqCode key={i} code={trimmed} />
+    if (!trimmed) return null
+    return <FaqProse key={i} text={trimmed} />
+  })
+}
+
 // Разделы FAQ: порядок + иконка + ключи пунктов (тексты — в i18n settings.faq.*)
 const FAQ_CATEGORIES: { id: string; icon: React.ComponentType<{ className?: string }>; items: string[] }[] = [
   { id: 'setup', icon: Wrench, items: ['dockerNetwork', 'panelPort', 'update', 'backup', 'resourceLimits'] },
@@ -920,8 +962,8 @@ function FaqSection() {
                         )}
                       </button>
                       {open && (
-                        <div className="px-4 pb-4 text-sm text-dark-300 whitespace-pre-line border-t border-[var(--glass-border)]">
-                          <div className="pt-3">{item.a}</div>
+                        <div className="px-4 pb-4 border-t border-[var(--glass-border)]">
+                          <div className="pt-3 space-y-2.5">{renderFaqAnswer(item.a)}</div>
                         </div>
                       )}
                     </Card>
