@@ -213,6 +213,8 @@ async def send_rich_or_html(
                     payload["reply_markup"] = reply_markup
                 resp = await client.post(f"{api}/sendRichMessage", json=payload)
                 if resp.status_code == 200:
+                    logger.debug("sendRichMessage ok: chat_id=%s blocks=%d",
+                                 chat_id, len(rich_blocks))
                     return True
                 logger.warning("sendRichMessage rejected (%s): %s — fallback to HTML",
                                resp.status_code, resp.text[:200])
