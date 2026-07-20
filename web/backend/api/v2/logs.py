@@ -15,6 +15,7 @@ from pydantic import BaseModel
 from web.backend.api.deps import (
     require_permission,
     get_current_admin_ws,
+    ws_auth_invalid,
     AdminUser,
 )
 
@@ -395,6 +396,18 @@ async def stream_logs(
         logger.debug("Non-critical: %s", e)
         return
 
+    # RBAC: WS-стрим логов требует того же права logs:view, что и HTTP-эндпоинты
+    has_perm = (
+        admin.account_id is None  # legacy env admin = superadmin
+        or admin.role == "superadmin"
+        or admin.has_permission("logs", "view")
+    )
+    if not has_perm:
+        await websocket.accept(subprotocol=getattr(websocket.state, "auth_subprotocol", None))
+        await websocket.send_json({"type": "error", "message": "Permission denied: logs.view required"})
+        await websocket.close(code=4003, reason="permission_denied")
+        return
+
     file_info = LOG_FILES.get(file)
     if not file_info:
         await websocket.close(code=4000, reason="Unknown log source")
@@ -412,6 +425,10 @@ async def stream_logs(
             # Stream frontend logs from memory buffer
             last_idx = len(_frontend_log_buffer)
             while True:
+                reason = ws_auth_invalid(websocket)
+                if reason:
+                    await websocket.close(code=4001, reason=reason)
+                    return
                 try:
                     current_len = len(_frontend_log_buffer)
                     if current_len > last_idx:
@@ -467,6 +484,10 @@ async def stream_logs(
                 fp.seek(0, 2)  # Go to end
 
             while True:
+                reason = ws_auth_invalid(websocket)
+                if reason:
+                    await websocket.close(code=4001, reason=reason)
+                    return
                 try:
                     if fp and path.exists():
                         new_lines = fp.readlines()
@@ -506,6 +527,10 @@ async def stream_logs(
                                         # Restart with memory streaming
                                         last_idx = len(_frontend_log_buffer)
                                         while True:
+                                            reason = ws_auth_invalid(websocket)
+                                            if reason:
+                                                await websocket.close(code=4001, reason=reason)
+                                                return
                                             current_len = len(_frontend_log_buffer)
                                             if current_len > last_idx:
                                                 items = list(_frontend_log_buffer)

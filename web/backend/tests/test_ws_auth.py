@@ -1,7 +1,28 @@
-"""Tests for WebSocket handshake authentication (extract_ws_token)."""
+"""Tests for WebSocket handshake authentication (extract_ws_token) + Origin/re-auth."""
+import time
+from types import SimpleNamespace
+
 import pytest
 
-from web.backend.api.deps import extract_ws_token, WS_AUTH_SUBPROTOCOL
+from web.backend.api.deps import (
+    extract_ws_token,
+    WS_AUTH_SUBPROTOCOL,
+    ws_origin_allowed,
+    ws_auth_invalid,
+)
+from web.backend.core.security import create_access_token
+from web.backend.core.token_blacklist import token_blacklist
+from web.backend.core import sessions
+
+
+class FakeWsState:
+    """Fake websocket with headers + .state (для ws_origin_allowed / ws_auth_invalid)."""
+
+    def __init__(self, headers=None, auth_token=...):
+        self.headers = headers or {}
+        self.state = SimpleNamespace()
+        if auth_token is not ...:
+            self.state.auth_token = auth_token
 
 
 class FakeWebSocket:
@@ -103,3 +124,45 @@ class TestExtractWsToken:
         token, subprotocol = extract_ws_token(ws)
         assert token == "cookie.jwt"
         assert subprotocol is None
+
+
+class TestWsOriginAllowed:
+    def test_no_origin_native_client(self):
+        # Мобильное приложение / агент Origin не шлют — пропускаем
+        assert ws_origin_allowed(FakeWsState()) is True
+
+    def test_same_origin(self):
+        ws = FakeWsState(headers={"origin": "https://panel.example.com", "host": "panel.example.com"})
+        assert ws_origin_allowed(ws) is True
+
+    def test_cross_origin_blocked(self):
+        ws = FakeWsState(headers={"origin": "https://evil.com", "host": "panel.example.com"})
+        assert ws_origin_allowed(ws) is False
+
+    def test_configured_cors_origin(self):
+        # http://localhost:3000 — в дефолтном WEB_CORS_ORIGINS
+        ws = FakeWsState(headers={"origin": "http://localhost:3000", "host": "unrelated"})
+        assert ws_origin_allowed(ws) is True
+
+
+class TestWsAuthInvalid:
+    def test_no_token_stashed(self):
+        assert ws_auth_invalid(FakeWsState()) is None
+
+    def test_valid_token(self):
+        tok = create_access_token("pwd:ok", "ok", "password")
+        assert ws_auth_invalid(FakeWsState(auth_token=tok)) is None
+
+    def test_garbage_token_expired(self):
+        assert ws_auth_invalid(FakeWsState(auth_token="not.a.jwt")) == "token expired"
+
+    def test_blacklisted_token(self):
+        tok = create_access_token("pwd:bl", "bl", "password")
+        token_blacklist.add(tok, time.time() + 3600)
+        assert ws_auth_invalid(FakeWsState(auth_token=tok)) == "token revoked"
+
+    def test_session_revoked(self):
+        sid = sessions.new_sid()
+        tok = create_access_token("pwd:sess", "sess", "password", sid=sid)
+        sessions._mark_revoked_mem(sid, time.time() + 3600)
+        assert ws_auth_invalid(FakeWsState(auth_token=tok)) == "session revoked"

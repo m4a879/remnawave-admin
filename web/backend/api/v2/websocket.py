@@ -7,7 +7,7 @@ from typing import Set, Dict, Any
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
-from web.backend.api.deps import get_current_admin_ws, AdminUser
+from web.backend.api.deps import get_current_admin_ws, ws_auth_invalid, AdminUser
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -126,6 +126,11 @@ async def websocket_endpoint(websocket: WebSocket):
 
         # Слушаем сообщения от клиента
         while True:
+            # Перепроверка авторизации: рвём push-поток после logout/отзыва (H1)
+            reason = ws_auth_invalid(websocket)
+            if reason:
+                await websocket.close(code=4001, reason=reason)
+                break
             try:
                 data = await asyncio.wait_for(
                     websocket.receive_text(),

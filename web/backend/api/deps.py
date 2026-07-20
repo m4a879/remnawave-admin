@@ -4,6 +4,7 @@ import ipaddress
 import logging
 from dataclasses import dataclass, field
 from typing import Optional, List, Tuple, Set
+from urllib.parse import urlparse
 
 from fastapi import Depends, HTTPException, Request, status, Query, WebSocket
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -330,6 +331,53 @@ def extract_ws_token(websocket: WebSocket) -> Tuple[Optional[str], Optional[str]
     return websocket.query_params.get("token"), None
 
 
+def ws_origin_allowed(websocket: WebSocket) -> bool:
+    """CSWSH-защита: браузерный WS-апгрейд с чужого Origin отклоняется.
+
+    Нативные клиенты (мобильное приложение, агент) заголовок Origin не шлют —
+    их пропускаем. Браузер шлёт Origin всегда: разрешаем, только если он
+    совпадает с запрошенным хостом (same-origin) или входит в WEB_CORS_ORIGINS.
+    """
+    origin = websocket.headers.get("origin")
+    if not origin:
+        return True  # нативный клиент без Origin
+    allowed = get_web_settings().cors_origins
+    if "*" in allowed:
+        return True
+    origin_l = origin.rstrip("/").lower()
+    if any(origin_l == a.rstrip("/").lower() for a in allowed):
+        return True
+    o_host = (urlparse(origin).hostname or "").lower()
+    req_host = (
+        websocket.headers.get("x-forwarded-host")
+        or websocket.headers.get("host")
+        or ""
+    ).split(",")[0].split(":")[0].strip().lower()
+    return bool(o_host) and o_host == req_host
+
+
+def ws_auth_invalid(websocket: WebSocket) -> Optional[str]:
+    """Перепроверка stashed-токена в долгоживущих WS-циклах.
+
+    Возвращает причину, если токен больше не валиден (протух / отозван /
+    сессия отозвана), иначе None. Если токен не сохранён — None (не рвём поток).
+    Позволяет закрыть root-терминал/лог-стрим после logout/отзыва сессии,
+    а не только на handshake.
+    """
+    token = getattr(websocket.state, "auth_token", None)
+    if not token:
+        return None
+    if token_blacklist.is_blacklisted(token):
+        return "token revoked"
+    payload = decode_token(token, token_type="access")
+    if not payload:
+        return "token expired"
+    from web.backend.core.sessions import is_session_revoked
+    if is_session_revoked(payload.get("sid", "")):
+        return "session revoked"
+    return None
+
+
 async def get_current_admin_ws(
     websocket: WebSocket,
     token: Optional[str] = None,
@@ -338,13 +386,20 @@ async def get_current_admin_ws(
 
     Если token не передан явно, извлекается из handshake (см. extract_ws_token).
     Сохраняет websocket.state.auth_subprotocol — эндпоинт ОБЯЗАН передать его
-    в websocket.accept(subprotocol=...).
+    в websocket.accept(subprotocol=...). Также сохраняет websocket.state.auth_token
+    для перепроверки в циклах (см. ws_auth_invalid).
     """
+    if not ws_origin_allowed(websocket):
+        await websocket.close(code=4403, reason="Origin not allowed")
+        raise HTTPException(status_code=403, detail="Origin not allowed")
+
     if token is None:
         token, subprotocol = extract_ws_token(websocket)
         websocket.state.auth_subprotocol = subprotocol
     else:
         websocket.state.auth_subprotocol = None
+
+    websocket.state.auth_token = token
 
     if not token:
         await websocket.close(code=4001, reason="Missing token")
