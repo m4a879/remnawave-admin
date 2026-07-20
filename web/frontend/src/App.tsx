@@ -20,6 +20,7 @@ import Layout from './components/layout/Layout'
 import Login from './pages/Login'
 import Dashboard from './pages/Dashboard'
 import ResetPassword from './pages/ResetPassword'
+import OAuthCallback from './pages/OAuthCallback'
 
 // Lazy-loaded pages
 const Users = lazy(() => import('./pages/Users'))
@@ -38,7 +39,9 @@ const Analytics = lazy(() => import('./pages/Analytics'))
 const Automations = lazy(() => import('./pages/automations'))
 const Notifications = lazy(() => import('./pages/Notifications'))
 const MailServer = lazy(() => import('./pages/MailServer'))
-const Billing = lazy(() => import('./pages/Billing'))
+const Finance = lazy(() => import('./pages/Finance'))
+const Dns = lazy(() => import('./pages/Dns'))
+const BsCheck = lazy(() => import('./pages/BsCheck'))
 const Backup = lazy(() => import('./pages/Backup'))
 const ApiKeys = lazy(() => import('./pages/ApiKeys'))
 const Reports = lazy(() => import('./pages/Reports'))
@@ -50,7 +53,6 @@ const BedolagaCustomerDetail = lazy(() => import('./pages/bedolaga/BedolagaCusto
 const BedolagaPromo = lazy(() => import('./pages/bedolaga/BedolagaPromo'))
 const BedolagaMarketing = lazy(() => import('./pages/bedolaga/BedolagaMarketing'))
 const BedolagaReferrals = lazy(() => import('./pages/bedolaga/BedolagaReferrals'))
-const XrayEditor = lazy(() => import('./pages/xray/XrayEditor'))
 const NotFound = lazy(() => import('./pages/NotFound'))
 
 // Plugin UI route registry — see web/frontend/src/plugins/registry.tsx
@@ -93,7 +95,10 @@ function ProtectedShell() {
             <Route path="/admin/plugins" element={<AdminPlugins />} />
             <Route path="/logs" element={<SystemLogs />} />
             <Route path="/analytics" element={<Analytics />} />
-            <Route path="/billing" element={<Billing />} />
+            <Route path="/finance" element={<Finance />} />
+            <Route path="/dns" element={<Dns />} />
+            <Route path="/bscheck" element={<BsCheck />} />
+            <Route path="/billing" element={<Navigate to="/finance" replace />} />
             <Route path="/backups" element={<Backup />} />
             <Route path="/api-keys" element={<ApiKeys />} />
             <Route path="/reports" element={<Reports />} />
@@ -222,18 +227,7 @@ export default function App() {
             {/* Public routes */}
             <Route path="/login" element={<Login />} />
             <Route path="/reset-password" element={<ResetPassword />} />
-
-            {/* Full-screen protected pages (own chrome, no admin sidebar/header) */}
-            <Route
-              path="/resources/xray"
-              element={
-                <ProtectedRoute>
-                  <Suspense fallback={null}>
-                    <XrayEditor />
-                  </Suspense>
-                </ProtectedRoute>
-              }
-            />
+            <Route path="/oauth/callback" element={<OAuthCallback />} />
 
             {/* Standard protected pages (inside admin Layout) */}
             <Route path="/*" element={<ProtectedShell />} />

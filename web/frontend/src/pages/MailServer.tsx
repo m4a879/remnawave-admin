@@ -12,7 +12,7 @@ import { toast } from 'sonner'
 import {
   Globe, Send, Inbox, ListOrdered, Plus, Trash2, RefreshCw,
   CheckCircle2, XCircle, Copy, Mail, MailOpen, X, Ban,
-  RotateCcw, KeyRound, Pencil,
+  RotateCcw, KeyRound, Pencil, Gauge,
 } from '@/components/brand/icons'
 
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -278,6 +278,8 @@ function DomainCard({
   const queryClient = useQueryClient()
   const [editingFromName, setEditingFromName] = useState(false)
   const [fromNameValue, setFromNameValue] = useState(domain.from_name || '')
+  const [editingLimit, setEditingLimit] = useState(false)
+  const [limitValue, setLimitValue] = useState<number>(domain.max_send_per_hour)
   const dnsCount = [domain.dns_mx_ok, domain.dns_spf_ok, domain.dns_dkim_ok, domain.dns_dmarc_ok, domain.dns_ptr_ok].filter(Boolean).length
 
   const updateFromNameMut = useMutation({
@@ -286,6 +288,16 @@ function DomainCard({
       queryClient.invalidateQueries({ queryKey: ['mailserver-domains'] })
       setEditingFromName(false)
       toast.success(t('mailServer.senderNameUpdated'))
+    },
+    onError: (err: Error & { response?: { data?: { detail?: string } } }) => toast.error(err.response?.data?.detail || t('common.error')),
+  })
+
+  const updateLimitMut = useMutation({
+    mutationFn: () => mailserverApi.updateDomain(domain.id, { max_send_per_hour: Math.max(0, Math.floor(Number(limitValue) || 0)) } as any),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['mailserver-domains'] })
+      setEditingLimit(false)
+      toast.success(t('mailServer.limitUpdated'))
     },
     onError: (err: Error & { response?: { data?: { detail?: string } } }) => toast.error(err.response?.data?.detail || t('common.error')),
   })
@@ -357,6 +369,44 @@ function DomainCard({
                 {canEdit && (
                   <Button size="sm" variant="ghost" className="h-6 w-6 p-0" onClick={() => setEditingFromName(true)}>
                     <Mail className="w-3.5 h-3.5" />
+                  </Button>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Hourly send limit (0 = inherit the global setting) */}
+        <div className="flex items-center gap-3 mt-3 p-3 rounded-lg bg-[var(--glass-bg-hover)]/30 border border-[var(--glass-border)]">
+          <div className="flex-1 min-w-0">
+            <span className="text-xs text-muted-foreground">{t('mailServer.domainLimit')}:</span>
+            {editingLimit ? (
+              <div className="flex flex-wrap items-center gap-2 mt-1">
+                <Input
+                  type="number"
+                  min={0}
+                  value={limitValue}
+                  onChange={(e) => setLimitValue(Number(e.target.value))}
+                  className="h-8 text-sm w-28"
+                />
+                <Button size="sm" variant="outline" className="h-8 shrink-0" onClick={() => updateLimitMut.mutate()} disabled={updateLimitMut.isPending}>
+                  <CheckCircle2 className="w-3.5 h-3.5" />
+                </Button>
+                <Button size="sm" variant="ghost" className="h-8 shrink-0" onClick={() => { setEditingLimit(false); setLimitValue(domain.max_send_per_hour) }}>
+                  <X className="w-3.5 h-3.5" />
+                </Button>
+                <span className="text-xs text-dark-300 w-full sm:w-auto">{t('mailServer.domainLimitHint')}</span>
+              </div>
+            ) : (
+              <div className="flex items-center gap-2 mt-0.5">
+                <span className="text-sm text-white">
+                  {domain.max_send_per_hour > 0
+                    ? t('mailServer.domainLimitValue', { n: domain.max_send_per_hour })
+                    : <span className="text-dark-300 italic">{t('mailServer.domainLimitInherit')}</span>}
+                </span>
+                {canEdit && (
+                  <Button size="sm" variant="ghost" className="h-6 w-6 p-0" onClick={() => setEditingLimit(true)}>
+                    <Gauge className="w-3.5 h-3.5" />
                   </Button>
                 )}
               </div>

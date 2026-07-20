@@ -372,3 +372,31 @@ class TestCollectorStats:
         assert "queue" in data
         assert "processing" in data
         assert data["queue"]["health"] in ("idle", "ok", "busy", "overloaded")
+
+
+class TestSharedHwidUserUuids:
+    """_shared_hwid_user_uuids — разворачивание групп get_shared_hwids() для HWID-скана.
+
+    Регрессия C3: скан-цикл читал r["user_uuid"] из группированного ответа
+    ({hwid, users: [...]}) — ключа там нет, множество всегда выходило пустым
+    и оффлайн-абузеры никогда не попадали в очередь детектора.
+    """
+
+    def test_extracts_uuids_from_groups(self):
+        groups = [
+            {"hwid": "HW1", "user_count": 2, "users": [
+                {"uuid": "U1", "username": "a"},
+                {"uuid": "U2", "username": "b"},
+            ]},
+            {"hwid": "HW2", "user_count": 2, "users": [
+                {"uuid": "U2", "username": "b"},
+                {"uuid": "U3", "username": "c"},
+            ]},
+        ]
+        assert collector._shared_hwid_user_uuids(groups) == {"U1", "U2", "U3"}
+
+    def test_empty_and_malformed_groups(self):
+        assert collector._shared_hwid_user_uuids([]) == set()
+        assert collector._shared_hwid_user_uuids(None) == set()
+        assert collector._shared_hwid_user_uuids([{"hwid": "HW1"}]) == set()
+        assert collector._shared_hwid_user_uuids([{"hwid": "HW1", "users": [{"username": "x"}]}]) == set()

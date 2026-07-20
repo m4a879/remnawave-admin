@@ -34,6 +34,32 @@ export interface ImportUsersResult {
   errors: Array<{ username: string; error: string }>
 }
 
+export interface BackupPreview {
+  filename: string
+  size_bytes: number
+  created_at: string
+  type: string
+  exported_at?: string
+  schema_version?: string
+  settings_count?: number
+  pg_version?: string
+  error?: string
+}
+
+export interface BackupStatus {
+  backup_size_bytes: number
+  file_count: number
+  disk_free_bytes: number
+  disk_total_bytes: number
+  last_backup: {
+    filename: string
+    backup_type: string
+    size_bytes: number
+    status: string
+    created_at: string
+  } | null
+}
+
 export const backupApi = {
   listFiles: async (): Promise<BackupFile[]> => {
     const { data } = await client.get('/backups/')
@@ -53,6 +79,16 @@ export const backupApi = {
       },
     })
     return Array.isArray(data) ? data : []
+  },
+
+  previewBackup: async (filename: string): Promise<BackupPreview> => {
+    const { data } = await client.get(`/backups/preview/${filename}`)
+    return data
+  },
+
+  getStatus: async (): Promise<BackupStatus> => {
+    const { data } = await client.get('/backups/status')
+    return data
   },
 
   createDatabaseBackup: async (): Promise<BackupResult> => {

@@ -52,7 +52,7 @@ SUPERADMIN_PERMISSIONS: Set[Tuple[str, str]] = {
     ("logs", "view"), ("logs", "edit"),
     ("notifications", "view"), ("notifications", "create"), ("notifications", "edit"), ("notifications", "delete"),
     ("resources", "view"), ("resources", "create"), ("resources", "edit"), ("resources", "delete"),
-    ("billing", "view"), ("billing", "create"), ("billing", "edit"), ("billing", "delete"),
+    ("finance", "view"), ("finance", "create"), ("finance", "edit"), ("finance", "delete"),
     ("reports", "view"), ("reports", "create"),
     ("mailserver", "view"), ("mailserver", "create"), ("mailserver", "edit"), ("mailserver", "delete"),
     ("backups", "view"), ("backups", "create"), ("backups", "delete"),

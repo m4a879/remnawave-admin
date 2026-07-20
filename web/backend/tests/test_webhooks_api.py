@@ -10,6 +10,14 @@ from web.backend.api.deps import get_current_admin
 from .conftest import make_admin
 
 
+@pytest.fixture(autouse=True)
+def _allow_private_webhook_urls(monkeypatch):
+    # Тесты гоняют example.com/приватные URL и проверяют HMAC/доставку, а не
+    # SSRF-фильтр (для него — test_webhook_ssrf.py). В песочнице example.com
+    # резолвится в 198.18/15 (private), поэтому разрешаем приватные URL здесь.
+    monkeypatch.setattr("web.backend.core.webhook_security.WEBHOOK_ALLOW_PRIVATE_URL", True)
+
+
 MOCK_WEBHOOK_ROW = {
     "id": 1,
     "name": "My Webhook",

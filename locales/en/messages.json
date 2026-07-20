@@ -24,7 +24,6 @@
     "nodes": "🛰 Nodes",
     "hosts": "🖥 Hosts",
     "subs": "🧾 Subscriptions",
-    "tokens": "🔑 API tokens",
     "templates": "📑 Templates",
     "snippets": "✂️ Snippets",
     "configs": "🧩 Configs",
@@ -199,7 +198,6 @@
     "hosts": "🖥 Hosts: total *{total}* (enabled: `{enabled}`, disabled: `{disabled}`)",
     "nodes_detailed": "🛰 Nodes: total *{total}* (enabled: `{enabled}`, disabled: `{disabled}`, online: `{online}`)",
     "templates": "📑 Templates: *{count}*",
-    "tokens": "🔑 API tokens: *{count}*",
     "snippets": "✂️ Snippets: *{count}*",
     "traffic_stats": "📶 Traffic statistics",
     "extended_stats": "📊 Extended statistics",
@@ -590,21 +588,6 @@
     "search_no_results": "🙅 No subscriptions found for query: <code>{query}</code>",
     "search_results": "🔍 Found subscriptions: {count}\n\nQuery: <code>{query}</code>",
     "search_results_limited": "⚠️ Showing only {shown} of {total} results."
-  },
-  "token": {
-    "usage": "🔑 Create: /token <name>. List: /tokens.",
-    "created": "✅ API token created:\n🆔 UUID: {uuid}\n🔑 Token: {token}\nSave it now.",
-    "not_found": "🙅 Token not found.",
-    "delete": "Delete",
-    "delete_confirm": "⚠️ Are you sure you want to delete token <b>{name}</b>?\n\nThis action cannot be undone!",
-    "delete_confirm_yes": "✅ Yes, delete",
-    "delete_confirm_no": "❌ Cancel",
-    "deleted": "🗑 Token deleted.",
-    "list_title": "🔑 API tokens • total {total}",
-    "list_item": "{name}: {token} (uuid: {uuid})",
-    "list_more": "…and {count} more",
-    "list_hint": "ℹ️ Create: /token <name>. Delete: buttons.",
-    "list_empty": "No API tokens."
   },
   "template": {
     "usage": "📑 Details: /template <uuid>. List: /templates.",
@@ -1027,9 +1010,17 @@
     "traffic_reset_suffix": "\n\n🔄 <i>Traffic reset ({name})</i>",
     "reset_error": "❌ Reset error: {e}"
   },
+  "fin": {
+    "invalid_format": "Invalid button format",
+    "unknown_action": "Unknown action: {action}",
+    "error": "Error: {e}",
+    "no_permission": "Missing finance:edit permission",
+    "not_found": "Record not found (deleted?)",
+    "paid_ok": "✅ {name}: payment recorded. Next due: {next_due}",
+    "skip_ok": "⏭ {name}: cycle skipped. Next due: {next_due}"
+  },
   "notify": {
     "fallback": "ℹ️ <b>Notification:</b> {event}",
-
     "user": {
       "fallback": "✏️ <b>User updated</b>",
       "title": {
@@ -1082,7 +1073,6 @@
       "subscription_link": "🔗 Link: <code>{url}</code>",
       "external_squad": "External: {uuid}..."
     },
-
     "node": {
       "fallback": "ℹ️ <b>Node event: {event}</b>",
       "title": {
@@ -1102,7 +1092,6 @@
         "changes": "📋 <b>Changes</b>"
       }
     },
-
     "service": {
       "fallback": "ℹ️ <b>Service event: {event}</b>",
       "title": {
@@ -1114,7 +1103,8 @@
       "login": {
         "username": "👤 <b>Username:</b> <code>{username}</code>",
         "ip": "🌐 <b>IP:</b> <code>{ip}</code>",
-        "user_agent": "🔍 <b>User Agent:</b> <code>{user_agent}</code>"
+        "user_agent": "🔍 <b>User Agent:</b> <code>{user_agent}</code>",
+        "description": "💬 <b>Description:</b> <code>{description}</code>"
       },
       "panel_unavailable": {
         "error_type": "⚠️ <b>Error:</b> <code>{error_type}</code>",
@@ -1123,7 +1113,6 @@
         "last_check": "🕒 <b>Last check:</b> {last_check}"
       }
     },
-
     "hwid": {
       "fallback": "💻 <b>HWID event: {event}</b>",
       "title": {
@@ -1153,13 +1142,11 @@
         "fallback": "HWID: {event}"
       }
     },
-
     "error": {
       "title": "⚠️ <b>System error</b>",
       "type": "<b>Type:</b> <code>{event}</code>",
       "message": "<b>Message:</b> <code>{message}</code>"
     },
-
     "crm": {
       "fallback": "💰 <b>CRM event: {event}</b>",
       "title": {
@@ -1189,7 +1176,6 @@
         "amount": "Amount"
       }
     },
-
     "violation": {
       "title": "🚨 <b>LIMIT VIOLATOR</b>",
       "email": "📧 Email: <code>{email}</code>",
@@ -1227,7 +1213,6 @@
         "unknown": "Unknown"
       }
     },
-
     "push": {
       "node_fallback": "Node event",
       "service_title": "Service: {event}",

@@ -39,10 +39,29 @@ WEBHOOK_SIGNATURE_TOLERANCE_SEC = 300  # documented replay window
 
 _PRIVATE_NETWORKS = [
     ipaddress.ip_network(n) for n in (
+        "0.0.0.0/8",             # "this" network, incl. 0.0.0.0
         "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16",
-        "127.0.0.0/8", "169.254.0.0/16", "::1/128", "fc00::/7", "fe80::/10",
+        "127.0.0.0/8", "169.254.0.0/16",
+        "100.64.0.0/10",         # CGNAT (RFC 6598)
+        "::1/128", "fc00::/7", "fe80::/10",
+        "::ffff:0:0/96",         # IPv4-mapped IPv6 (::ffff:a.b.c.d)
+        "::/128",                # unspecified
     )
 ]
+
+
+def _ip_is_blocked(addr) -> bool:
+    """True если адрес приватный/служебный (SSRF-опасный).
+
+    Нормализует IPv4-mapped IPv6 (::ffff:169.254.169.254 → 169.254.169.254),
+    иначе такой адрес обходил бы блок-лист.
+    """
+    if isinstance(addr, ipaddress.IPv6Address) and addr.ipv4_mapped is not None:
+        addr = addr.ipv4_mapped
+    if (addr.is_private or addr.is_loopback or addr.is_link_local
+            or addr.is_reserved or addr.is_unspecified or addr.is_multicast):
+        return True
+    return any(addr in net for net in _PRIVATE_NETWORKS)
 
 
 def check_url_safety(url: str) -> Tuple[bool, Optional[str]]:
@@ -76,9 +95,8 @@ def check_url_safety(url: str) -> Tuple[bool, Optional[str]]:
             addr = ipaddress.ip_address(h)
         except ValueError:
             continue
-        for net in _PRIVATE_NETWORKS:
-            if addr in net:
-                return False, f"URL resolves to private address {addr}"
+        if _ip_is_blocked(addr):
+            return False, f"URL resolves to blocked address {addr}"
     return True, None
 
 
@@ -210,6 +228,13 @@ async def deliver_once(
     event: str, payload: dict,
 ) -> Tuple[bool, int, Optional[str], Optional[str], int]:
     """Execute one HTTP attempt. Returns (success, status_code, response_body, error, duration_ms)."""
+    # SSRF-ревалидация прямо перед доставкой: ловит DNS-rebind, когда URL был
+    # безопасен при создании, а к моменту отправки резолвится в приватный адрес.
+    ok, reason = check_url_safety(url)
+    if not ok:
+        logger.warning("Webhook %s blocked by SSRF re-check: %s", webhook_id, reason)
+        return (False, 0, None, f"blocked: {reason}", 0)
+
     body = json.dumps({"event": event, "data": payload}, default=str)
     headers = {"Content-Type": "application/json", "X-Webhook-Event": event}
     if secret:

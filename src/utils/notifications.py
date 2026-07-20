@@ -519,15 +519,21 @@ async def send_service_notification(
 
         # Дополнительная информация
         if event == "service.login_attempt_failed" or event == "service.login_attempt_success":
-            username = event_data.get("username", "—")
-            ip = event_data.get("ip", "—")
-            user_agent = event_data.get("userAgent", "—")
+            # Remnawave вкладывает поля под data.loginAttempt (не на верхнем уровне)
+            la = event_data.get("loginAttempt")
+            la = la if isinstance(la, dict) else event_data
+            username = la.get("username") or "—"
+            ip = la.get("ip") or "—"
+            user_agent = la.get("userAgent") or "—"
+            description = la.get("description") or "—"
 
             lines.append(tr("notify.service.login.username", username=_esc(username)))
             if ip != "—":
                 lines.append(tr("notify.service.login.ip", ip=_esc(ip)))
             if user_agent != "—":
-                lines.append(tr("notify.service.login.user_agent", user_agent=_esc(user_agent[:50])))
+                lines.append(tr("notify.service.login.user_agent", user_agent=_esc(user_agent[:200])))
+            if description != "—":
+                lines.append(tr("notify.service.login.description", description=_esc(description)))
         elif event == "panel.unavailable":
             error_type = event_data.get("error_type", "—")
             error_message = event_data.get("error_message", "—")

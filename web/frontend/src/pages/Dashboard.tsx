@@ -16,12 +16,12 @@ import {
   Wifi,
   Database,
   Globe,
-  CreditCard,
   CalendarClock,
   ChevronDown,
   ChevronUp,
   Tag,
   RotateCcw,
+  LayoutGrid,
 } from '@/components/brand/icons'
 import {
   DndContext,
@@ -35,12 +35,20 @@ import {
 } from '@dnd-kit/core'
 import {
   SortableContext,
-  verticalListSortingStrategy,
+  rectSortingStrategy,
   arrayMove,
   sortableKeyboardCoordinates,
 } from '@dnd-kit/sortable'
 import { SortableSection } from '@/components/SortableSection'
 import { useOrderPreference } from '@/lib/useOrderPreference'
+import { useWidgetVisibility } from '@/lib/useWidgetVisibility'
+import { FinanceWidget, BedolagaWidget, ViolationsWidget, BackupWidget, NodeCostsWidget } from '@/components/dashboard/ExtraWidgets'
+import { useWidgetSize, SIZE_SPAN } from '@/lib/useWidgetSize'
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuTrigger, DropdownMenuItem,
+  DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuCheckboxItem,
+} from '@/components/ui/dropdown-menu'
+import { backupApi } from '@/api/backup'
 import {
   BarChart,
   Bar,
@@ -50,13 +58,9 @@ import {
   Tooltip as RechartsTooltip,
   ResponsiveContainer,
   Cell,
-  LineChart,
-  Line,
-  AreaChart,
-  Area,
 } from 'recharts'
+import { InteractiveChart } from '@/components/charts/InteractiveChart'
 import client from '../api/client'
-import { billingApi } from '../api/billing'
 import { auditApi, type AuditLogEntry } from '../api/audit'
 import { usePermissionStore } from '../store/permissionStore'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -572,7 +576,6 @@ function GrowthTrendsCard({
   onMetricChange: (m: string) => void
 }) {
   const { t } = useTranslation()
-  const chart = useChartTheme()
   const formatBytesLocal = createFormatBytes(t)
 
   const metricOptions = [
@@ -606,33 +609,16 @@ function GrowthTrendsCard({
               <span className="text-xs text-muted-foreground">{t('dashboard.totalGrowth')}:</span>
               <span className="text-sm font-semibold text-primary-400">{formatValue(trends.total_growth)}</span>
             </div>
-            <ResponsiveContainer width="100%" height={180}>
-              <AreaChart data={trends.series}>
-                <defs>
-                  <linearGradient id="trendGrad" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor={chart.accentColor} stopOpacity={0.35} />
-                    <stop offset="100%" stopColor={chart.accentColor} stopOpacity={0.02} />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid strokeDasharray="3 3" stroke={chart.grid} vertical={false} />
-                <XAxis dataKey="date" stroke={chart.axis} fontSize={10} tickLine={false} axisLine={false} tickFormatter={(d) => { const p = d.split('-'); return `${p[2]}.${p[1]}` }} />
-                <YAxis stroke={chart.axis} fontSize={10} tickLine={false} axisLine={false} tickFormatter={(v) => metric === 'traffic' ? createFormatBytesShort(t)(v) : v} />
-                <RechartsTooltip content={(props: any) => {
-                  if (!props.active || !props.payload?.length) return null
-                  return (
-                    <div style={chart.tooltipStyle} className="px-3 py-2.5 rounded-xl shadow-xl">
-                      <p className={cn("text-[10px] uppercase tracking-wider mb-1", chart.tooltipMutedClass)}>{props.label}</p>
-                      {props.payload.map((entry: any, i: number) => (
-                        <p key={i} className="text-xs font-medium" style={{ color: entry.color }}>
-                          {entry.name}: {formatValue(entry.value)}
-                        </p>
-                      ))}
-                    </div>
-                  )
-                }} />
-                <Area type="monotone" dataKey="value" name={metricOptions.find((o) => o.value === metric)?.label || metric} stroke={chart.accentColor} fill="url(#trendGrad)" strokeWidth={1.5} />
-              </AreaChart>
-            </ResponsiveContainer>
+            <InteractiveChart
+              data={trends.series}
+              xKey="date"
+              height={180}
+              exportName={`dashboard-trend-${metric}`}
+              xFormatter={(d) => { const p = d.split('-'); return `${p[2]}.${p[1]}` }}
+              yFormatter={(v) => (metric === 'traffic' ? createFormatBytesShort(t)(v) : String(v))}
+              tooltipFormatter={(v) => formatValue(v as number)}
+              series={[{ key: 'value', name: metricOptions.find((o) => o.value === metric)?.label || metric }]}
+            />
           </>
         ) : (
           <div className="h-[180px] flex items-center justify-center">
@@ -1009,102 +995,6 @@ function SystemStatusCard({
               <span>{t('dashboard.panelSince')}: {formatDateShortUtil(panelRecap.initDate)}</span>
             )}
           </div>
-        )}
-      </CardContent>
-    </Card>
-  )
-}
-
-// ── BillingSummaryCard ───────────────────────────────────────────
-
-function BillingSummaryCard({ loading }: { loading: boolean }) {
-  const { t } = useTranslation()
-  const navigate = useNavigate()
-  const { formatCurrency, formatDate } = useFormatters()
-
-  const { data: billing, isLoading } = useQuery({
-    queryKey: ['billingSummary'],
-    queryFn: billingApi.getSummary,
-    refetchInterval: 120000,
-    staleTime: 60_000,
-    retry: false,
-  })
-
-  const isCardLoading = loading || isLoading
-
-  return (
-    <Card
-      className="animate-fade-in-up cursor-pointer hover:shadow-glow-teal transition-shadow"
-      style={{ animationDelay: '0.35s' }}
-      onClick={() => navigate('/billing')}
-    >
-      <CardHeader className="pb-2">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <CardTitle className="text-base md:text-lg">{t('dashboard.billing')}</CardTitle>
-            <InfoTooltip text={t('dashboard.billingTooltip')} side="right" />
-          </div>
-          <div
-            className="p-2 rounded-lg"
-            style={{
-              background: 'rgba(var(--glow-rgb), 0.15)',
-              border: '1px solid rgba(var(--glow-rgb), 0.3)',
-            }}
-          >
-            <CreditCard className="w-5 h-5 text-primary-400" />
-          </div>
-        </div>
-      </CardHeader>
-      <CardContent>
-        {isCardLoading ? (
-          <div className="space-y-3">
-            <Skeleton className="h-8 w-24" />
-            <Skeleton className="h-4 w-full" />
-            <Skeleton className="h-4 w-3/4" />
-          </div>
-        ) : billing ? (
-          <div className="space-y-3">
-            <div>
-              <p className="text-xs text-muted-foreground">{t('dashboard.billingMonthly')}</p>
-              <p className="text-xl font-bold text-white">
-                {formatCurrency(Number(billing.current_month_payments) || 0)}
-              </p>
-            </div>
-            <Separator />
-            <div className="space-y-1.5">
-              <div className="flex items-center justify-between bg-[var(--glass-bg)] rounded-lg px-3 py-1.5 border border-[var(--glass-border)]">
-                <span className="text-xs text-muted-foreground">{t('dashboard.billingProviders')}</span>
-                <span className="text-xs text-white font-mono">{billing.total_providers}</span>
-              </div>
-              <div className="flex items-center justify-between bg-[var(--glass-bg)] rounded-lg px-3 py-1.5 border border-[var(--glass-border)]">
-                <span className="text-xs text-muted-foreground">{t('dashboard.billingNodes')}</span>
-                <span className="text-xs text-white font-mono">{billing.total_billing_nodes}</span>
-              </div>
-              <div className="flex items-center justify-between bg-[var(--glass-bg)] rounded-lg px-3 py-1.5 border border-[var(--glass-border)]">
-                <span className="text-xs text-muted-foreground">{t('dashboard.billingTotalSpent')}</span>
-                <span className="text-xs text-primary-400 font-semibold font-mono">
-                  {formatCurrency(Number(billing.total_spent) || 0)}
-                </span>
-              </div>
-              {billing.next_payment_date && (
-                <div className="flex items-center justify-between bg-[var(--glass-bg)] rounded-lg px-3 py-1.5 border border-[var(--glass-border)]">
-                  <span className="text-xs text-muted-foreground flex items-center gap-1">
-                    <CalendarClock className="w-3 h-3" />
-                    {t('dashboard.billingNextPayment')}
-                  </span>
-                  <span className="text-xs text-primary-400 font-mono">
-                    {formatDate(billing.next_payment_date)}
-                  </span>
-                </div>
-              )}
-            </div>
-            <Separator />
-            <span className="text-xs text-muted-foreground group-hover:text-primary-400 flex items-center gap-1 transition-colors duration-200">
-              {t('dashboard.details')} <ExternalLink className="w-3 h-3" />
-            </span>
-          </div>
-        ) : (
-          <p className="text-sm text-muted-foreground">{t('common.noData')}</p>
         )}
       </CardContent>
     </Card>
@@ -1886,6 +1776,14 @@ export default function Dashboard() {
   const { formatBytes: formatBytesUtil } = useFormatters()
   const formatBytes = (bytes: number | null | undefined) => (!bytes || bytes <= 0) ? `0 ${t('common.bytes.b')}` : formatBytesUtil(bytes)
   const formatBytesShort = createFormatBytesShort(t)
+  const backupAgo = (iso?: string | null): string => {
+    if (!iso) return '—'
+    const diff = Math.floor((Date.now() - new Date(iso).getTime()) / 1000)
+    if (diff < 60) return `${diff}${t('dashboard.backupUnitS', 's')}`
+    if (diff < 3600) return `${Math.floor(diff / 60)}${t('dashboard.backupUnitM', 'm')}`
+    if (diff < 86400) return `${Math.floor(diff / 3600)}${t('dashboard.backupUnitH', 'h')}`
+    return `${Math.floor(diff / 86400)}${t('dashboard.backupUnitD', 'd')}`
+  }
 
   const canViewUsers = hasPermission('users', 'view')
   const canViewNodes = hasPermission('nodes', 'view')
@@ -1894,23 +1792,42 @@ export default function Dashboard() {
   const canViewBilling = hasPermission('billing', 'view')
   const canViewAudit = hasPermission('audit', 'view')
   const canViewFleet = hasPermission('fleet', 'view')
+  const canViewBackups = hasPermission('backups', 'view')
 
-  // Widget ordering (DnD reorder, persists to localStorage)
-  const DASHBOARD_WIDGETS = ['stats', 'traffic', 'connections', 'load', 'activity', 'system'] as const
+  // Реестр виджетов: базовые (всегда) + из других модулей (permission + скрыты по умолчанию)
+  const WIDGET_REGISTRY: { id: string; perm?: [string, string]; defaultHidden?: boolean }[] = [
+    { id: 'stats' }, { id: 'traffic' }, { id: 'connections' },
+    { id: 'load' }, { id: 'activity' }, { id: 'system' },
+    { id: 'finance', perm: ['finance', 'view'], defaultHidden: true },
+    { id: 'bedolaga', perm: ['bedolaga', 'view'], defaultHidden: true },
+    { id: 'violations', perm: ['violations', 'view'], defaultHidden: true },
+    { id: 'backups', perm: ['backups', 'view'], defaultHidden: true },
+    { id: 'nodecosts', perm: ['finance', 'view'], defaultHidden: true },
+  ]
+  const availableWidgets = WIDGET_REGISTRY.filter((w) => !w.perm || hasPermission(w.perm[0], w.perm[1]))
+  const DASHBOARD_WIDGETS = availableWidgets.map((w) => w.id)
+  const defaultHiddenWidgets = availableWidgets.filter((w) => w.defaultHidden).map((w) => w.id)
   const order = useOrderPreference('dashboard-widget-order-v1')
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
     useSensor(TouchSensor, { activationConstraint: { delay: 200, tolerance: 8 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   )
-  const widgetIds = order.applyOrder([...DASHBOARD_WIDGETS])
+  const orderedWidgetIds = order.applyOrder([...DASHBOARD_WIDGETS])
+  const visibility = useWidgetVisibility('dashboard-widget-hidden-v1', defaultHiddenWidgets)
+  // размеры только для компактных виджетов из других модулей
+  const RESIZABLE = new Set(['finance', 'bedolaga', 'violations', 'backups', 'nodecosts'])
+  const widgetSize = useWidgetSize('dashboard-widget-size-v1', 'md')
+  const spanClass = (id: string) => RESIZABLE.has(id) ? SIZE_SPAN[widgetSize.getSize(id)] : 'lg:col-span-6'
+  // рендерим только видимые; drag работает в пределах видимых
+  const widgetIds = orderedWidgetIds.filter((w) => visibility.isVisible(w))
   const handleWidgetDragEnd = (event: DragEndEvent) => {
     const { active, over } = event
     if (!over || active.id === over.id) return
-    const oldIndex = widgetIds.indexOf(String(active.id))
-    const newIndex = widgetIds.indexOf(String(over.id))
+    const oldIndex = orderedWidgetIds.indexOf(String(active.id))
+    const newIndex = orderedWidgetIds.indexOf(String(over.id))
     if (oldIndex < 0 || newIndex < 0) return
-    order.setCustomOrder(arrayMove(widgetIds, oldIndex, newIndex))
+    order.setCustomOrder(arrayMove(orderedWidgetIds, oldIndex, newIndex))
   }
   // Chart state
   const [trafficPeriod, setTrafficPeriod] = useState('7d')
@@ -1931,6 +1848,13 @@ export default function Dashboard() {
     refetchInterval: 60_000,
     staleTime: 30_000,
     enabled: canViewAnalytics,
+  })
+
+  const { data: backupStatus } = useQuery({
+    queryKey: ['backup-status-widget'],
+    queryFn: backupApi.getStatus,
+    refetchInterval: 120_000,
+    enabled: canViewBackups,
   })
 
   const { data: violationStats, isLoading: violationsLoading, isError: violationsError } = useQuery({
@@ -2137,36 +2061,55 @@ export default function Dashboard() {
         </Card>
       )}
 
-      {/* ── Reset custom layout (shown only if user reordered) ──── */}
-      {order.isCustomized && (
-        <div className="flex justify-end">
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={order.reset}
-            className="h-8 px-2 text-xs text-dark-200 hover:text-white"
-            title={t('dashboard.resetLayout', { defaultValue: 'Сбросить порядок виджетов' })}
-          >
-            <RotateCcw className="w-3.5 h-3.5 mr-1.5" />
-            {t('dashboard.resetLayout', { defaultValue: 'Сбросить порядок виджетов' })}
-          </Button>
-        </div>
-      )}
+      {/* ── Настройка дашборда: показать/скрыть виджеты + сброс ──── */}
+      <div className="flex justify-end">
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="ghost" size="sm" className="h-8 px-2 text-xs text-dark-200 hover:text-white gap-1.5">
+              <LayoutGrid className="w-3.5 h-3.5" />
+              {t('dashboard.customize', { defaultValue: 'Настроить' })}
+              {(visibility.isCustomized || order.isCustomized || widgetSize.isCustomized) && <span className="w-1.5 h-1.5 rounded-full bg-primary-400" />}
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-56">
+            <DropdownMenuLabel>{t('dashboard.widgets', { defaultValue: 'Виджеты' })}</DropdownMenuLabel>
+            {DASHBOARD_WIDGETS.map((w) => (
+              <DropdownMenuCheckboxItem
+                key={w}
+                checked={visibility.isVisible(w)}
+                onCheckedChange={() => visibility.toggle(w)}
+                onSelect={(e) => e.preventDefault()}
+              >
+                {t(`dashboard.widget.${w}`, { defaultValue: w })}
+              </DropdownMenuCheckboxItem>
+            ))}
+            {(visibility.isCustomized || order.isCustomized || widgetSize.isCustomized) && (
+              <>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={() => { order.reset(); visibility.reset(); widgetSize.reset() }}>
+                  <RotateCcw className="w-3.5 h-3.5 mr-2" />
+                  {t('dashboard.resetLayout', { defaultValue: 'Сбросить настройки' })}
+                </DropdownMenuItem>
+              </>
+            )}
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
 
       {/* ── Your quota card ──────────────────────────────────────── */}
       <AdminQuotaCard />
 
       {/* ── Sortable widgets ────────────────────────────────────── */}
       <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleWidgetDragEnd}>
-        <SortableContext items={widgetIds} strategy={verticalListSortingStrategy}>
-          <div className="space-y-6">
+        <SortableContext items={widgetIds} strategy={rectSortingStrategy}>
+          <div className="grid grid-cols-1 lg:grid-cols-6 gap-6 items-start">
             {widgetIds.map((wid) => {
               switch (wid) {
                 case 'stats':
                   return (
-                    <SortableSection key="stats" id="stats">
-                      {/* ── Stats grid (5 compact cards) ────────────────────────── */}
-                      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
+                    <SortableSection key="stats" id="stats" className={spanClass('stats')}>
+                      {/* ── Stats grid (compact cards) ──────────────────────────── */}
+                      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
         {canViewUsers && (
           <StatCard
             title={t('dashboard.totalUsers')}
@@ -2225,13 +2168,26 @@ export default function Dashboard() {
             index={4}
           />
         )}
+        {canViewBackups && (
+          <StatCard
+            title={t('dashboard.lastBackup')}
+            value={backupStatus?.last_backup ? backupAgo(backupStatus.last_backup.created_at) : '—'}
+            icon={Database}
+            color={backupStatus?.last_backup ? 'cyan' : 'yellow'}
+            subtitle={backupStatus?.last_backup
+              ? `${backupStatus.last_backup.backup_type} · ${formatBytes(backupStatus.last_backup.size_bytes)}`
+              : t('dashboard.noBackup')}
+            onClick={() => navigate('/backup')}
+            index={5}
+          />
+        )}
                       </div>
                     </SortableSection>
                   )
                 case 'traffic':
                   if (!canViewAnalytics) return null
                   return (
-                    <SortableSection key="traffic" id="traffic">
+                    <SortableSection key="traffic" id="traffic" className={spanClass('traffic')}>
                       {/* ── Row 2: Traffic Chart + Growth Trends ────────────────── */}
                       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           <Card className="animate-fade-in-up" style={{ animationDelay: '0.1s', '--card-accent-rgb': '236, 72, 153' } as React.CSSProperties}>
@@ -2248,41 +2204,32 @@ export default function Dashboard() {
               {timeseriesLoading ? (
                 <ChartSkeleton />
               ) : trafficChartData.length > 0 ? (
-                <ResponsiveContainer width="100%" height={240}>
-                  {nodeUuids.length > 0 && nodeTrafficChartData.length > 0 ? (
-                    <AreaChart data={nodeTrafficChartData}>
-                      <defs>
-                        {nodeUuids.map((uid, i) => (
-                          <linearGradient key={uid} id={`grad-${i}`} x1="0" y1="0" x2="0" y2="1">
-                            <stop offset="0%" stopColor={chart.nodeColors[i % chart.nodeColors.length]} stopOpacity={0.35} />
-                            <stop offset="100%" stopColor={chart.nodeColors[i % chart.nodeColors.length]} stopOpacity={0.02} />
-                          </linearGradient>
-                        ))}
-                      </defs>
-                      <CartesianGrid strokeDasharray="3 3" stroke={chart.grid} vertical={false} />
-                      <XAxis dataKey="name" stroke={chart.axis} fontSize={10} tickLine={false} axisLine={false} />
-                      <YAxis stroke={chart.axis} fontSize={10} tickFormatter={(v) => formatBytesShort(v)} tickLine={false} axisLine={false} />
-                      <RechartsTooltip content={<TrafficChartTooltip />} />
-                      {nodeUuids.map((uid, i) => (
-                        <Area key={uid} type="monotone" dataKey={uid} name={nodeNames[uid] || uid.substring(0, 8)} stackId="traffic" stroke={chart.nodeColors[i % chart.nodeColors.length]} fill={`url(#grad-${i})`} strokeWidth={1.5} />
-                      ))}
-                    </AreaChart>
-                  ) : (
-                    <LineChart data={trafficChartData}>
-                      <defs>
-                        <linearGradient id="trafficGrad" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="0%" stopColor={chart.accentColor} stopOpacity={0.35} />
-                          <stop offset="100%" stopColor={chart.accentColor} stopOpacity={0.02} />
-                        </linearGradient>
-                      </defs>
-                      <CartesianGrid strokeDasharray="3 3" stroke={chart.grid} vertical={false} />
-                      <XAxis dataKey="name" stroke={chart.axis} fontSize={10} tickLine={false} axisLine={false} />
-                      <YAxis stroke={chart.axis} fontSize={10} tickFormatter={(v) => formatBytesShort(v)} tickLine={false} axisLine={false} />
-                      <RechartsTooltip content={<TrafficChartTooltip />} />
-                      <Line type="monotone" dataKey="value" name={t('dashboard.traffic')} stroke={chart.accentColor} strokeWidth={2} dot={false} activeDot={{ r: 5, fill: chart.accentColor, stroke: 'rgba(255,255,255,0.3)', strokeWidth: 2 }} />
-                    </LineChart>
-                  )}
-                </ResponsiveContainer>
+                nodeUuids.length > 0 && nodeTrafficChartData.length > 0 ? (
+                  <InteractiveChart
+                    data={nodeTrafficChartData}
+                    xKey="name"
+                    height={240}
+                    stacked
+                    exportName="dashboard-node-traffic"
+                    yFormatter={(v) => formatBytesShort(v)}
+                    tooltip={<TrafficChartTooltip />}
+                    series={nodeUuids.map((uid, i) => ({
+                      key: uid, name: nodeNames[uid] || uid.substring(0, 8),
+                      color: chart.nodeColors[i % chart.nodeColors.length],
+                    }))}
+                  />
+                ) : (
+                  <InteractiveChart
+                    data={trafficChartData}
+                    xKey="name"
+                    height={240}
+                    defaultType="line"
+                    exportName="dashboard-traffic"
+                    yFormatter={(v) => formatBytesShort(v)}
+                    tooltip={<TrafficChartTooltip />}
+                    series={[{ key: 'value', name: t('dashboard.traffic') }]}
+                  />
+                )
               ) : (
                 <div className="h-60 flex items-center justify-center">
                   <span className="text-muted-foreground text-sm">{t('dashboard.noDataForPeriod')}</span>
@@ -2297,7 +2244,7 @@ export default function Dashboard() {
                   )
                 case 'connections':
                   return (
-                    <SortableSection key="connections" id="connections">
+                    <SortableSection key="connections" id="connections" className={spanClass('connections')}>
                       {/* ── Row 3: Connections by Node + Top Users by Traffic ─────── */}
                       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {canViewAnalytics && (
@@ -2352,7 +2299,7 @@ export default function Dashboard() {
                   )
                 case 'load':
                   return (
-                    <SortableSection key="load" id="load">
+                    <SortableSection key="load" id="load" className={spanClass('load')}>
                       {/* ── Row 4: Node Load + Expiry + Traffic Anomaly ───────── */}
                       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {canViewFleet && (
@@ -2369,7 +2316,7 @@ export default function Dashboard() {
                   )
                 case 'activity':
                   return (
-                    <SortableSection key="activity" id="activity">
+                    <SortableSection key="activity" id="activity" className={spanClass('activity')}>
                       {/* ── Row 5: Activity Feed + Violations + Top Violators ── */}
                       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {canViewAudit && (
@@ -2432,11 +2379,9 @@ export default function Dashboard() {
                   )
                 case 'system':
                   return (
-                    <SortableSection key="system" id="system">
-                      {/* ── Row 6: Billing + Collector + System Status + Updates ── */}
+                    <SortableSection key="system" id="system" className={spanClass('system')}>
+                      {/* ── Row 6: Collector + System Status + Updates ── */}
                       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {canViewBilling && <BillingSummaryCard loading={false} />}
-
         {canViewAnalytics && (
           <CollectorQueueCard stats={collectorStats} loading={collectorLoading} />
         )}
@@ -2485,6 +2430,16 @@ export default function Dashboard() {
                       </div>
                     </SortableSection>
                   )
+                case 'finance':
+                  return <SortableSection key="finance" id="finance" className={spanClass('finance')}><FinanceWidget onResize={() => widgetSize.cycle('finance')} /></SortableSection>
+                case 'bedolaga':
+                  return <SortableSection key="bedolaga" id="bedolaga" className={spanClass('bedolaga')}><BedolagaWidget onResize={() => widgetSize.cycle('bedolaga')} /></SortableSection>
+                case 'violations':
+                  return <SortableSection key="violations" id="violations" className={spanClass('violations')}><ViolationsWidget onResize={() => widgetSize.cycle('violations')} /></SortableSection>
+                case 'backups':
+                  return <SortableSection key="backups" id="backups" className={spanClass('backups')}><BackupWidget onResize={() => widgetSize.cycle('backups')} /></SortableSection>
+                case 'nodecosts':
+                  return <SortableSection key="nodecosts" id="nodecosts" className={spanClass('nodecosts')}><NodeCostsWidget onResize={() => widgetSize.cycle('nodecosts')} /></SortableSection>
                 default:
                   return null
               }

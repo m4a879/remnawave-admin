@@ -25,6 +25,7 @@ from web.backend.core.audit import write_audit_log, get_audit_logs
 from web.backend.core.rbac import get_role_by_id
 from shared.rbac import get_all_permissions_for_role_id
 from web.backend.core.admin_credentials import hash_password, validate_password_strength
+from web.backend.core.auth_policy import parse_methods, serialize_methods
 from web.backend.schemas.admin import (
     AdminAccountCreate,
     AdminAccountUpdate,
@@ -56,6 +57,7 @@ def _account_to_response(account: dict) -> AdminAccountResponse:
         max_hosts=account.get("max_hosts"),
         unlimited_traffic_policy=account.get("unlimited_traffic_policy", "allowed"),
         unrestricted_user_access=account.get("unrestricted_user_access", True),
+        allowed_auth_methods=parse_methods(account.get("allowed_auth_methods")),
         has_bot_access=account.get("has_bot_access", False),
         users_created=account.get("users_created", 0),
         traffic_used_bytes=account.get("traffic_used_bytes", 0),
@@ -187,6 +189,13 @@ async def create_admin(
     if not account:
         raise api_error(500, E.ADMIN_CREATE_FAILED)
 
+    # Политика метода входа (если задана при создании)
+    if data.allowed_auth_methods is not None:
+        await update_admin_account(
+            account["id"],
+            allowed_auth_methods=serialize_methods(data.allowed_auth_methods),
+        )
+
     # Audit
     await write_audit_log(
         admin_id=admin.account_id,
@@ -282,6 +291,9 @@ async def update_admin(
         fields["unlimited_traffic_policy"] = data.unlimited_traffic_policy
     if data.unrestricted_user_access is not None:
         fields["unrestricted_user_access"] = data.unrestricted_user_access
+    if "allowed_auth_methods" in data.model_fields_set:
+        # [] или None → снять ограничение (NULL); список → ограничить методы
+        fields["allowed_auth_methods"] = serialize_methods(data.allowed_auth_methods)
     if data.has_bot_access is not None:
         fields["has_bot_access"] = data.has_bot_access
     if data.password is not None:

@@ -117,6 +117,7 @@ class AdminInfo(BaseModel):
     unlimited_traffic_policy: str = "allowed"
     auth_method: str = "telegram"
     password_is_generated: bool = False
+    totp_enabled: bool = False
     unrestricted_user_access: bool = False
     permissions: List[PermissionEntry] = []
 

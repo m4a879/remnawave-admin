@@ -50,6 +50,25 @@ vi.mock('@/api/auth', () => ({
     refreshToken: vi.fn(),
     changePassword: vi.fn(),
     logout: vi.fn(),
+    listPasskeys: vi.fn().mockResolvedValue([]),
+    registerPasskey: vi.fn(),
+    deletePasskey: vi.fn(),
+    loginPasskey: vi.fn(),
+    oauthProviders: vi.fn().mockResolvedValue([]),
+    oauthLinks: vi.fn().mockResolvedValue([]),
+    oauthLoginUrl: vi.fn(),
+    oauthLinkUrl: vi.fn(),
+    oauthCallback: vi.fn(),
+    deleteOauthLink: vi.fn(),
+    setOauthProvider: vi.fn(),
+    deleteOauthProvider: vi.fn(),
+    listSessions: vi.fn().mockResolvedValue([]),
+    revokeSession: vi.fn(),
+    revokeOtherSessions: vi.fn(),
+    setup2fa: vi.fn(),
+    enable2fa: vi.fn(),
+    disable2fa: vi.fn(),
+    regenBackupCodes: vi.fn(),
   },
 }))
 
@@ -340,10 +359,25 @@ describe('Page smoke tests', () => {
     expect(container).toBeTruthy()
   })
 
-  it('Billing renders without errors', async () => {
-    const Billing = (await import('@/pages/Billing')).default
-    const { container } = renderPage(<Billing />)
+  it('Finance renders without errors', async () => {
+    const Finance = (await import('@/pages/Finance')).default
+    const { container } = renderPage(<Finance />)
     expect(container).toBeTruthy()
+  })
+
+  it('BsCheck renders without errors', async () => {
+    const client = (await import('@/api/client')).default as unknown as { get: ReturnType<typeof vi.fn> }
+    client.get.mockImplementation((url: string) => {
+      if (url === '/bscheck/status') return Promise.resolve({ data: { configured: true, account: { balance_total: 1000, tier: 'bronze' } } })
+      if (url === '/bscheck/operators') return Promise.resolve({ data: { items: [{ id: 'mts', name: 'МТС', op_key: 'ufo1:mts', channel_state: 'DPI_ON', alive: true, region_label: 'Урал' }] } })
+      if (url === '/bscheck/nodes') return Promise.resolve({ data: { items: [{ uuid: 'n1', name: 'Node 1', ip: '1.2.3.4', address: '100.0.0.1', agent_ip: '1.2.3.4' }] } })
+      if (url === '/bscheck/summary') return Promise.resolve({ data: { items: {} } })
+      return Promise.resolve({ data: { items: [], total: 0 } })
+    })
+    const BsCheck = (await import('@/pages/BsCheck')).default
+    const { container } = renderPage(<BsCheck />)
+    expect(container).toBeTruthy()
+    client.get.mockResolvedValue({ data: { items: [], total: 0 } })
   })
 
   it('Login renders without errors', async () => {

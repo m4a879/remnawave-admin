@@ -141,7 +141,7 @@ async def create_webhook(
     _validate_events(body.events)
     _validate_signature_version(body.signature_version)
 
-    admin_id = admin.id if hasattr(admin, "id") else (admin.account_id or None)
+    admin_id = admin.account_id
     async with db_service.acquire() as conn:
         row = await conn.fetchrow(
             insert_sql(WEBHOOK_SUBSCRIPTIONS_TABLE,

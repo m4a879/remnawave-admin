@@ -56,6 +56,8 @@ class AdminAccountBase(BaseModel):
 
 class AdminAccountCreate(AdminAccountBase):
     password: Optional[str] = Field(None, min_length=8, max_length=200)
+    # Разрешённые способы входа (password/telegram/passkey/oauth). None/[] = все.
+    allowed_auth_methods: Optional[List[str]] = None
 
 
 class AdminAccountUpdate(BaseModel):
@@ -72,6 +74,8 @@ class AdminAccountUpdate(BaseModel):
     has_bot_access: Optional[bool] = None
     unlimited_traffic_policy: Optional[str] = None
     unrestricted_user_access: Optional[bool] = None
+    # None = не трогать; [] = снять ограничение (все методы); список = ограничить.
+    allowed_auth_methods: Optional[List[str]] = None
 
 
 class CounterResetRequest(BaseModel):
@@ -99,6 +103,7 @@ class AdminAccountResponse(BaseModel):
     is_generated_password: bool = False
     unlimited_traffic_policy: str = "allowed"
     unrestricted_user_access: bool = True
+    allowed_auth_methods: Optional[List[str]] = None
     created_by: Optional[int] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None

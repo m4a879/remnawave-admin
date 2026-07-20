@@ -1027,6 +1027,152 @@ function SubscriptionInfoDialog({
   )
 }
 
+// ── Ключи подключения (полные vless://… по хостам) ────────────────
+
+function parseKey(raw: string): { remark: string; host: string; raw: string } {
+  const hash = raw.indexOf('#')
+  let base = raw
+  let remark = ''
+  if (hash >= 0) {
+    base = raw.slice(0, hash)
+    const frag = raw.slice(hash + 1)
+    try { remark = decodeURIComponent(frag) } catch { remark = frag }
+  }
+  let host = ''
+  const at = base.indexOf('@')
+  if (at >= 0) host = base.slice(at + 1).split(/[/?]/)[0]
+  return { remark: remark || host || raw.slice(8, 32), host, raw }
+}
+
+function KeyRow({ raw, onQr }: { raw: string; onQr: (raw: string) => void }) {
+  const { t } = useTranslation()
+  const [copied, setCopied] = useState(false)
+  const { remark, host } = parseKey(raw)
+  const copy = () => {
+    navigator.clipboard.writeText(raw)
+    setCopied(true)
+    toast.success(t('common.copied'))
+    setTimeout(() => setCopied(false), 1500)
+  }
+  return (
+    <div className="flex items-center gap-2 bg-[var(--glass-bg)] rounded px-2 py-1.5">
+      <div className="min-w-0 flex-1">
+        <p className="text-xs text-white truncate">{remark}</p>
+        {host && <p className="text-[10px] font-mono text-muted-foreground truncate">{host}</p>}
+      </div>
+      <Button variant="ghost" size="icon" className="h-7 w-7 shrink-0" onClick={copy} aria-label={t('common.copy')}>
+        {copied ? <Check className="h-3.5 w-3.5 text-green-400" /> : <Copy className="h-3.5 w-3.5" />}
+      </Button>
+      <Button variant="ghost" size="icon" className="h-7 w-7 shrink-0" onClick={() => onQr(raw)} aria-label="QR">
+        <QrCode className="h-3.5 w-3.5" />
+      </Button>
+    </div>
+  )
+}
+
+function KeySection({ title, keys, tone, defaultOpen, onQr }: {
+  title: string
+  keys: string[]
+  tone: string
+  defaultOpen: boolean
+  onQr: (raw: string) => void
+}) {
+  const { t } = useTranslation()
+  const [open, setOpen] = useState(defaultOpen)
+  if (!keys.length) return null
+  const copyAll = () => {
+    navigator.clipboard.writeText(keys.join('\n'))
+    toast.success(t('common.copied'))
+  }
+  return (
+    <div className="rounded-lg border border-[var(--glass-border)]">
+      <div className="flex items-center gap-2 px-2 py-1.5">
+        <button type="button" className="flex items-center gap-1.5 flex-1 text-left" onClick={() => setOpen((o) => !o)}>
+          {open ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+          <span className={cn('text-sm font-medium', tone)}>{title}</span>
+          <Badge variant="outline" className="text-[10px]">{keys.length}</Badge>
+        </button>
+        <Button variant="ghost" size="sm" className="h-6 gap-1 text-[11px]" onClick={copyAll}>
+          <Copy className="h-3 w-3" />{t('userDetail.connectionKeys.copyAll')}
+        </Button>
+      </div>
+      {open && (
+        <div className="px-2 pb-2 space-y-1 max-h-72 overflow-y-auto">
+          {keys.map((k, i) => <KeyRow key={i} raw={k} onQr={onQr} />)}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function ConnectionKeysDialog({ open, onOpenChange, userUuid }: {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  userUuid: string
+}) {
+  const { t } = useTranslation()
+  const [qr, setQr] = useState<string | null>(null)
+  const { data, isLoading, isError } = useQuery({
+    queryKey: ['connection-keys', userUuid],
+    queryFn: async () => {
+      const { data } = await client.get(`/users/${userUuid}/connection-keys`)
+      return data as { enabledKeys?: string[]; hiddenKeys?: string[]; disabledKeys?: string[] }
+    },
+    enabled: open && !!userUuid,
+    staleTime: 30_000,
+  })
+  const enabled = data?.enabledKeys || []
+  const hidden = data?.hiddenKeys || []
+  const disabled = data?.disabledKeys || []
+  const total = enabled.length + hidden.length + disabled.length
+
+  return (
+    <>
+      <Dialog open={open} onOpenChange={onOpenChange}>
+        <DialogContent className="sm:max-w-lg max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <KeyRound className="h-5 w-5 text-primary-400" />
+              {t('userDetail.connectionKeys.title')}
+            </DialogTitle>
+          </DialogHeader>
+          {isLoading ? (
+            <div className="space-y-2"><Skeleton className="h-10 w-full" /><Skeleton className="h-10 w-full" /></div>
+          ) : isError ? (
+            <p className="text-sm text-muted-foreground">{t('userDetail.connectionKeys.error')}</p>
+          ) : total === 0 ? (
+            <p className="text-sm text-muted-foreground">{t('userDetail.connectionKeys.empty')}</p>
+          ) : (
+            <div className="space-y-2">
+              <p className="text-[11px] text-muted-foreground">{t('userDetail.connectionKeys.hint')}</p>
+              <KeySection title={t('userDetail.connectionKeys.active')} keys={enabled} tone="text-green-400" defaultOpen onQr={setQr} />
+              <KeySection title={t('userDetail.connectionKeys.hidden')} keys={hidden} tone="text-amber-400" defaultOpen={false} onQr={setQr} />
+              <KeySection title={t('userDetail.connectionKeys.disabled')} keys={disabled} tone="text-red-400" defaultOpen={false} onQr={setQr} />
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={qr != null} onOpenChange={(o) => !o && setQr(null)}>
+        <DialogContent className="sm:max-w-xs">
+          <DialogHeader><DialogTitle className="text-sm break-all">{qr ? parseKey(qr).remark : ''}</DialogTitle></DialogHeader>
+          {qr && (
+            <div className="flex flex-col items-center gap-3">
+              <div className="bg-white p-3 rounded-lg">
+                <QRCodeSVG value={qr} size={224} level="M" />
+              </div>
+              <Button variant="outline" size="sm" className="gap-1.5 w-full"
+                onClick={() => { navigator.clipboard.writeText(qr); toast.success(t('common.copied')) }}>
+                <Copy className="h-3.5 w-3.5" />{t('common.copy')}
+              </Button>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+    </>
+  )
+}
+
 interface IpNode {
   nodeUuid: string
   nodeName: string
@@ -1302,6 +1448,7 @@ export default function UserDetail() {
   const [qrDialogOpen, setQrDialogOpen] = useState(false)
   const [subInfoOpen, setSubInfoOpen] = useState(false)
   const [ipsDialogOpen, setIpsDialogOpen] = useState(false)
+  const [keysDialogOpen, setKeysDialogOpen] = useState(false)
   const qrRef = useRef<HTMLDivElement>(null)
   const canEdit = useHasPermission('users', 'edit')
   const canDelete = useHasPermission('users', 'delete')
@@ -2598,6 +2745,15 @@ export default function UserDetail() {
                         <Network className="h-3.5 w-3.5" />
                         IPs
                       </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setKeysDialogOpen(true)}
+                        className="h-7 px-2.5 text-xs gap-1"
+                      >
+                        <KeyRound className="h-3.5 w-3.5" />
+                        {t('userDetail.connectionKeys.button')}
+                      </Button>
                       <ImportClientDropdown userUuid={user.uuid} />
                     </div>
                   </div>
@@ -2900,6 +3056,13 @@ export default function UserDetail() {
       <IpControlDialog
         open={ipsDialogOpen}
         onOpenChange={setIpsDialogOpen}
+        userUuid={user?.uuid || ''}
+      />
+
+      {/* Connection Keys Dialog */}
+      <ConnectionKeysDialog
+        open={keysDialogOpen}
+        onOpenChange={setKeysDialogOpen}
         userUuid={user?.uuid || ''}
       />
 

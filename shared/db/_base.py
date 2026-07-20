@@ -491,7 +491,7 @@ def _db_row_to_api_format(row) -> Dict[str, Any]:
         'disk_usage', 'disk_total_bytes', 'disk_used_bytes',
         'disk_read_speed_bps', 'disk_write_speed_bps',
         'uptime_seconds', 'metrics_updated_at',
-        'agent_v2_connected', 'agent_v2_last_ping',
+        'agent_v2_connected', 'agent_v2_last_ping', 'agent_ip',
     )
     _INTERNAL_FIELDS = ("created_by_admin_id",)
 

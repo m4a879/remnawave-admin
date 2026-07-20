@@ -1,18 +1,13 @@
 import client from './client'
 
 // Types
-export interface ApiToken {
-  uuid: string
-  token: string
-  tokenName: string
-  createdAt: string
-}
-
 export interface Template {
   uuid: string
   name: string
   templateType: string // XRAY_JSON, XRAY_BASE64, MIHOMO, STASH, CLASH, SINGBOX
   templateJson: Record<string, unknown> | null
+  // YAML-шаблоны (MIHOMO/CLASH/STASH): base64-строка YAML
+  encodedTemplateYaml?: string | null
   viewPosition: number
   createdAt: string
   updatedAt: string
@@ -35,19 +30,6 @@ export interface ConfigProfile {
 
 // API functions
 export const resourcesApi = {
-  // Tokens
-  getTokens: async (): Promise<ApiToken[]> => {
-    const { data } = await client.get('/tokens')
-    return data.items || []
-  },
-  createToken: async (tokenName: string) => {
-    const { data } = await client.post('/tokens', { tokenName })
-    return data
-  },
-  deleteToken: async (uuid: string) => {
-    await client.delete(`/tokens/${uuid}`)
-  },
-
   // Templates
   getTemplates: async (): Promise<Template[]> => {
     const { data } = await client.get('/templates')
@@ -61,8 +43,16 @@ export const resourcesApi = {
     const { data } = await client.post('/templates', { name, templateType })
     return data
   },
-  updateTemplate: async (uuid: string, updates: { name?: string; templateJson?: Record<string, unknown> }) => {
+  updateTemplate: async (uuid: string, updates: { name?: string; templateJson?: Record<string, unknown>; encodedTemplateYaml?: string }) => {
     const { data } = await client.patch(`/templates/${uuid}`, updates)
+    return data
+  },
+  getTemplateVersions: async (uuid: string): Promise<{ items: ConfigVersion[] }> => {
+    const { data } = await client.get(`/templates/${uuid}/versions`)
+    return data
+  },
+  getTemplateVersion: async (id: number): Promise<ConfigVersion & { content: string }> => {
+    const { data } = await client.get(`/templates/versions/${id}`)
     return data
   },
   deleteTemplate: async (uuid: string) => {
@@ -102,4 +92,40 @@ export const resourcesApi = {
     const { data } = await client.get(`/config-profiles/${uuid}/computed-config`)
     return data
   },
+  updateConfigProfile: async (uuid: string, config: Record<string, unknown>) => {
+    const { data } = await client.patch(`/config-profiles/${uuid}`, config)
+    return data
+  },
+  createConfigProfile: async (name: string): Promise<ConfigProfile> => {
+    const { data } = await client.post('/config-profiles', { name })
+    return data
+  },
+  renameConfigProfile: async (uuid: string, name: string) => {
+    const { data } = await client.patch(`/config-profiles/${uuid}/name`, { name })
+    return data
+  },
+  deleteConfigProfile: async (uuid: string) => {
+    const { data } = await client.delete(`/config-profiles/${uuid}`)
+    return data
+  },
+  generateX25519: async (): Promise<{ keypairs: { publicKey: string; privateKey: string }[] }> => {
+    const { data } = await client.get('/config-profiles/tools/x25519')
+    return data
+  },
+  getProfileVersions: async (uuid: string): Promise<{ items: ConfigVersion[] }> => {
+    const { data } = await client.get(`/config-profiles/${uuid}/versions`)
+    return data
+  },
+  getProfileVersion: async (id: number): Promise<ConfigVersion & { content: string }> => {
+    const { data } = await client.get(`/config-profiles/versions/${id}`)
+    return data
+  },
+}
+
+export interface ConfigVersion {
+  id: number
+  entity_name: string | null
+  created_by: string | null
+  created_at: string | null
+  size_bytes?: number
 }

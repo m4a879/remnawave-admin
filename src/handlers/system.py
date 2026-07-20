@@ -160,13 +160,6 @@ async def _fetch_panel_stats_text() -> str:
             lines.append(f"  {_('stats.templates').format(count='—')}")
 
         try:
-            tokens_data = await internal_api_client.get_tokens()
-            tokens = tokens_data.get("response", {}).get("apiKeys", [])
-            lines.append(f"  {_('stats.tokens').format(count=len(tokens))}")
-        except Exception:
-            lines.append(f"  {_('stats.tokens').format(count='—')}")
-
-        try:
             snippets_data = await internal_api_client.get_snippets()
             snippets = snippets_data.get("response", {}).get("snippets", [])
             lines.append(f"  {_('stats.snippets').format(count=len(snippets))}")
@@ -507,13 +500,6 @@ async def _fetch_stats_text() -> str:
             lines.append(f"  {_('stats.templates').format(count=len(templates))}")
         except Exception:
             lines.append(f"  {_('stats.templates').format(count='—')}")
-
-        try:
-            tokens_data = await internal_api_client.get_tokens()
-            tokens = tokens_data.get("response", {}).get("apiKeys", [])
-            lines.append(f"  {_('stats.tokens').format(count=len(tokens))}")
-        except Exception:
-            lines.append(f"  {_('stats.tokens').format(count='—')}")
 
         try:
             snippets_data = await internal_api_client.get_snippets()

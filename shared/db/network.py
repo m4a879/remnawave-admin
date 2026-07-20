@@ -549,6 +549,36 @@ class NetworkMixin:
             logger.error("Error deleting HWID device for user %s: %s", user_uuid, e, exc_info=True)
             return False
 
+    async def delete_hwid_devices_except_users(self, user_uuids: List[str]) -> int:
+        """
+        Удалить HWID-записи всех юзеров, которых НЕТ в списке.
+
+        Используется полным синком: юзер, у которого в панели удалили последнее
+        устройство, не попадает в выдачу API вообще — per-user синк его не чистит.
+
+        Returns:
+            Количество удалённых записей
+        """
+        if not self.is_connected or not user_uuids:
+            return 0
+
+        try:
+            async with self.acquire() as conn:
+                result = await conn.execute(
+                    delete_sql(USER_HWID_DEVICES_TABLE, "NOT (user_uuid = ANY($1::uuid[]))"),
+                    list(user_uuids),
+                )
+                if result and "DELETE" in result:
+                    try:
+                        return int(result.split()[1])
+                    except (IndexError, ValueError):
+                        return 0
+                return 0
+
+        except Exception as e:
+            logger.error("Error deleting stale HWID devices: %s", e, exc_info=True)
+            return 0
+
     async def delete_all_user_hwid_devices(self, user_uuid: str) -> int:
         """
         Удалить все HWID устройства пользователя.
@@ -989,6 +1019,7 @@ class NetworkMixin:
                         "expire_date": expire_at.isoformat() if expire_at else None,
                         "is_active": is_active,
                         "is_trial": is_trial,
+                        "app_version": r["app_version"],
                     })
 
                 # Sort by user_count desc

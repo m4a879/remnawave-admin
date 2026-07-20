@@ -3,6 +3,7 @@
 CRUD for scripts + execution on nodes via Agent v2 WebSocket.
 Import from GitHub URLs and repositories.
 """
+import asyncio
 import json
 import logging
 import re
@@ -86,6 +87,23 @@ class ExecScriptResponse(BaseModel):
     status: str = 'pending'
 
 
+class ExecScriptBulkRequest(BaseModel):
+    script_id: int
+    node_uuids: List[str]
+    env_vars: Optional[dict] = None
+
+
+class ExecBulkItem(BaseModel):
+    node_uuid: str
+    exec_id: Optional[int] = None
+    status: str
+    error: Optional[str] = None
+
+
+class ExecScriptBulkResponse(BaseModel):
+    results: List[ExecBulkItem]
+
+
 class ExecStatusResponse(BaseModel):
     id: int
     node_uuid: str
@@ -165,7 +183,7 @@ async def create_script(
     if not db_service.is_connected:
         raise api_error(503, E.DB_UNAVAILABLE)
 
-    admin_id = admin.id if hasattr(admin, 'id') else None
+    admin_id = admin.account_id
 
     async with db_service.acquire() as conn:
         row = await conn.fetchrow(
@@ -254,41 +272,23 @@ async def delete_script(
 
 # ── Script Execution ─────────────────────────────────────────────
 
-@router.post("/exec-script", response_model=ExecScriptResponse)
-async def exec_script(
-    body: ExecScriptRequest,
-    admin: AdminUser = Depends(require_permission("fleet", "scripts")),
-):
-    """Execute a script on a node via Agent v2 WebSocket."""
-    from shared.database import db_service
-    if not db_service.is_connected:
-        raise api_error(503, E.DB_UNAVAILABLE)
+async def _exec_one(db_service, script, node_uuid: str, env_vars, admin_id, admin_username) -> dict:
+    """Dispatch an already-fetched script to a single node.
 
-    # Check agent connected
-    if not agent_manager.is_connected(body.node_uuid):
-        raise api_error(400, E.AGENT_NOT_CONNECTED)
-
-    # Get script
-    async with db_service.acquire() as conn:
-        script = await conn.fetchrow(
-            select_sql(NODE_SCRIPTS_TABLE, "*", "WHERE id = $1"), body.script_id,
-        )
-    if not script:
-        raise api_error(404, E.SCRIPT_NOT_FOUND)
+    Returns {node_uuid, exec_id?, status, error?}. Does NOT raise on per-node
+    business errors so a bulk run doesn't abort on one bad node.
+    """
+    if not agent_manager.is_connected(node_uuid):
+        return {"node_uuid": node_uuid, "status": "error", "error": "AGENT_NOT_CONNECTED"}
 
     # Get agent token
-    agent_token = None
     async with db_service.acquire() as conn:
         row = await conn.fetchrow(
-            select_sql(NODES_TABLE, "agent_token", "WHERE uuid = $1"), body.node_uuid,
+            select_sql(NODES_TABLE, "agent_token", "WHERE uuid = $1"), node_uuid,
         )
-        if row:
-            agent_token = row["agent_token"]
+    agent_token = row["agent_token"] if row else None
     if not agent_token:
-        raise api_error(400, E.AGENT_TOKEN_NOT_FOUND)
-
-    admin_id = admin.id if hasattr(admin, 'id') else None
-    admin_username = admin.username or str(admin.telegram_id)
+        return {"node_uuid": node_uuid, "status": "error", "error": "AGENT_TOKEN_NOT_FOUND"}
 
     # Create command log entry
     async with db_service.acquire() as conn:
@@ -297,18 +297,18 @@ async def exec_script(
                 ["node_uuid", "admin_id", "admin_username", "command_type", "command_data", "status"],
                 values="$1, $2, $3, 'exec_script', $4, 'running'",
                 returning="id"),
-            body.node_uuid, admin_id, admin_username,
-            f"script={script['name']}" + (f" env={list(body.env_vars.keys())}" if body.env_vars else ""),
+            node_uuid, admin_id, admin_username,
+            f"script={script['name']}" + (f" env={list(env_vars.keys())}" if env_vars else ""),
         )
         exec_id = cmd_row["id"]
 
     # Prepend env vars as export statements if provided
     script_content = script["script_content"]
-    if body.env_vars:
+    if env_vars:
         import shlex
         exports = "\n".join(
             f"export {k}={shlex.quote(str(v))}"
-            for k, v in body.env_vars.items()
+            for k, v in env_vars.items()
             if k.isidentifier()
         )
         if exports:
@@ -333,16 +333,86 @@ async def exec_script(
     payload_with_ts, sig = sign_command_with_ts(cmd_payload, agent_token)
     payload_with_ts["_sig"] = sig
 
-    sent = await agent_manager.send_command(body.node_uuid, payload_with_ts)
+    sent = await agent_manager.send_command(node_uuid, payload_with_ts)
     if not sent:
-        # Update log to error
         async with db_service.acquire() as conn:
             await conn.execute(
                 update_sql(NODE_COMMAND_LOG_TABLE, "status = 'error', output = 'Failed to send to agent'", "id = $1"), exec_id,
             )
+        return {"node_uuid": node_uuid, "exec_id": exec_id, "status": "error", "error": "AGENT_COMMAND_FAILED"}
+
+    return {"node_uuid": node_uuid, "exec_id": exec_id, "status": "running"}
+
+
+@router.post("/exec-script", response_model=ExecScriptResponse)
+async def exec_script(
+    body: ExecScriptRequest,
+    admin: AdminUser = Depends(require_permission("fleet", "scripts")),
+):
+    """Execute a script on a node via Agent v2 WebSocket."""
+    from shared.database import db_service
+    if not db_service.is_connected:
+        raise api_error(503, E.DB_UNAVAILABLE)
+
+    # Check agent connected
+    if not agent_manager.is_connected(body.node_uuid):
+        raise api_error(400, E.AGENT_NOT_CONNECTED)
+
+    # Get script
+    async with db_service.acquire() as conn:
+        script = await conn.fetchrow(
+            select_sql(NODE_SCRIPTS_TABLE, "*", "WHERE id = $1"), body.script_id,
+        )
+    if not script:
+        raise api_error(404, E.SCRIPT_NOT_FOUND)
+
+    admin_id = admin.account_id
+    admin_username = admin.username or str(admin.telegram_id)
+
+    result = await _exec_one(db_service, script, body.node_uuid, body.env_vars, admin_id, admin_username)
+    if result.get("error"):
+        if result["error"] == "AGENT_TOKEN_NOT_FOUND":
+            raise api_error(400, E.AGENT_TOKEN_NOT_FOUND)
         raise api_error(500, E.AGENT_COMMAND_FAILED)
 
-    return ExecScriptResponse(exec_id=exec_id, status="running")
+    return ExecScriptResponse(exec_id=result["exec_id"], status=result["status"])
+
+
+@router.post("/exec-script-bulk", response_model=ExecScriptBulkResponse)
+async def exec_script_bulk(
+    body: ExecScriptBulkRequest,
+    admin: AdminUser = Depends(require_permission("fleet", "scripts")),
+):
+    """Execute a script on multiple nodes in parallel. One node failing does
+    not abort the others — each node gets its own result entry."""
+    from shared.database import db_service
+    if not db_service.is_connected:
+        raise api_error(503, E.DB_UNAVAILABLE)
+
+    if not body.node_uuids:
+        raise HTTPException(status_code=400, detail="node_uuids is empty")
+
+    # Get script once
+    async with db_service.acquire() as conn:
+        script = await conn.fetchrow(
+            select_sql(NODE_SCRIPTS_TABLE, "*", "WHERE id = $1"), body.script_id,
+        )
+    if not script:
+        raise api_error(404, E.SCRIPT_NOT_FOUND)
+
+    admin_id = admin.account_id
+    admin_username = admin.username or str(admin.telegram_id)
+
+    # Dedup node UUIDs preserving order
+    seen: set = set()
+    uniq = [u for u in body.node_uuids if not (u in seen or seen.add(u))]
+
+    results = await asyncio.gather(*[
+        _exec_one(db_service, script, u, body.env_vars, admin_id, admin_username)
+        for u in uniq
+    ])
+
+    return ExecScriptBulkResponse(results=[ExecBulkItem(**r) for r in results])
 
 
 @router.get("/exec/{exec_id}", response_model=ExecStatusResponse)
@@ -484,7 +554,7 @@ async def import_script_from_url(
     except Exception as e:
         raise HTTPException(status_code=400, detail="Failed to download script")
 
-    admin_id = admin.id if hasattr(admin, 'id') else None
+    admin_id = admin.account_id
 
     async with db_service.acquire() as conn:
         row = await conn.fetchrow(
@@ -572,7 +642,7 @@ async def bulk_import_scripts(
     if not db_service.is_connected:
         raise api_error(503, E.DB_UNAVAILABLE)
 
-    admin_id = admin.id if hasattr(admin, 'id') else None
+    admin_id = admin.account_id
     imported = 0
     errors = []
 

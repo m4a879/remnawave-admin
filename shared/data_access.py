@@ -102,43 +102,6 @@ async def get_user_by_short_uuid(short_uuid: str) -> Optional[Dict[str, Any]]:
     return await _fetch_single(short_uuid, db_service.get_user_by_short_uuid, api_client.get_user_by_short_uuid, "user")
 
 
-# ==================== Token Access ====================
-
-async def get_all_tokens() -> List[Dict[str, Any]]:
-    """Get all API tokens. Tries DB first, falls back to API."""
-    if db_service.is_connected:
-        tokens = await db_service.get_all_tokens()
-        if tokens:
-            logger.debug("Tokens fetched from DB (%d)", len(tokens))
-            return tokens
-    
-    try:
-        response = await api_client.get_tokens()
-        payload = response.get("response", {})
-        
-        # Handle different response formats
-        if isinstance(payload, list):
-            return payload
-        elif isinstance(payload, dict):
-            return payload.get("apiKeys") or payload.get("tokens") or []
-    except Exception as e:
-        logger.warning("Failed to fetch tokens from API: %s", e)
-    
-    return []
-
-
-async def get_token_by_uuid(uuid: str) -> Optional[Dict[str, Any]]:
-    """Get token by UUID. Tries DB first, falls back to API."""
-    if db_service.is_connected:
-        token = await db_service.get_token_by_uuid(uuid)
-        if token and token.get("uuid"):
-            return token
-    
-    # API doesn't have get_token_by_uuid, so search in list
-    tokens = await get_all_tokens()
-    return next((t for t in tokens if t.get("uuid") == uuid), None)
-
-
 # ==================== Template Access ====================
 
 async def get_all_templates() -> List[Dict[str, Any]]:

@@ -35,8 +35,11 @@ import {
   ArrowLeftRight,
   Gauge,
   UserMinus,
+  Bookmark,
+  Save,
 } from '@/components/brand/icons'
 import client from '../api/client'
+import { userPresetsApi, UserPreset, UserPresetData } from '../api/userPresets'
 import { EmptyState } from '@/components/EmptyState'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -104,6 +107,8 @@ const fetchUsers = async (params: {
   sort_by: string
   sort_order: string
   admin_id?: string
+  external_squad_uuid?: string
+  tag?: string
 }): Promise<PaginatedResponse> => {
   const { data } = await client.get('/users', { params })
   return data
@@ -498,6 +503,76 @@ function CreateUserModal({
   const isUnlimitedLocked = unlimitedPolicy !== undefined && unlimitedPolicy !== 'allowed'
   const effectiveIsUnlimited = unlimitedPolicy === 'enforced' ? true : unlimitedPolicy === 'disabled' ? false : form.is_unlimited
 
+  // ── Пресеты создания (наборы дефолтов формы) ──────────────────
+  const qc = useQueryClient()
+  const canManagePresets = useHasPermission('users', 'create')
+  const { data: presets } = useQuery({
+    queryKey: ['user-presets'], queryFn: userPresetsApi.list, enabled: open, staleTime: 60_000,
+  })
+  const [savingPreset, setSavingPreset] = useState(false)
+  const [presetName, setPresetName] = useState('')
+
+  const applyPreset = (p: UserPreset) => {
+    const d = p.data || {}
+    setForm(prev => {
+      const next = { ...prev }
+      if (d.traffic_limit_bytes != null && d.traffic_limit_bytes > 0) {
+        next.is_unlimited = false
+        next.traffic_limit_gb = String(Math.round(d.traffic_limit_bytes / 1073741824 * 100) / 100)
+      } else if (d.traffic_limit_bytes === 0 || d.traffic_limit_bytes === null) {
+        next.is_unlimited = true
+        next.traffic_limit_gb = ''
+      }
+      if (d.traffic_limit_strategy) next.traffic_limit_strategy = d.traffic_limit_strategy
+      if (d.hwid_device_limit != null) next.hwid_device_limit = String(d.hwid_device_limit)
+      if (d.tag != null) next.tag = d.tag
+      if (d.description != null) next.description = d.description
+      if (Array.isArray(d.active_internal_squads)) next.active_internal_squads = d.active_internal_squads
+      if (d.expire_days != null) {
+        const dt = new Date(Date.now() + d.expire_days * 86400000)
+        next.expire_at = new Date(dt.getTime() - dt.getTimezoneOffset() * 60000).toISOString().slice(0, 16)
+      }
+      return next
+    })
+    toast.success(t('users.presets.applied', { name: p.name }))
+  }
+
+  // текущие значения формы -> данные пресета (что имеет смысл переиспользовать)
+  const formToPresetData = (): UserPresetData => {
+    const data: UserPresetData = {
+      traffic_limit_strategy: form.traffic_limit_strategy,
+      hwid_device_limit: parseInt(form.hwid_device_limit, 10) || 0,
+      active_internal_squads: form.active_internal_squads,
+    }
+    if (!form.is_unlimited && form.traffic_limit_gb) {
+      data.traffic_limit_bytes = Math.round(parseFloat(form.traffic_limit_gb) * 1073741824)
+    } else {
+      data.traffic_limit_bytes = null
+    }
+    if (form.tag.trim()) data.tag = form.tag.trim().toUpperCase()
+    if (form.description.trim()) data.description = form.description.trim()
+    if (form.expire_at) {
+      const days = Math.round((new Date(form.expire_at).getTime() - Date.now()) / 86400000)
+      if (days > 0) data.expire_days = days
+    }
+    return data
+  }
+
+  const savePresetMut = useMutation({
+    mutationFn: () => userPresetsApi.create(presetName.trim(), formToPresetData()),
+    onSuccess: () => {
+      toast.success(t('users.presets.saved'))
+      setSavingPreset(false); setPresetName('')
+      qc.invalidateQueries({ queryKey: ['user-presets'] })
+    },
+    onError: (e: { response?: { data?: { detail?: string } } }) =>
+      toast.error(e.response?.data?.detail || t('common.error')),
+  })
+  const deletePresetMut = useMutation({
+    mutationFn: (id: number) => userPresetsApi.remove(id),
+    onSuccess: () => { toast.success(t('common.deleted')); qc.invalidateQueries({ queryKey: ['user-presets'] }) },
+  })
+
   const handleSubmit = () => {
     const createData: Record<string, unknown> = {}
     if (form.username.trim()) createData.username = form.username.trim()
@@ -570,6 +645,52 @@ function CreateUserModal({
             <p className="text-red-400 text-sm">{error}</p>
           </div>
         )}
+
+        {/* Пресеты: применить набор дефолтов / сохранить текущий */}
+        <div className="rounded-lg border border-[var(--glass-border)] bg-[var(--glass-bg)] p-2.5 space-y-2">
+          <div className="flex items-center gap-2">
+            <Bookmark className="w-4 h-4 text-primary-400 shrink-0" />
+            <Select value="" onValueChange={(v) => {
+              const p = presets?.items.find((x) => String(x.id) === v)
+              if (p) applyPreset(p)
+            }}>
+              <SelectTrigger className="h-8 flex-1"><SelectValue placeholder={t('users.presets.apply')} /></SelectTrigger>
+              <SelectContent>
+                {!presets?.items.length ? (
+                  <div className="px-2 py-1.5 text-xs text-muted-foreground">{t('users.presets.empty')}</div>
+                ) : presets.items.map((p) => (
+                  <div key={p.id} className="flex items-center">
+                    <SelectItem value={String(p.id)} className="flex-1">{p.name}</SelectItem>
+                    {canManagePresets && (
+                      <button type="button" className="px-1.5 text-red-400 hover:text-red-300"
+                        onClick={(e) => { e.stopPropagation(); e.preventDefault(); deletePresetMut.mutate(p.id) }}
+                        title={t('common.delete')}>
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </SelectContent>
+            </Select>
+            {canManagePresets && !savingPreset && (
+              <Button type="button" variant="outline" size="sm" className="h-8 gap-1.5 shrink-0"
+                onClick={() => setSavingPreset(true)} title={t('users.presets.saveCurrent')}>
+                <Save className="w-4 h-4" /><span className="hidden sm:inline">{t('users.presets.saveShort')}</span>
+              </Button>
+            )}
+          </div>
+          {savingPreset && (
+            <div className="flex items-center gap-2">
+              <Input autoFocus value={presetName} placeholder={t('users.presets.namePlaceholder')} maxLength={100}
+                className="h-8" onChange={(e) => setPresetName(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter' && presetName.trim()) savePresetMut.mutate() }} />
+              <Button type="button" size="sm" className="h-8" disabled={!presetName.trim() || savePresetMut.isPending}
+                onClick={() => savePresetMut.mutate()}>{t('common.save')}</Button>
+              <Button type="button" variant="ghost" size="sm" className="h-8"
+                onClick={() => { setSavingPreset(false); setPresetName('') }}>{t('common.cancel')}</Button>
+            </div>
+          )}
+        </div>
 
         <div className="space-y-5">
           {/* Section: Basic info */}
@@ -874,6 +995,8 @@ export default function Users() {
   const [sortBy, setSortBy] = useUrlParam('sort_by', 'created_at')
   const [sortOrder, setSortOrder] = useUrlParam('sort_order', 'desc')
   const [adminId, setAdminId] = useUrlParam('admin_id', '')
+  const [externalSquad, setExternalSquad] = useUrlParam('external_squad', '')
+  const [userTag, setUserTag] = useUrlParam('tag', '')
   // Lock restricted admins to their own account
   // Unrestricted non-superadmins default to "any admin" (like superadmin)
   useEffect(() => {
@@ -882,12 +1005,12 @@ export default function Users() {
     }
   }, [isLockedToOwnAccount, isSuperadmin, unrestrictedUserAccess, accountId, adminId])
   const hasAnyFilterInUrl =
-    !!status || !!trafficType || !!expireFilter || !!onlineFilter || !!trafficUsage || (canChooseAdmin && !!adminId)
+    !!status || !!trafficType || !!expireFilter || !!onlineFilter || !!trafficUsage || (canChooseAdmin && !!adminId) || !!externalSquad || !!userTag
   const [showFilters, setShowFilters] = useState(hasAnyFilterInUrl)
 
   const activeFilterCount = useMemo(
-    () => [status, trafficType, expireFilter, onlineFilter, trafficUsage].filter(Boolean).length,
-    [status, trafficType, expireFilter, onlineFilter, trafficUsage],
+    () => [status, trafficType, expireFilter, onlineFilter, trafficUsage, externalSquad, userTag].filter(Boolean).length,
+    [status, trafficType, expireFilter, onlineFilter, trafficUsage, externalSquad, userTag],
   )
 
   // Export handlers
@@ -925,7 +1048,9 @@ export default function Users() {
     ...(onlineFilter && { onlineFilter }),
     ...(trafficUsage && { trafficUsage }),
     ...(adminId && { adminId }),
-  }), [status, trafficType, expireFilter, onlineFilter, trafficUsage, adminId])
+    ...(externalSquad && { externalSquad }),
+    ...(userTag && { userTag }),
+  }), [status, trafficType, expireFilter, onlineFilter, trafficUsage, adminId, externalSquad, userTag])
   const hasActiveFilters = activeFilterCount > 0
   const handleLoadFilter = useCallback((filters: Record<string, unknown>) => {
     setStatus((filters.status as string) || '')
@@ -934,6 +1059,8 @@ export default function Users() {
     setOnlineFilter((filters.onlineFilter as string) || '')
     setTrafficUsage((filters.trafficUsage as string) || '')
     setAdminId((filters.adminId as string) || '')
+    setExternalSquad((filters.externalSquad as string) || '')
+    setUserTag((filters.userTag as string) || '')
     setShowFilters(true)
     setPage(1)
   }, [])
@@ -963,7 +1090,7 @@ export default function Users() {
 
   // Fetch users
   const { data, isLoading, isFetching, isError, error, refetch } = useQuery({
-    queryKey: ['users', page, perPage, debouncedSearch, status, trafficType, expireFilter, onlineFilter, trafficUsage, sortBy, sortOrder, adminId],
+    queryKey: ['users', page, perPage, debouncedSearch, status, trafficType, expireFilter, onlineFilter, trafficUsage, sortBy, sortOrder, adminId, externalSquad, userTag],
     queryFn: () => {
       const p: Record<string, unknown> = {
         page,
@@ -974,6 +1101,8 @@ export default function Users() {
         expire_filter: expireFilter || undefined,
         online_filter: onlineFilter || undefined,
         traffic_usage: trafficUsage || undefined,
+        external_squad_uuid: externalSquad || undefined,
+        tag: userTag || undefined,
         sort_by: sortBy,
         sort_order: sortOrder,
       }
@@ -994,6 +1123,28 @@ export default function Users() {
     enabled: canChooseAdmin,
   })
   const admins: { id: number; username: string }[] = Array.isArray(adminsData?.items) ? adminsData.items : []
+
+  // Fetch external squads for filter dropdown
+  const { data: externalSquadsData } = useQuery<Squad[]>({
+    queryKey: ['external-squads'],
+    queryFn: async () => {
+      const { data } = await client.get('/users/meta/external-squads')
+      return Array.isArray(data) ? data : []
+    },
+    staleTime: 60_000,
+  })
+  const externalSquadsList: Squad[] = Array.isArray(externalSquadsData) ? externalSquadsData : []
+
+  // Fetch distinct user tags for filter dropdown
+  const { data: userTagsData } = useQuery<string[]>({
+    queryKey: ['user-tags'],
+    queryFn: async () => {
+      const { data } = await client.get('/users/meta/tags')
+      return Array.isArray(data) ? data : []
+    },
+    staleTime: 60_000,
+  })
+  const userTagsList: string[] = Array.isArray(userTagsData) ? userTagsData : []
 
   // Mutations
   const enableUser = useMutation({
@@ -1068,6 +1219,8 @@ export default function Users() {
     setExpireFilter('')
     setOnlineFilter('')
     setTrafficUsage('')
+    setExternalSquad('')
+    setUserTag('')
     setPage(1)
   }, [])
 
@@ -1439,6 +1592,38 @@ export default function Users() {
                   </div>
 
                   <div>
+                    <Label className="text-[11px] uppercase tracking-wider text-dark-300">{t('users.filters.externalSquad')}</Label>
+                    <Select value={externalSquad || '_all'} onValueChange={(v) => { setExternalSquad(v === '_all' ? '' : v); setPage(1) }}>
+                      <SelectTrigger className="mt-1">
+                        <SelectValue placeholder={t('users.filters.anyExternalSquad')} />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="_all">{t('users.filters.anyExternalSquad')}</SelectItem>
+                        {externalSquadsList.map((sq: Squad) => (
+                          <SelectItem key={sq.uuid} value={sq.uuid}>
+                            {sq.squadName || sq.name || sq.squadTag || sq.tag || sq.uuid}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div>
+                    <Label className="text-[11px] uppercase tracking-wider text-dark-300">{t('users.filters.tag')}</Label>
+                    <Select value={userTag || '_all'} onValueChange={(v) => { setUserTag(v === '_all' ? '' : v); setPage(1) }}>
+                      <SelectTrigger className="mt-1">
+                        <SelectValue placeholder={t('users.filters.anyTag')} />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="_all">{t('users.filters.anyTag')}</SelectItem>
+                        {userTagsList.map((tg) => (
+                          <SelectItem key={tg} value={tg}>{tg}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div>
                     <Label className="text-[11px] uppercase tracking-wider text-dark-300">{t('users.filters.perPage')}</Label>
                     <Select value={String(perPage)} onValueChange={(v) => { setPerPage(Number(v)); setPage(1) }}>
                       <SelectTrigger className="mt-1">
@@ -1508,6 +1693,18 @@ export default function Users() {
                   <FilterChip
                     label={`${t('users.filters.admin')}: ${admins.find(a => String(a.id) === adminId)?.username || adminId}`}
                     onRemove={() => { setAdminId(''); setPage(1) }}
+                  />
+                )}
+                {externalSquad && (
+                  <FilterChip
+                    label={`${t('users.filters.externalSquad')}: ${externalSquadsList.find(sq => sq.uuid === externalSquad)?.squadName || externalSquadsList.find(sq => sq.uuid === externalSquad)?.name || externalSquad}`}
+                    onRemove={() => { setExternalSquad(''); setPage(1) }}
+                  />
+                )}
+                {userTag && (
+                  <FilterChip
+                    label={`${t('users.filters.tag')}: ${userTag}`}
+                    onRemove={() => { setUserTag(''); setPage(1) }}
                   />
                 )}
                 <button onClick={resetFilters} className="text-[11px] text-dark-300 hover:text-primary-400 ml-1">

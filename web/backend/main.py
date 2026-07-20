@@ -45,11 +45,14 @@ from web.backend.api.v2 import agent_ws as agent_ws_api
 from web.backend.api.v2 import fleet as fleet_api
 from web.backend.api.v2 import terminal as terminal_api
 from web.backend.api.v2 import scripts as scripts_api
-from web.backend.api.v2 import tokens as tokens_api
 from web.backend.api.v2 import templates as templates_api
 from web.backend.api.v2 import snippets as snippets_api
 from web.backend.api.v2 import config_profiles as config_profiles_api
-from web.backend.api.v2 import billing as billing_api
+from web.backend.api.v2 import user_presets as user_presets_api
+from web.backend.api.v2 import finance as finance_api
+from web.backend.api.v2 import dns as dns_api
+from web.backend.api.v2 import bscheck as bscheck_api
+from web.backend.api.v2 import reputation as reputation_api
 from web.backend.api.v2 import reports as reports_api
 from web.backend.api.v2 import asn as asn_api
 from web.backend.api.v2 import collector as collector_api
@@ -541,6 +544,24 @@ async def lifespan(app: FastAPI):
                     from web.backend.core.task_scheduler import task_scheduler_loop
                     _bg_tasks.append(asyncio.create_task(task_scheduler_loop()))
 
+                    from web.backend.core.backup_service import backup_scheduler_loop
+                    _bg_tasks.append(asyncio.create_task(backup_scheduler_loop()))
+
+                    from web.backend.core.bscheck_scheduler import bscheck_scheduler_loop
+                    _bg_tasks.append(asyncio.create_task(bscheck_scheduler_loop()))
+
+                    from web.backend.core.finance.rates import rates_update_loop
+                    _bg_tasks.append(asyncio.create_task(rates_update_loop()))
+
+                    from web.backend.core.finance.reminders import reminders_loop
+                    _bg_tasks.append(asyncio.create_task(reminders_loop()))
+
+                    from web.backend.core.finance.sync import autosync_loop
+                    _bg_tasks.append(asyncio.create_task(autosync_loop()))
+
+                    from web.backend.core.finance.bedolaga_income import deposits_loop
+                    _bg_tasks.append(asyncio.create_task(deposits_loop()))
+
                 # ── Services for collector and full mode ──
                 if app_mode in ("collector", "full"):
                     async def _baseline_refresh_loop():
@@ -566,13 +587,13 @@ async def lifespan(app: FastAPI):
                     # юзеров с активными подключениями СЕЙЧАС, поэтому кросс-аккаунт HWID у оффлайн-
                     # абузеров не ловится. Этот цикл периодически ставит юзеров с общими HWID в очередь.
                     async def _hwid_scan_loop():
-                        from web.backend.api.v2.collector import _enqueue_violation_users
+                        from web.backend.api.v2.collector import _enqueue_violation_users, _shared_hwid_user_uuids
                         await asyncio.sleep(600)
                         while True:
                             try:
                                 if config_service.get("violations_enabled", True) and config_service.get("violations_analyzer_hwid", True):
-                                    rows = await db_service.get_shared_hwids(min_users=2, limit=1000)
-                                    uuids = {r["user_uuid"] for r in rows if r.get("user_uuid")}
+                                    groups = await db_service.get_shared_hwids(min_users=2, limit=1000)
+                                    uuids = _shared_hwid_user_uuids(groups)
                                     if uuids:
                                         _enqueue_violation_users(uuids)
                                         logger.info("HWID scan: %d users sharing HWIDs enqueued for violation check", len(uuids))
@@ -994,11 +1015,14 @@ def create_app() -> FastAPI:
         app.include_router(fleet_api.router, prefix="/api/v2/fleet", tags=["fleet"])
         app.include_router(terminal_api.router, prefix="/api/v2", tags=["terminal"])
         app.include_router(scripts_api.router, prefix="/api/v2/fleet", tags=["scripts"])
-        app.include_router(tokens_api.router, prefix="/api/v2/tokens", tags=["tokens"])
         app.include_router(templates_api.router, prefix="/api/v2/templates", tags=["templates"])
         app.include_router(snippets_api.router, prefix="/api/v2/snippets", tags=["snippets"])
         app.include_router(config_profiles_api.router, prefix="/api/v2/config-profiles", tags=["config-profiles"])
-        app.include_router(billing_api.router, prefix="/api/v2/billing", tags=["billing"])
+        app.include_router(finance_api.router, prefix="/api/v2/finance", tags=["finance"])
+        app.include_router(dns_api.router, prefix="/api/v2/dns", tags=["dns"])
+        app.include_router(bscheck_api.router, prefix="/api/v2/bscheck", tags=["bscheck"])
+        app.include_router(reputation_api.router, prefix="/api/v2/reputation", tags=["reputation"])
+        app.include_router(user_presets_api.router, prefix="/api/v2/user-presets", tags=["user-presets"])
         app.include_router(reports_api.router, prefix="/api/v2/reports", tags=["reports"])
         app.include_router(asn_api.router, prefix="/api/v2/asn", tags=["asn"])
         app.include_router(backup_api.router, prefix="/api/v2/backups", tags=["backups"])

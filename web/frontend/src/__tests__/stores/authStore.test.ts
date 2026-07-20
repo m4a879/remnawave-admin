@@ -278,6 +278,7 @@ describe('authStore', () => {
         unlimited_traffic_policy: 'allowed',
         auth_method: 'password',
         password_is_generated: false,
+        totp_enabled: false,
         unrestricted_user_access: false,
         permissions: [],
       })

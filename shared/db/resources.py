@@ -8,7 +8,7 @@ from typing import Any, Dict, List, Optional
 from shared.logger import logger
 from shared.db_schema import (
     HOSTS_TABLE, CONFIG_PROFILES_TABLE, SYNC_METADATA_TABLE,
-    API_TOKENS_TABLE, TEMPLATES_TABLE, SNIPPETS_TABLE,
+    TEMPLATES_TABLE, SNIPPETS_TABLE,
     INTERNAL_SQUADS_TABLE, EXTERNAL_SQUADS_TABLE, NODES_TABLE,
 )
 from shared.db_query import select_sql, insert_sql, update_sql, delete_sql
@@ -238,94 +238,6 @@ class ResourcesMixin:
             result="ok" if status == "success" else "error",
         ).inc()
     
-
-    # ==================== API Tokens Methods ====================
-    
-    async def upsert_token(self, data: Dict[str, Any]) -> bool:
-        """Upsert an API token."""
-        if not self.is_connected:
-            return False
-        
-        response = data.get("response", data)
-        if isinstance(response, list):
-            for token in response:
-                await self._upsert_single_token(token)
-            return True
-        
-        return await self._upsert_single_token(response)
-    
-    async def _upsert_single_token(self, token: Dict[str, Any]) -> bool:
-        """Upsert a single token."""
-        uuid = token.get("uuid")
-        if not uuid:
-            return False
-        
-        async with self.acquire() as conn:
-            await conn.execute(
-                insert_sql(
-                    API_TOKENS_TABLE,
-                    ["uuid", "name", "token_hash", "created_at", "updated_at", "raw_data"],
-                    values="$1, $2, $3, $4, NOW(), $5",
-                    suffix="""ON CONFLICT (uuid) DO UPDATE SET
-                    name = EXCLUDED.name,
-                    token_hash = EXCLUDED.token_hash,
-                    updated_at = NOW(),
-                    raw_data = EXCLUDED.raw_data""",
-                ),
-                uuid,
-                token.get("name") or token.get("tokenName"),
-                token.get("token") or token.get("tokenHash"),
-                _parse_timestamp(token.get("createdAt")),
-                json.dumps(token)
-            )
-        return True
-    
-    async def get_all_tokens(self) -> List[Dict[str, Any]]:
-        """Get all API tokens."""
-        if not self.is_connected:
-            return []
-        
-        async with self.acquire() as conn:
-            rows = await conn.fetch(
-                select_sql(API_TOKENS_TABLE, "*", "ORDER BY name")
-            )
-            return [_db_row_to_api_format(row) for row in rows]
-    
-    async def get_token_by_uuid(self, uuid: str) -> Optional[Dict[str, Any]]:
-        """Get token by UUID."""
-        if not self.is_connected:
-            return None
-        
-        async with self.acquire() as conn:
-            row = await conn.fetchrow(
-                select_sql(API_TOKENS_TABLE, "*", "WHERE uuid = $1"),
-                uuid
-            )
-            return _db_row_to_api_format(row) if row else None
-    
-    async def delete_token_from_db(self, uuid: str) -> bool:
-        """Delete token from DB by UUID."""
-        if not self.is_connected:
-            return False
-        
-        async with self.acquire() as conn:
-            result = await conn.execute(
-                delete_sql(API_TOKENS_TABLE, "uuid = $1"),
-                uuid
-            )
-            return result == "DELETE 1"
-    
-    async def delete_all_tokens(self) -> int:
-        """Delete all tokens. Returns count of deleted records."""
-        if not self.is_connected:
-            return 0
-        
-        async with self.acquire() as conn:
-            result = await conn.execute(delete_sql(API_TOKENS_TABLE, "TRUE"))
-            try:
-                return int(result.split()[-1])
-            except (IndexError, ValueError):
-                return 0
 
     # ==================== Templates Methods ====================
     

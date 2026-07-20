@@ -879,16 +879,6 @@ class RemnawaveApiClient(BaseHttpClient):
         """Get torrent blocker stats (summary + topUsers + topNodes)."""
         return await self._get("/api/node-plugins/torrent-blocker/stats")
 
-    # --- API Tokens ---
-    async def get_tokens(self) -> dict:
-        return await self._get("/api/tokens")
-
-    async def create_token(self, token_name: str) -> dict:
-        return await self._post("/api/tokens", json={"tokenName": token_name})
-
-    async def delete_token(self, token_uuid: str) -> dict:
-        return await self._delete(f"/api/tokens/{token_uuid}")
-
     # --- Subscription templates ---
     async def get_templates(self) -> dict:
         return await self._get("/api/subscription-templates")
@@ -905,18 +895,26 @@ class RemnawaveApiClient(BaseHttpClient):
         )
 
     async def update_template(
-        self, template_uuid: str, name: str | None = None, template_json: dict | None = None
+        self, template_uuid: str, name: str | None = None, template_json: dict | None = None,
+        encoded_template_yaml: str | None = None,
     ) -> dict:
         payload: dict[str, object] = {"uuid": template_uuid}
         if name:
             payload["name"] = name
         if template_json is not None:
             payload["templateJson"] = template_json
+        # YAML-шаблоны (MIHOMO/CLASH/STASH) хранятся base64-строкой отдельно от JSON
+        if encoded_template_yaml is not None:
+            payload["encodedTemplateYaml"] = encoded_template_yaml
         return await self._patch("/api/subscription-templates", json=payload)
 
     async def reorder_templates(self, uuids_in_order: list[str]) -> dict:
         items = [{"uuid": uuid, "viewPosition": idx + 1} for idx, uuid in enumerate(uuids_in_order)]
         return await self._post("/api/subscription-templates/actions/reorder", json={"items": items})
+
+    async def generate_x25519(self) -> dict:
+        """Пары ключей x25519 для Reality (панель: system/tools)."""
+        return await self._get("/api/system/tools/x25519/generate")
 
     # --- Snippets ---
     async def get_snippets(self) -> dict:
@@ -1095,6 +1093,14 @@ class RemnawaveApiClient(BaseHttpClient):
 
     async def get_subscription_by_uuid(self, uuid: str) -> dict:
         return await self._get(f"/api/subscriptions/by-uuid/{uuid}")
+
+    async def get_subscription_connection_keys(self, uuid: str) -> dict:
+        """Полные ключи подключения (vless://… по хостам), сгруппированные
+        enabledKeys/hiddenKeys/disabledKeys. Админский источник Panel API —
+        не гейтится HWID (в отличие от /sub/{short}/info).
+
+        Путь по контракту Remnawave: uuid ИДЁТ ПОСЛЕ connection-keys."""
+        return await self._get(f"/api/subscriptions/connection-keys/{uuid}")
 
     async def get_raw_subscription_by_short_uuid(self, short_uuid: str) -> dict:
         return await self._get(f"/api/subscriptions/by-short-uuid/{short_uuid}/raw")

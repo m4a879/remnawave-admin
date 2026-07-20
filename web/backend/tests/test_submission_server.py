@@ -324,3 +324,56 @@ class TestSubmissionHandler:
 
         result = await handler.handle_DATA(None, session, envelope)
         assert "550" in result
+
+    @pytest.mark.asyncio
+    async def test_handle_data_452_when_nothing_queued(self):
+        """If the outbound queue rejects everything (rate limit / transient
+        error), the client must get a 4xx — never a silent 250 that makes the
+        mail look 'sent' while it was dropped."""
+        handler = SubmissionHandler()
+        session = MagicMock()
+        session.smtp_credential_id = 1
+        session.smtp_username = "user"
+        session.smtp_allowed_domains = []
+
+        envelope = MagicMock()
+        envelope.mail_from = "sender@example.com"
+        envelope.rcpt_tos = ["recipient@example.com"]
+        envelope.content = (
+            b"From: sender@example.com\r\n"
+            b"To: recipient@example.com\r\n"
+            b"Subject: Test\r\n"
+            b"\r\n"
+            b"Hello world"
+        )
+
+        mock_queue = AsyncMock()
+        mock_queue.enqueue.return_value = None  # queue refused (rate limit)
+
+        with patch("web.backend.core.mail.outbound_queue.outbound_queue", mock_queue):
+            result = await handler.handle_DATA(None, session, envelope)
+
+        assert result.startswith("452")
+
+    @pytest.mark.asyncio
+    async def test_handle_data_250_on_partial(self):
+        """Some recipients queued, some rejected → keep 250 (avoid duplicate
+        resends of the ones that did go through)."""
+        handler = SubmissionHandler()
+        session = MagicMock()
+        session.smtp_credential_id = 1
+        session.smtp_username = "user"
+        session.smtp_allowed_domains = []
+
+        envelope = MagicMock()
+        envelope.mail_from = "sender@example.com"
+        envelope.rcpt_tos = ["a@example.com", "b@example.com"]
+        envelope.content = b"From: sender@example.com\r\nSubject: X\r\n\r\nBody"
+
+        mock_queue = AsyncMock()
+        mock_queue.enqueue.side_effect = [1, None]  # first ok, second rejected
+
+        with patch("web.backend.core.mail.outbound_queue.outbound_queue", mock_queue):
+            result = await handler.handle_DATA(None, session, envelope)
+
+        assert result.startswith("250")

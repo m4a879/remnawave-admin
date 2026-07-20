@@ -36,10 +36,10 @@ import {
   Share2,
   ShieldBan,
   Package,
-  FileJson,
   Wallet,
   FileText,
   Boxes,
+  Network,
   type LucideIcon,
 } from '@/components/brand/icons'
 import { useAuthStore } from '../../store/authStore'
@@ -102,8 +102,9 @@ const navigation: NavigationEntry[] = [
   { name: 'nav.nodes', href: '/nodes', icon: Server, permission: { resource: 'nodes', action: 'view' } },
   { name: 'nav.fleet', href: '/fleet', icon: Activity, permission: { resource: 'fleet', action: 'view' } },
   { name: 'nav.hosts', href: '/hosts', icon: Globe, permission: { resource: 'hosts', action: 'view' } },
-  { name: 'nav.billing', href: '/billing', icon: Wallet, permission: { resource: 'billing', action: 'view' } },
-  { name: 'nav.xrayEditor', href: '/resources/xray', icon: FileJson, permission: { resource: 'resources', action: 'view' } },
+  { name: 'nav.dns', href: '/dns', icon: Network, permission: { resource: 'dns', action: 'view' } },
+  { name: 'nav.bscheck', href: '/bscheck', icon: ShieldCheck, permission: { resource: 'bscheck', action: 'view' } },
+  { name: 'nav.finance', href: '/finance', icon: Wallet, permission: { resource: 'finance', action: 'view' } },
   { name: 'nav.resources', href: '/resources', icon: Boxes, permission: { resource: 'resources', action: 'view' } },
   // Security — «защищаюсь»
   { type: 'section', name: 'nav.sections.security' },

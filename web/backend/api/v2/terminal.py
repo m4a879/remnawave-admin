@@ -2,8 +2,10 @@
 
 Bridges browser xterm.js ↔ backend ↔ agent PTY session.
 
-WS /api/v2/fleet/{node_uuid}/terminal?token={jwt}
-Permission: fleet.terminal (superadmin only).
+WS /api/v2/fleet/{node_uuid}/terminal
+Permission: fleet.terminal — ГРАНТУЕМОЕ RBAC-право (НЕ только superadmin).
+Даёт интерактивный root-shell на ноде (эквивалент root на хосте) — выдавать
+с осторожностью, только доверенным ролям.
 """
 import asyncio
 import base64
@@ -15,7 +17,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from shared.db_schema import NODES_TABLE
 from shared.db_query import select_sql
 
-from web.backend.api.deps import get_current_admin_ws
+from web.backend.api.deps import get_current_admin_ws, ws_auth_invalid
 from web.backend.core.agent_manager import agent_manager
 from web.backend.core.agent_hmac import sign_command_with_ts
 from web.backend.core.terminal_sessions import terminal_manager, SESSION_COOLDOWN_SECONDS
@@ -97,7 +99,7 @@ async def terminal_websocket(
     # Create terminal session
     session = await terminal_manager.create_session(
         node_uuid=node_uuid,
-        admin_id=admin.id if hasattr(admin, 'id') else 0,
+        admin_id=admin.account_id or 0,
         admin_username=admin.username or str(admin.telegram_id),
         browser_ws=websocket,
     )
@@ -107,7 +109,7 @@ async def terminal_websocket(
         await asyncio.sleep(SESSION_COOLDOWN_SECONDS + 0.5)
         session = await terminal_manager.create_session(
             node_uuid=node_uuid,
-            admin_id=admin.id if hasattr(admin, 'id') else 0,
+            admin_id=admin.account_id or 0,
             admin_username=admin.username or str(admin.telegram_id),
             browser_ws=websocket,
         )
@@ -145,6 +147,13 @@ async def terminal_websocket(
 
         # Listen for browser input
         while True:
+            # Перепроверка авторизации: рвём root-терминал после logout / отзыва
+            # токена или сессии, а не только на handshake (H1).
+            reason = ws_auth_invalid(websocket)
+            if reason:
+                logger.info("Terminal closed mid-session (%s): node=%s admin=%s", reason, node_uuid, session.admin_username)
+                await websocket.close(code=4001, reason=reason)
+                break
             try:
                 data = await asyncio.wait_for(websocket.receive_text(), timeout=60.0)
             except asyncio.TimeoutError:
@@ -245,5 +254,15 @@ async def _relay_agent_to_browser(
     try:
         while True:
             await asyncio.sleep(30)
+            # Добить даже простаивающий терминал (нет ввода из браузера) после
+            # отзыва токена/сессии — иначе он висел бы до input-таймаута.
+            reason = ws_auth_invalid(websocket)
+            if reason:
+                logger.info("Terminal relay closing (%s): node=%s", reason, node_uuid)
+                try:
+                    await websocket.close(code=4001, reason=reason)
+                except Exception as e:  # noqa: BLE001
+                    logger.debug("Non-critical: %s", e)
+                break
     except asyncio.CancelledError:
         pass

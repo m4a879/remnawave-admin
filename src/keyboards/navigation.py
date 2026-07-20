@@ -16,7 +16,6 @@ class NavTarget:
     STATS_MENU = "stats_menu"
     TEMPLATES_MENU = "templates_menu"
     SNIPPETS_MENU = "snippets_menu"
-    TOKENS_MENU = "tokens_menu"
     HOSTS_MENU = "hosts_menu"
     NODES_LIST = "nodes_list"
     CONFIGS_MENU = "configs_menu"

@@ -101,7 +101,10 @@ class OutboundMailQueue:
                 if domain_id:
                     allowed = await self._check_rate_limit(conn, domain_id)
                     if not allowed:
-                        logger.warning("Rate limit exceeded for domain_id=%d", domain_id)
+                        logger.warning(
+                            "Rate limit exceeded for domain_id=%d (effective hourly cap reached)",
+                            domain_id,
+                        )
                         return None
 
                 row_id = await conn.fetchval(
@@ -357,20 +360,38 @@ class OutboundMailQueue:
 
         raise RuntimeError(f"All MX hosts failed: {last_error}")
 
+    def _effective_hourly_limit(self, domain_limit: Optional[int]) -> int:
+        """Resolve the effective hourly send cap for a domain.
+
+        A positive per-domain ``max_send_per_hour`` is an explicit override.
+        Otherwise (0 / NULL) the domain inherits the global default from
+        settings (``mailserver_max_send_per_hour``). A result ``<= 0`` means
+        unlimited. This is what makes the "Лимит отправки в час" setting in the
+        UI actually take effect — historically it was read nowhere.
+        """
+        if domain_limit and domain_limit > 0:
+            return int(domain_limit)
+        try:
+            from shared.config_service import config_service
+            return int(config_service.get("mailserver_max_send_per_hour", 100) or 0)
+        except Exception:
+            return 100
+
     async def _check_rate_limit(self, conn, domain_id: int) -> bool:
-        """Check if the domain is within its hourly send limit."""
+        """Check if the domain is within its effective hourly send limit."""
         row = await conn.fetchrow(
             select_sql(DOMAIN_CONFIG_TABLE, "max_send_per_hour", "WHERE id = $1"), domain_id,
         )
-        if not row or not row["max_send_per_hour"]:
-            return True
+        limit = self._effective_hourly_limit(row["max_send_per_hour"] if row else None)
+        if limit <= 0:
+            return True  # unlimited
 
         sent_count = await conn.fetchval(
             select_sql(EMAIL_QUEUE_TABLE, "COUNT(*)",
                 "WHERE domain_id = $1 AND created_at > NOW() - INTERVAL '1 hour'"),
             domain_id,
         )
-        return (sent_count or 0) < row["max_send_per_hour"]
+        return (sent_count or 0) < limit
 
 
 # Global instance

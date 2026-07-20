@@ -24,7 +24,6 @@ from src.handlers.hosts import _fetch_hosts_text, _handle_host_create_input, _se
 from src.handlers.nodes import _fetch_nodes_range_text, _fetch_nodes_realtime_text, _fetch_nodes_text, _handle_node_create_input, _handle_node_edit_input, _send_node_detail
 from src.handlers.navigation import _fetch_main_menu_text, _send_subscription_detail
 from src.handlers.resources import (
-    _create_token,
     _fetch_configs_text,
     _fetch_snippets_text,
     _handle_template_create_input,
@@ -34,7 +33,6 @@ from src.handlers.resources import (
     _send_snippet_detail,
     _send_template_detail,
     _send_templates,
-    _show_tokens,
     _upsert_snippet,
 )
 from src.handlers.system import _fetch_bandwidth_text, _fetch_health_text, _handle_asn_sync_custom_limit_input
@@ -425,27 +423,6 @@ async def cmd_sub(message: Message) -> None:
         return
     short_uuid = parts[1].strip()
     await _send_subscription_detail(message, short_uuid)
-
-
-@router.message(Command("tokens"))
-async def cmd_tokens(message: Message, admin: BotAdmin) -> None:
-    """Обработчик команды /tokens."""
-    if await _not_admin(message):
-        return
-    await _show_tokens(message, reply_markup=resources_menu_keyboard(admin=admin))
-
-
-@router.message(Command("token"))
-async def cmd_token_create(message: Message) -> None:
-    """Обработчик команды /token."""
-    if await _not_admin(message):
-        return
-    parts = message.text.split(maxsplit=1)
-    if len(parts) < 2:
-        await _send_clean_message(message, _("token.usage"))
-        return
-    name = parts[1].strip()
-    await _create_token(message, name)
 
 
 @router.message(Command("templates"))

@@ -642,10 +642,17 @@ async def get_shared_hwids(
     request: Request,
     min_users: int = Query(2, ge=2, le=10),
     limit: int = Query(50, ge=5, le=200),
-    admin: AdminUser = Depends(require_permission("analytics", "view")),
+    admin: AdminUser = Depends(require_permission("violations", "view")),
 ):
     """Get HWIDs shared across multiple user accounts."""
-    return await _compute_shared_hwids(min_users=min_users, limit=limit)
+    data = await _compute_shared_hwids(min_users=min_users, limit=limit)
+    # Порог «N аккаунтов на HWID -> hard_block» — вне кэша, чтобы UI видел смену настройки сразу
+    from shared.config_service import config_service
+    try:
+        threshold = int(config_service.get("violations_hard_block_hwid_accounts", 5) or 0)
+    except (TypeError, ValueError):
+        threshold = 0
+    return {**data, "hard_block_accounts_threshold": threshold}
 
 
 @cached("analytics:shared-hwids", ttl=CACHE_TTL_LONG, key_args=("min_users", "limit"))
@@ -1325,14 +1332,11 @@ async def get_ltv_estimate(
         avg_days = float(lifetime_row["avg_lifetime_days"] or 0)
         sample_size = lifetime_row["sample_size"] or 0
 
-        # Get cost per user from billing
+        # Get cost per user from finance module (регулярные расходы/мес в RUB)
         ltv = 0
         try:
-            from shared.api_client import api_client
-            nodes_result = await api_client.get_infra_billing_nodes()
-            nodes_resp = nodes_result.get("response", {})
-            stats = nodes_resp.get("stats", {}) if isinstance(nodes_resp, dict) else {}
-            monthly_cost = float(stats.get("currentMonthPayments", 0) or 0)
+            summary = await db_service.finance_summary(months=1)
+            monthly_cost = float(summary.get("recurring", {}).get("expense_rub", 0) or 0)
 
             active_count = (await db_service.get_users_count_by_status()).get("active", 1) or 1
             cost_per_user_month = monthly_cost / active_count if active_count > 0 else 0

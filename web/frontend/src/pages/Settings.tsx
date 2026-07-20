@@ -18,6 +18,10 @@ import {
   EyeOff,
   Copy,
   KeyRound,
+  Wrench,
+  Mail,
+  Gauge,
+  Server,
 } from '@/components/brand/icons'
 import { toast } from 'sonner'
 import client from '../api/client'
@@ -29,6 +33,11 @@ import { useFormatters } from '@/lib/useFormatters'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Card, CardContent } from '@/components/ui/card'
+import PasskeysBlock from '@/components/settings/PasskeysBlock'
+import OAuthBlock from '@/components/settings/OAuthBlock'
+import TotpBlock from '@/components/settings/TotpBlock'
+import TelegramBlock from '@/components/settings/TelegramBlock'
+import SessionsBlock from '@/components/settings/SessionsBlock'
 import { Badge } from '@/components/ui/badge'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
@@ -38,7 +47,6 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { cn } from '@/lib/utils'
-import Resources from './Resources'
 
 // Types matching backend ConfigItemResponse
 interface ConfigItem {
@@ -841,80 +849,131 @@ function IpWhitelistBlock() {
 }
 
 
+// Код-блок в ответе FAQ (моноширинный, с рамкой и копированием)
+function FaqCode({ code }: { code: string }) {
+  const [copied, setCopied] = useState(false)
+  return (
+    <div className="relative group">
+      <pre className="text-xs font-mono text-primary-100 bg-black/40 border border-[var(--glass-border)] rounded-lg p-3 pr-10 overflow-x-auto">
+        <code>{code}</code>
+      </pre>
+      <button
+        type="button"
+        onClick={() => { navigator.clipboard.writeText(code); setCopied(true); setTimeout(() => setCopied(false), 1500) }}
+        className="absolute top-2 right-2 p-1.5 rounded-md bg-white/5 hover:bg-white/10 text-dark-300 hover:text-white transition-colors"
+        aria-label="copy"
+      >
+        {copied ? <Check className="w-3.5 h-3.5 text-green-400" /> : <Copy className="w-3.5 h-3.5" />}
+      </button>
+    </div>
+  )
+}
+
+// Прозаический сегмент ответа с поддержкой инлайн-кода в одинарных backticks
+function FaqProse({ text }: { text: string }) {
+  const segs = text.split('`')
+  return (
+    <p className="text-sm text-dark-300 whitespace-pre-line leading-relaxed">
+      {segs.map((s, i) => (i % 2 === 1
+        ? <code key={i} className="px-1 py-0.5 rounded bg-white/5 text-primary-200 font-mono text-[12px]">{s}</code>
+        : <span key={i}>{s}</span>))}
+    </p>
+  )
+}
+
+// Ответ FAQ: ```…``` → код-блок, остальное → проза (с инлайн-кодом)
+function renderFaqAnswer(text: string) {
+  return text.split('```').map((part, i) => {
+    const trimmed = part.replace(/^\n+/, '').replace(/\n+$/, '')
+    if (i % 2 === 1) return <FaqCode key={i} code={trimmed} />
+    if (!trimmed) return null
+    return <FaqProse key={i} text={trimmed} />
+  })
+}
+
+// Разделы FAQ: порядок + иконка + ключи пунктов (тексты — в i18n settings.faq.*)
+const FAQ_CATEGORIES: { id: string; icon: React.ComponentType<{ className?: string }>; items: string[] }[] = [
+  { id: 'setup', icon: Wrench, items: ['dockerNetwork', 'panelPort', 'update', 'backup', 'resourceLimits'] },
+  { id: 'access', icon: Lock, items: ['authMethods', 'twoFactor', 'sessions', 'methodPolicy', 'passwordReset', 'passwordLogin'] },
+  { id: 'mail', icon: Mail, items: ['smtpRelay', 'mailServerSetup', 'notifyChannels'] },
+  { id: 'performance', icon: Gauge, items: ['highCpu', 'dbPool', 'violationQueue'] },
+  { id: 'infra', icon: Server, items: ['nodeOffline', 'agentInstall', 'alertSpam'] },
+]
+
 function FaqSection() {
   const { t } = useTranslation()
-  const [openItem, setOpenItem] = useState<number | null>(null)
+  const [openItem, setOpenItem] = useState<string | null>(null)
+  const [query, setQuery] = useState('')
 
-  const faqItems = [
-    {
-      q: t('settings.faq.items.panelPort.q'),
-      a: t('settings.faq.items.panelPort.a'),
-    },
-    {
-      q: t('settings.faq.items.passwordLogin.q'),
-      a: t('settings.faq.items.passwordLogin.a'),
-    },
-    {
-      q: t('settings.faq.items.highCpu.q'),
-      a: t('settings.faq.items.highCpu.a'),
-    },
-    {
-      q: t('settings.faq.items.nodeOffline.q'),
-      a: t('settings.faq.items.nodeOffline.a'),
-    },
-    {
-      q: t('settings.faq.items.alertSpam.q'),
-      a: t('settings.faq.items.alertSpam.a'),
-    },
-    {
-      q: t('settings.faq.items.dockerRestart.q'),
-      a: t('settings.faq.items.dockerRestart.a'),
-    },
-    {
-      q: t('settings.faq.items.dbPool.q'),
-      a: t('settings.faq.items.dbPool.a'),
-    },
-    {
-      q: t('settings.faq.items.passwordReset.q'),
-      a: t('settings.faq.items.passwordReset.a'),
-    },
-    {
-      q: t('settings.faq.items.smtp.q'),
-      a: t('settings.faq.items.smtp.a'),
-    },
-    {
-      q: t('settings.faq.items.violationQueue.q'),
-      a: t('settings.faq.items.violationQueue.a'),
-    },
-    {
-      q: t('settings.faq.items.resourceLimits.q'),
-      a: t('settings.faq.items.resourceLimits.a'),
-    },
-  ]
+  const q = query.trim().toLowerCase()
+  const categories = FAQ_CATEGORIES
+    .map((cat) => ({
+      ...cat,
+      entries: cat.items
+        .map((key) => ({ key, q: t(`settings.faq.items.${key}.q`), a: t(`settings.faq.items.${key}.a`) }))
+        .filter((it) => !q || it.q.toLowerCase().includes(q) || it.a.toLowerCase().includes(q)),
+    }))
+    .filter((cat) => cat.entries.length > 0)
 
   return (
-    <div className="space-y-2">
-      <p className="text-sm text-dark-300 mb-4">{t('settings.faq.description')}</p>
-      {faqItems.map((item, idx) => (
-        <Card key={idx} className="p-0 overflow-hidden">
-          <button
-            onClick={() => setOpenItem(openItem === idx ? null : idx)}
-            className="w-full flex items-center justify-between p-4 hover:bg-[var(--glass-bg)] transition-colors text-left"
-          >
-            <span className="text-sm font-medium text-white pr-4">{item.q}</span>
-            {openItem === idx ? (
-              <ChevronDown className="w-4 h-4 text-dark-300 shrink-0" />
-            ) : (
-              <ChevronRight className="w-4 h-4 text-dark-300 shrink-0" />
-            )}
-          </button>
-          {openItem === idx && (
-            <div className="px-4 pb-4 text-sm text-dark-300 whitespace-pre-line border-t border-[var(--glass-border)]">
-              <div className="pt-3">{item.a}</div>
+    <div className="space-y-6">
+      <div className="space-y-3">
+        <p className="text-sm text-dark-300">{t('settings.faq.description')}</p>
+        <div className="relative">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-dark-300 pointer-events-none" />
+          <Input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder={t('settings.faq.searchPlaceholder')}
+            className="pl-9"
+          />
+        </div>
+      </div>
+
+      {categories.length === 0 ? (
+        <p className="text-sm text-dark-300 text-center py-8">{t('settings.faq.empty')}</p>
+      ) : (
+        categories.map((cat) => {
+          const Icon = cat.icon
+          return (
+            <div key={cat.id} className="space-y-2">
+              <div className="flex items-center gap-2.5 px-1">
+                <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-primary-500/10 text-primary-400 shrink-0">
+                  <Icon className="w-4 h-4" />
+                </div>
+                <h3 className="text-sm font-semibold text-white">{t(`settings.faq.categories.${cat.id}`)}</h3>
+                <Badge variant="outline" className="ml-auto text-[10px]">{cat.entries.length}</Badge>
+              </div>
+              <div className="space-y-2">
+                {cat.entries.map((item) => {
+                  const id = `${cat.id}:${item.key}`
+                  const open = openItem === id
+                  return (
+                    <Card key={id} className="p-0 overflow-hidden">
+                      <button
+                        onClick={() => setOpenItem(open ? null : id)}
+                        className="w-full flex items-center justify-between p-4 hover:bg-[var(--glass-bg)] transition-colors text-left"
+                      >
+                        <span className="text-sm font-medium text-white pr-4">{item.q}</span>
+                        {open ? (
+                          <ChevronDown className="w-4 h-4 text-dark-300 shrink-0" />
+                        ) : (
+                          <ChevronRight className="w-4 h-4 text-dark-300 shrink-0" />
+                        )}
+                      </button>
+                      {open && (
+                        <div className="px-4 pb-4 border-t border-[var(--glass-border)]">
+                          <div className="pt-3 space-y-2.5">{renderFaqAnswer(item.a)}</div>
+                        </div>
+                      )}
+                    </Card>
+                  )
+                })}
+              </div>
             </div>
-          )}
-        </Card>
-      ))}
+          )
+        })
+      )}
     </div>
   )
 }
@@ -1444,12 +1503,17 @@ export default function Settings() {
       <Tabs defaultValue="general">
         <TabsList>
           <TabsTrigger value="general">{t('settings.tabs.general')}</TabsTrigger>
-          <TabsTrigger value="resources">{t('settings.tabs.resources')}</TabsTrigger>
+          <TabsTrigger value="auth">{t('settings.tabs.auth')}</TabsTrigger>
           <TabsTrigger value="faq">{t('settings.tabs.faq')}</TabsTrigger>
         </TabsList>
 
-        <TabsContent value="resources" className="mt-4">
-          <Resources embedded />
+        <TabsContent value="auth" className="space-y-6 mt-4">
+          <ChangePasswordBlock />
+          <TelegramBlock />
+          <TotpBlock />
+          <PasskeysBlock />
+          <OAuthBlock />
+          <SessionsBlock />
         </TabsContent>
 
         <TabsContent value="faq" className="mt-4">
@@ -1503,8 +1567,7 @@ export default function Settings() {
         />
       )}
 
-      {/* Security blocks */}
-      {!search && <ChangePasswordBlock />}
+      {/* Методы авторизации вынесены во вкладку «auth». Здесь — IP-доступ. */}
       {!search && <IpWhitelistBlock />}
 
       {/* Settings as accordion */}

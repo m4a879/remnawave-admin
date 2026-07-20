@@ -1,4 +1,5 @@
-import { useState, useMemo, useCallback, memo, lazy, Suspense, Fragment } from 'react'
+import { useState, useMemo, useCallback, useEffect, memo, lazy, Suspense } from 'react'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 import { useOpenUser } from '@/lib/useOpenUser'
@@ -15,12 +16,8 @@ import {
   Wifi,
   WifiOff,
   ChevronDown,
-  ChevronRight,
   Search,
   ArrowUpDown,
-  Fingerprint,
-  Smartphone,
-  Copy,
   Server,
   Cpu,
   Activity,
@@ -31,24 +28,17 @@ import {
   Download,
 } from '@/components/brand/icons'
 import {
-  AreaChart,
-  Area,
-  LineChart,
-  Line,
-  XAxis,
-  YAxis,
-  CartesianGrid,
   Tooltip as RechartsTooltip,
   ResponsiveContainer,
   PieChart,
   Pie,
   Cell,
-  Legend,
 } from 'recharts'
 import { toast } from 'sonner'
 import client from '@/api/client'
 import { advancedAnalyticsApi } from '@/api/advancedAnalytics'
-import type { GeoCity, GeoCityUser, TopUser, SharedHwidGroup, NodeFleetItem, RetentionCohort, NodeMetricsHistoryItem, NodeMetricsTimeseriesPoint, GeoBalanceNode, GeoBalanceRecommendation, IpExportItem } from '@/api/advancedAnalytics'
+import { InteractiveChart } from '@/components/charts/InteractiveChart'
+import type { GeoCity, GeoCityUser, TopUser, NodeFleetItem, RetentionCohort, NodeMetricsHistoryItem, NodeMetricsTimeseriesPoint, GeoBalanceNode, GeoBalanceRecommendation, IpExportItem } from '@/api/advancedAnalytics'
 import { ExportDropdown } from '@/components/ExportDropdown'
 import { exportCSV, exportJSON, formatBytesForExport } from '@/lib/export'
 
@@ -790,7 +780,6 @@ const UsageBar = memo(function UsageBar({ percent }: { percent: number }) {
 
 function OnlineTrendCard() {
   const { t } = useTranslation()
-  const chart = useChartTheme()
   const [period, setPeriod] = useUrlParam('online_period', '24h')
   const [aggRaw, setAgg] = useUrlParam('online_agg', 'avg')
   const aggregation = aggRaw === 'max' ? 'max' : 'avg'
@@ -837,32 +826,46 @@ function OnlineTrendCard() {
             </CardTitle>
             <InfoTooltip
               text={t('analytics.onlineTrend.tooltip', {
-                defaultValue: 'Сумма users_online по активным нодам. Снимок раз в 5 мин, агрегация в бакеты при чтении.',
+                defaultValue: 'Тот же онлайн, что на карточке «Сейчас онлайн» дашборда. Снимок раз в минуту; на 7д/30д точка графика — час/день, переключатель выбирает средний или пиковый онлайн внутри точки.',
               })}
               side="right"
             />
           </div>
           <div className="flex items-center gap-2 flex-wrap">
-            {/* Aggregation switch (slide-tab) */}
-            <div className="flex items-center gap-1 bg-[var(--glass-bg)] rounded-lg p-0.5">
-              {([
-                { value: 'avg', label: t('analytics.onlineTrend.avg', { defaultValue: 'Средний' }) },
-                { value: 'max', label: t('analytics.onlineTrend.max', { defaultValue: 'Максимум' }) },
-              ] as const).map((opt) => (
-                <button
-                  key={opt.value}
-                  onClick={() => setAgg(opt.value)}
-                  className={cn(
-                    'px-2.5 py-2 sm:py-1 text-xs rounded-md transition-all duration-200 min-h-[44px] sm:min-h-0',
-                    aggregation === opt.value
-                      ? 'bg-primary/20 text-primary-400 font-medium'
-                      : 'text-muted-foreground hover:text-white',
-                  )}
-                >
-                  {opt.label}
-                </button>
-              ))}
-            </div>
+            {/* Aggregation switch: точка графика на 7д = час, на 30д = день; переключатель
+                решает, показывать средний или пиковый онлайн внутри точки. На 24ч точка
+                минутная (один снимок), avg и max совпадают — переключатель прячем. */}
+            {period !== '24h' && (
+              <div className="flex items-center gap-1 bg-[var(--glass-bg)] rounded-lg p-0.5">
+                {([
+                  {
+                    value: 'avg',
+                    label: period === '30d'
+                      ? t('analytics.onlineTrend.avgDay', { defaultValue: 'Средний за день' })
+                      : t('analytics.onlineTrend.avgHour', { defaultValue: 'Средний за час' }),
+                  },
+                  {
+                    value: 'max',
+                    label: period === '30d'
+                      ? t('analytics.onlineTrend.peakDay', { defaultValue: 'Пик за день' })
+                      : t('analytics.onlineTrend.peakHour', { defaultValue: 'Пик за час' }),
+                  },
+                ] as const).map((opt) => (
+                  <button
+                    key={opt.value}
+                    onClick={() => setAgg(opt.value)}
+                    className={cn(
+                      'px-2.5 py-2 sm:py-1 text-xs rounded-md transition-all duration-200 min-h-[44px] sm:min-h-0',
+                      aggregation === opt.value
+                        ? 'bg-primary/20 text-primary-400 font-medium'
+                        : 'text-muted-foreground hover:text-white',
+                    )}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+            )}
             <PeriodSwitcher
               value={period}
               onChange={setPeriod}
@@ -889,7 +892,7 @@ function OnlineTrendCard() {
           <div className="h-[240px] flex items-center justify-center">
             <p className="text-sm text-muted-foreground">
               {t('analytics.onlineTrend.empty', {
-                defaultValue: 'Пока нет данных. Снимки накапливаются с 5-минутным интервалом.',
+                defaultValue: 'Пока нет данных. Снимки онлайна пишутся раз в минуту.',
               })}
             </p>
           </div>
@@ -909,46 +912,18 @@ function OnlineTrendCard() {
                 <span className="text-white font-mono ml-1">{chartData.length}</span>
               </span>
             </div>
-            <ResponsiveContainer width="100%" height={240}>
-              <AreaChart data={chartData}>
-                <defs>
-                  <linearGradient id="onlineGrad" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor={chart.accentColor} stopOpacity={0.35} />
-                    <stop offset="100%" stopColor={chart.accentColor} stopOpacity={0.02} />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid strokeDasharray="3 3" stroke={chart.grid} vertical={false} />
-                <XAxis
-                  dataKey="label"
-                  stroke={chart.axis}
-                  fontSize={10}
-                  tickLine={false}
-                  axisLine={false}
-                  interval="preserveStartEnd"
-                  minTickGap={20}
-                />
-                <YAxis
-                  stroke={chart.axis}
-                  fontSize={10}
-                  tickLine={false}
-                  axisLine={false}
-                  allowDecimals={false}
-                />
-                <RechartsTooltip contentStyle={chart.tooltipStyle} />
-                <Area
-                  type="monotone"
-                  dataKey="value"
-                  stroke={chart.accentColor}
-                  strokeWidth={2}
-                  fill="url(#onlineGrad)"
-                  dot={false}
-                  activeDot={{ r: 4, fill: chart.accentColor }}
-                  name={aggregation === 'max'
-                    ? t('analytics.onlineTrend.max', { defaultValue: 'Максимум' })
-                    : t('analytics.onlineTrend.avg', { defaultValue: 'Средний' })}
-                />
-              </AreaChart>
-            </ResponsiveContainer>
+            <InteractiveChart
+              data={chartData}
+              xKey="label"
+              height={240}
+              exportName={`online-trend-${period}`}
+              series={[{
+                key: 'value',
+                name: aggregation === 'max'
+                  ? t('analytics.onlineTrend.max', { defaultValue: 'Максимум' })
+                  : t('analytics.onlineTrend.avg', { defaultValue: 'Средний' }),
+              }]}
+            />
           </>
         )}
       </CardContent>
@@ -966,7 +941,6 @@ function TrendsCard() {
   const setCompare = (v: boolean) => setCompareRaw(v ? '1' : '')
   const [trendDateFrom, setTrendDateFrom] = useUrlParam('trend_from', '')
   const [trendDateTo, setTrendDateTo] = useUrlParam('trend_to', '')
-  const chart = useChartTheme()
 
   const hasCustomDates = Boolean(trendDateFrom)
   const apiDateFrom = hasCustomDates ? new Date(trendDateFrom).toISOString() : undefined
@@ -1014,6 +988,7 @@ function TrendsCard() {
       const points = tsData?.points || []
       const mapped = points.map((p) => ({
         date: formatDate(p.timestamp.split('T')[0]),
+        rawDate: p.timestamp.split('T')[0],
         value: p.value,
       }))
       const totalGrowth = points.reduce((s, p) => s + p.value, 0)
@@ -1024,6 +999,7 @@ function TrendsCard() {
 
     const mapped = series.map((p, i) => ({
       date: formatDate(p.date),
+      rawDate: p.date,
       value: p.value,
       prevValue: prevSeries[i]?.value ?? undefined,
     }))
@@ -1123,308 +1099,24 @@ function TrendsCard() {
             {t('analytics.trends.noData')}
           </div>
         ) : (
-          <div className="h-64">
-            <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={chartData}>
-                <defs>
-                  <linearGradient id="trendGradient" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor={chart.accentColor} stopOpacity={0.3} />
-                    <stop offset="95%" stopColor={chart.accentColor} stopOpacity={0} />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid
-                  strokeDasharray="3 3"
-                  stroke={chart.grid}
-                  vertical={false}
-                />
-                <XAxis
-                  dataKey="date"
-                  tick={{ fill: chart.tick, fontSize: 11 }}
-                  axisLine={false}
-                  tickLine={false}
-                />
-                <YAxis
-                  tick={{ fill: chart.tick, fontSize: 11 }}
-                  axisLine={false}
-                  tickLine={false}
-                  width={50}
-                  tickFormatter={(v: number) =>
-                    metric === 'traffic' ? formatBytesShort(v) : v.toLocaleString()
-                  }
-                />
-                <RechartsTooltip
-                  content={<TrendTooltip metric={metric} />}
-                  cursor={{ stroke: `${chart.accentColor}4D` }}
-                />
-                <Area
-                  type="monotone"
-                  dataKey="value"
-                  stroke={chart.accentColor}
-                  strokeWidth={2}
-                  fill="url(#trendGradient)"
-                  dot={false}
-                  activeDot={{ r: 4, fill: chart.accentColor }}
-                />
-                {compare && !isTraffic && (
-                  <Area
-                    type="monotone"
-                    dataKey="prevValue"
-                    stroke={chart.accentColor}
-                    strokeWidth={1.5}
-                    strokeDasharray="5 5"
-                    strokeOpacity={0.5}
-                    fill="none"
-                    dot={false}
-                  />
-                )}
-              </AreaChart>
-            </ResponsiveContainer>
-          </div>
-        )}
-      </CardContent>
-    </Card>
-  )
-}
-
-// ── Shared HWIDs Card ───────────────────────────────────────────
-
-type HwidFilter = 'all' | 'has_trial' | 'has_expired' | 'has_active'
-
-function SharedHwidsCard() {
-  const { t } = useTranslation()
-  const openUser = useOpenUser()
-  const [search, setSearch] = useState('')
-  const [expandedHwid, setExpandedHwid] = useState<string | null>(null)
-  const [filter, setFilter] = useState<HwidFilter>('all')
-
-  const { data, isLoading, isError, refetch } = useQuery({
-    queryKey: ['advanced-shared-hwids'],
-    queryFn: () => advancedAnalyticsApi.sharedHwids(),
-    staleTime: 60_000,
-    refetchInterval: 60_000,
-  })
-
-  const items: SharedHwidGroup[] = data?.items || []
-
-  const filtered = useMemo(() => {
-    let result = items
-    // Apply filter
-    if (filter === 'has_trial') {
-      result = result.filter((g) => g.users.some((u) => u.is_trial))
-    } else if (filter === 'has_expired') {
-      result = result.filter((g) => g.users.some((u) => !u.is_active && u.expire_date))
-    } else if (filter === 'has_active') {
-      result = result.filter((g) => g.users.some((u) => u.is_active))
-    }
-    // Apply search
-    if (search.trim()) {
-      const q = search.toLowerCase()
-      result = result.filter(
-        (g) =>
-          g.hwid.toLowerCase().includes(q) ||
-          g.users.some((u) => u.username?.toLowerCase().includes(q))
-      )
-    }
-    return result
-  }, [items, search, filter])
-
-  const truncHwid = (hwid: string) =>
-    hwid.length > 16 ? hwid.slice(0, 8) + '...' + hwid.slice(-4) : hwid
-
-  const copyHwid = (hwid: string) => {
-    navigator.clipboard.writeText(hwid)
-    toast.success(t('common.copied', { defaultValue: 'Copied' }))
-  }
-
-  const { formatDateShort: formatDate } = useFormatters()
-
-  return (
-    <Card className="animate-fade-in-up" style={{ animationDelay: '0.2s' }}>
-      <CardHeader className="pb-2">
-        <div className="flex items-center justify-between flex-wrap gap-2">
-          <div className="flex items-center gap-2">
-            <Fingerprint className="w-5 h-5 text-red-400" />
-            <CardTitle className="text-base">{t('analytics.sharedHwids.title')}</CardTitle>
-            <InfoTooltip text={t('analytics.sharedHwids.tooltip')} side="right" />
-            {items.length > 0 && (
-              <Badge variant="secondary" className="text-xs bg-red-500/20 text-red-300">
-                {items.length}
-              </Badge>
-            )}
-          </div>
-          <div className="flex items-center gap-1 flex-wrap">
-            <ExportDropdown
-              disabled={filtered.length === 0}
-              onExportCSV={() => exportCSV(filtered.flatMap((g) =>
-                g.users.map((u) => ({
-                  hwid: g.hwid, platform: g.platform ?? '', device: g.device_model ?? '',
-                  username: u.username, status: u.status, is_trial: u.is_trial, is_active: u.is_active,
-                }))
-              ), 'shared-hwids')}
-              onExportJSON={() => exportJSON(filtered, 'shared-hwids')}
-            />
-            {(['all', 'has_trial', 'has_active', 'has_expired'] as HwidFilter[]).map((f) => (
-              <Button
-                key={f}
-                variant={filter === f ? 'default' : 'outline'}
-                size="sm"
-                className="h-7 text-xs px-2.5"
-                onClick={() => setFilter(f)}
-              >
-                {t(`analytics.sharedHwids.filter.${f}`, {
-                  defaultValue: f === 'all' ? 'All' : f === 'has_trial' ? 'Trial' : f === 'has_active' ? 'Active' : 'Expired',
-                })}
-              </Button>
-            ))}
-          </div>
-          <div className="relative w-full sm:w-64">
-            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-            <Input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder={t('analytics.sharedHwids.searchPlaceholder')}
-              className="pl-9 h-8 text-sm"
-            />
-          </div>
-        </div>
-      </CardHeader>
-      <CardContent>
-        {isLoading ? (
-          <div className="space-y-3">
-            {Array.from({ length: 4 }).map((_, i) => (
-              <Skeleton key={i} className="h-14 w-full" />
-            ))}
-          </div>
-        ) : isError ? (
-          <QueryError onRetry={refetch} />
-        ) : filtered.length === 0 ? (
-          <div className="h-48 flex items-center justify-center text-muted-foreground">
-            <div className="text-center">
-              <Fingerprint className="w-12 h-12 mx-auto mb-2 opacity-30" />
-              <p>{t('analytics.sharedHwids.noData')}</p>
-              <p className="text-xs mt-1">{t('analytics.sharedHwids.noDataHint')}</p>
-            </div>
-          </div>
-        ) : (
-          <div className="space-y-2">
-            {filtered.map((group) => {
-              const isOpen = expandedHwid === group.hwid
-              return (
-                <Fragment key={group.hwid}>
-                  <div
-                    className={cn(
-                      'flex items-center gap-3 px-3 py-2.5 rounded-lg cursor-pointer transition-colors',
-                      isOpen
-                        ? 'bg-red-500/10 border border-red-500/20'
-                        : 'hover:bg-[var(--glass-bg-hover)]/40 border border-transparent'
-                    )}
-                    onClick={() => setExpandedHwid(isOpen ? null : group.hwid)}
-                  >
-                    {isOpen ? (
-                      <ChevronDown className="w-4 h-4 text-muted-foreground shrink-0" />
-                    ) : (
-                      <ChevronRight className="w-4 h-4 text-muted-foreground shrink-0" />
-                    )}
-
-                    <Smartphone className="w-4 h-4 text-muted-foreground shrink-0" />
-
-                    <button
-                      className="font-mono text-xs text-white hover:text-primary-400 transition-colors"
-                      title={group.hwid}
-                      onClick={(e) => { e.stopPropagation(); copyHwid(group.hwid) }}
-                    >
-                      {truncHwid(group.hwid)}
-                      <Copy className="w-3 h-3 inline ml-1 opacity-40" />
-                    </button>
-
-                    {group.platform && (
-                      <Badge variant="outline" className="text-[10px] h-5">
-                        {group.platform}
-                      </Badge>
-                    )}
-                    {group.device_model && (
-                      <span className="text-xs text-muted-foreground hidden sm:inline truncate max-w-[150px]">
-                        {group.device_model}
-                      </span>
-                    )}
-
-                    <div className="ml-auto flex items-center gap-1.5">
-                      {group.users.some((u) => u.is_trial) && (
-                        <Badge className="bg-yellow-500/20 text-yellow-300 text-[10px]">trial</Badge>
-                      )}
-                      <Badge className="bg-red-500/20 text-red-300 text-xs">
-                        {group.user_count} {t('analytics.sharedHwids.accounts')}
-                      </Badge>
-                    </div>
-                  </div>
-
-                  {isOpen && (
-                    <div className="ml-8 mb-2 border border-[var(--glass-border)] rounded-lg overflow-x-auto">
-                      <Table>
-                        <TableHeader>
-                          <TableRow>
-                            <TableHead className="text-xs">{t('analytics.topUsers.user')}</TableHead>
-                            <TableHead className="text-xs hidden sm:table-cell">{t('analytics.topUsers.status')}</TableHead>
-                            <TableHead className="text-xs hidden sm:table-cell">{t('analytics.sharedHwids.subscription', 'Подписка')}</TableHead>
-                            <TableHead className="text-xs hidden md:table-cell">{t('analytics.sharedHwids.createdAt')}</TableHead>
-                            <TableHead className="text-xs hidden md:table-cell">{t('analytics.sharedHwids.firstSeen')}</TableHead>
-                          </TableRow>
-                        </TableHeader>
-                        <TableBody>
-                          {group.users.map((user) => (
-                            <TableRow
-                              key={user.uuid}
-                              className="cursor-pointer hover:bg-[var(--glass-bg-hover)]/30"
-                              {...openUser(user.uuid)}
-                            >
-                              <TableCell>
-                                <div className="flex items-center gap-1.5">
-                                  <span className="font-medium text-white text-sm hover:text-primary-400 transition-colors">
-                                    {user.username || user.uuid.slice(0, 8)}
-                                  </span>
-                                  {user.is_trial && (
-                                    <Badge className="bg-yellow-500/20 text-yellow-300 text-[10px] px-1.5 py-0">trial</Badge>
-                                  )}
-                                </div>
-                              </TableCell>
-                              <TableCell className="hidden sm:table-cell">
-                                <Badge
-                                  variant="secondary"
-                                  className={cn('text-xs', STATUS_COLORS[user.status] || '')}
-                                >
-                                  {t(`analytics.status.${user.status}`, { defaultValue: user.status })}
-                                </Badge>
-                              </TableCell>
-                              <TableCell className="hidden sm:table-cell">
-                                {user.expire_date ? (
-                                  <Badge
-                                    variant="secondary"
-                                    className={cn('text-xs', user.is_active ? 'bg-green-500/20 text-green-300' : 'bg-[var(--glass-bg-hover)] text-dark-200')}
-                                  >
-                                    {user.is_active
-                                      ? t('analytics.sharedHwids.active', 'Активна')
-                                      : t('analytics.sharedHwids.expired', 'Истекла')}
-                                  </Badge>
-                                ) : (
-                                  <span className="text-xs text-dark-300">-</span>
-                                )}
-                              </TableCell>
-                              <TableCell className="hidden md:table-cell text-xs text-muted-foreground">
-                                {formatDate(user.created_at)}
-                              </TableCell>
-                              <TableCell className="hidden md:table-cell text-xs text-muted-foreground">
-                                {formatDate(user.hwid_first_seen)}
-                              </TableCell>
-                            </TableRow>
-                          ))}
-                        </TableBody>
-                      </Table>
-                    </div>
-                  )}
-                </Fragment>
-              )
-            })}
-          </div>
+          <InteractiveChart
+            data={chartData}
+            xKey="date"
+            rawKey="rawDate"
+            height={256}
+            exportName={`trend-${metric}-${period}`}
+            yFormatter={(v) => (metric === 'traffic' ? formatBytesShort(v) : v.toLocaleString())}
+            tooltip={<TrendTooltip metric={metric} />}
+            onRangeSelect={(from, to) => { setTrendDateFrom(from.slice(0, 10)); setTrendDateTo(to.slice(0, 10)) }}
+            series={
+              compare && !isTraffic
+                ? [
+                    { key: 'value', name: t(`analytics.trends.metric.${metric}`) },
+                    { key: 'prevValue', name: t('analytics.trends.compare', { defaultValue: 'Compare' }), dashed: true },
+                  ]
+                : [{ key: 'value', name: t(`analytics.trends.metric.${metric}`) }]
+            }
+          />
         )}
       </CardContent>
     </Card>
@@ -2210,7 +1902,6 @@ const METRIC_COLORS = { cpu: '#ef4444', memory: '#f59e0b', disk: '#3b82f6' }
 
 function NodeMetricsHistoryCard() {
   const { t } = useTranslation()
-  const chart = useChartTheme()
   const [period, setPeriod] = useState('24h')
 
   const { data, isLoading, isError, refetch } = useQuery({
@@ -2290,34 +1981,20 @@ function NodeMetricsHistoryCard() {
           <div className="space-y-4">
             {/* Overview chart */}
             {chartData.length > 1 && (
-              <div className="h-48">
-                <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={chartData}>
-                    <CartesianGrid strokeDasharray="3 3" stroke={chart.grid} vertical={false} />
-                    <XAxis dataKey="time" stroke={chart.axis} fontSize={10} tickLine={false} />
-                    <YAxis
-                      stroke={chart.axis}
-                      fontSize={10}
-                      tickLine={false}
-                      axisLine={false}
-                      domain={[0, 100]}
-                      tickFormatter={(v: number) => `${v}%`}
-                    />
-                    <RechartsTooltip
-                      contentStyle={chart.tooltipStyle}
-                      formatter={(value) => [`${value}%`]}
-                    />
-                    <Line type="monotone" dataKey="cpu" name="CPU" stroke={METRIC_COLORS.cpu} strokeWidth={2} dot={false} />
-                    <Line type="monotone" dataKey="memory" name="RAM" stroke={METRIC_COLORS.memory} strokeWidth={2} dot={false} />
-                    <Line type="monotone" dataKey="disk" name="Disk" stroke={METRIC_COLORS.disk} strokeWidth={2} dot={false} />
-                    <Legend
-                      verticalAlign="top"
-                      height={28}
-                      formatter={(value: string) => <span className="text-xs text-muted-foreground">{value}</span>}
-                    />
-                  </LineChart>
-                </ResponsiveContainer>
-              </div>
+              <InteractiveChart
+                data={chartData}
+                xKey="time"
+                height={192}
+                defaultType="line"
+                exportName="node-metrics"
+                yFormatter={(v) => `${v}%`}
+                tooltipFormatter={(v, n) => [`${v}%`, n]}
+                series={[
+                  { key: 'cpu', name: 'CPU', color: METRIC_COLORS.cpu },
+                  { key: 'memory', name: 'RAM', color: METRIC_COLORS.memory },
+                  { key: 'disk', name: 'Disk', color: METRIC_COLORS.disk },
+                ]}
+              />
             )}
 
             {/* Per-node table */}
@@ -2536,7 +2213,6 @@ function RetentionCard() {
 
 function ChurnCard() {
   const { t } = useTranslation()
-  const chartTheme = useChartTheme()
   const [period, setPeriod] = useState('month')
   const [months, setMonths] = useState('6')
 
@@ -2612,18 +2288,17 @@ function ChurnCard() {
         ) : (
           <>
             {/* Chart */}
-            <ResponsiveContainer width="100%" height={260}>
-              <AreaChart data={series}>
-                <CartesianGrid strokeDasharray="3 3" stroke={chartTheme.grid} />
-                <XAxis dataKey="period" tick={{ fill: chartTheme.tick, fontSize: 11 }} />
-                <YAxis tick={{ fill: chartTheme.tick, fontSize: 11 }} />
-                <RechartsTooltip contentStyle={chartTheme.tooltipStyle} />
-                <Area type="monotone" dataKey="active_users" stroke="#06b6d4" fill="#06b6d4" fillOpacity={0.15} name="Active" />
-                <Area type="monotone" dataKey="churned_users" stroke="#ef4444" fill="#ef4444" fillOpacity={0.2} name="Churned" />
-                <Area type="monotone" dataKey="new_users" stroke="#10b981" fill="#10b981" fillOpacity={0.1} name="New" />
-                <Legend />
-              </AreaChart>
-            </ResponsiveContainer>
+            <InteractiveChart
+              data={series}
+              xKey="period"
+              height={260}
+              exportName="churn-retention"
+              series={[
+                { key: 'active_users', name: 'Active', color: '#06b6d4' },
+                { key: 'new_users', name: 'New', color: '#10b981' },
+                { key: 'churned_users', name: 'Churned', color: '#ef4444' },
+              ]}
+            />
 
             {/* Table */}
             <div className="overflow-x-auto mt-4">
@@ -2908,7 +2583,6 @@ function GeoBalanceCard() {
 function TorrentAnalyticsCard() {
   const { t } = useTranslation()
   const openUser = useOpenUser()
-  const chart = useChartTheme()
   const [days, setDays] = useState('7')
 
   const { data, isLoading, isError, refetch } = useQuery({
@@ -2976,18 +2650,16 @@ function TorrentAnalyticsCard() {
 
             {/* Timeline chart */}
             {chartData.length > 1 && (
-              <div className="h-48">
-                <ResponsiveContainer width="100%" height="100%">
-                  <AreaChart data={chartData}>
-                    <CartesianGrid strokeDasharray="3 3" stroke={chart.grid} vertical={false} />
-                    <XAxis dataKey="date" stroke={chart.axis} fontSize={10} tickLine={false} />
-                    <YAxis stroke={chart.axis} fontSize={10} tickLine={false} axisLine={false} />
-                    <RechartsTooltip contentStyle={chart.tooltipStyle} />
-                    <Area type="monotone" dataKey="events" name={t('analytics.torrent.events', { defaultValue: 'Events' })} stroke="#ef4444" fill="#ef444420" strokeWidth={2} />
-                    <Area type="monotone" dataKey="users" name={t('analytics.torrent.users', { defaultValue: 'Users' })} stroke="#f97316" fill="#f9731620" strokeWidth={2} />
-                  </AreaChart>
-                </ResponsiveContainer>
-              </div>
+              <InteractiveChart
+                data={chartData}
+                xKey="date"
+                height={192}
+                exportName="torrent-timeline"
+                series={[
+                  { key: 'events', name: t('analytics.torrent.events', { defaultValue: 'Events' }), color: '#ef4444' },
+                  { key: 'users', name: t('analytics.torrent.users', { defaultValue: 'Users' }), color: '#f97316' },
+                ]}
+              />
             )}
 
             {/* Top destinations + Top users side by side */}
@@ -3060,13 +2732,22 @@ function TorrentAnalyticsCard() {
 
 // ── Main Page ───────────────────────────────────────────────────
 
-const VALID_TABS = ['geography', 'users', 'trends', 'shared-hwids', 'providers', 'nodes-traffic', 'nodes', 'geo-balance', 'torrent', 'retention'] as const
+const VALID_TABS = ['geography', 'users', 'trends', 'providers', 'nodes-traffic', 'nodes', 'geo-balance', 'torrent', 'retention'] as const
 
 export default function Analytics() {
   const { t } = useTranslation()
   const hasPermission = usePermissionStore((s) => s.hasPermission)
   const canViewAnalytics = hasPermission('analytics', 'view')
   const [tab, setTab] = useTabParam('geography', [...VALID_TABS])
+
+  // Таб «Общие HWID» переехал на страницу «Нарушения» — старые диплинки редиректим
+  const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
+  useEffect(() => {
+    if (searchParams.get('tab') === 'shared-hwids') {
+      navigate('/violations?tab=hwids', { replace: true })
+    }
+  }, [searchParams, navigate])
 
   if (!canViewAnalytics) {
     return (
@@ -3099,10 +2780,6 @@ export default function Analytics() {
           <TabsTrigger value="trends" className="gap-1.5">
             <TrendingUp className="w-4 h-4" />
             {t('analytics.tabs.trends')}
-          </TabsTrigger>
-          <TabsTrigger value="shared-hwids" className="gap-1.5">
-            <Fingerprint className="w-4 h-4" />
-            {t('analytics.tabs.sharedHwids')}
           </TabsTrigger>
           <TabsTrigger value="providers" className="gap-1.5">
             <Network className="w-4 h-4" />
@@ -3141,10 +2818,6 @@ export default function Analytics() {
         <TabsContent value="trends" className="space-y-4">
           <OnlineTrendCard />
           <TrendsCard />
-        </TabsContent>
-
-        <TabsContent value="shared-hwids">
-          <SharedHwidsCard />
         </TabsContent>
 
         <TabsContent value="providers">

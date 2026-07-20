@@ -4,8 +4,9 @@ import gzip as gzip_module
 import json
 import logging
 import os
+import re
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional, List
 
@@ -297,6 +298,48 @@ def get_backup_filepath(filename: str) -> Optional[Path]:
     return None
 
 
+def preview_backup_file(filename: str) -> dict:
+    """Return metadata about a backup file without restoring it.
+
+    For config (.json): exported_at, schema version, settings count.
+    For database (.sql.gz): PostgreSQL version from the dump header.
+    """
+    filepath = _safe_backup_path(filename)
+    if not filepath or not filepath.exists() or not filepath.is_file():
+        raise FileNotFoundError(f"Backup not found: {filename}")
+
+    stat = filepath.stat()
+    info = {
+        "filename": filename,
+        "size_bytes": stat.st_size,
+        "created_at": datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat(),
+    }
+
+    if filename.endswith(".json"):
+        info["type"] = "config"
+        try:
+            data = json.loads(filepath.read_text(encoding="utf-8"))
+            info["exported_at"] = data.get("exported_at")
+            info["schema_version"] = data.get("version")
+            info["settings_count"] = len(data.get("settings", []))
+        except Exception as e:
+            info["error"] = f"Не удалось прочитать JSON: {e}"
+    elif filename.endswith(".sql.gz"):
+        info["type"] = "database"
+        try:
+            with gzip_module.open(filepath, "rt", encoding="utf-8", errors="ignore") as f:
+                head = f.read(65536)
+            m = re.search(r"Dumped from database version ([\d.]+)", head)
+            if m:
+                info["pg_version"] = m.group(1)
+        except Exception as e:
+            info["error"] = f"Не удалось прочитать дамп: {e}"
+    else:
+        info["type"] = "unknown"
+
+    return info
+
+
 # ── Disk usage ───────────────────────────────────────────────
 
 def get_disk_usage() -> dict:
@@ -431,3 +474,210 @@ def save_uploaded_file(filename: str, content: bytes) -> dict:
         "size_bytes": len(content),
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
+
+
+# ── Scheduled auto-backup ────────────────────────────────────
+
+_last_auto_backup_ts: Optional[datetime] = None
+_last_deadman_alert_date: Optional[str] = None
+
+
+async def _notify_backup_failed(title: str, body: str, group_key: str = "backup_failed") -> None:
+    """Send a critical alert to admins (in-app + Telegram 'errors' topic)."""
+    try:
+        from web.backend.core.notification_service import create_notification
+        await create_notification(
+            title=title,
+            body=body,
+            type="alert",
+            severity="critical",
+            channels=["in_app", "telegram"],
+            topic_type="errors",
+            source="backup",
+            group_key=group_key,
+        )
+    except Exception as exc:
+        logger.warning("Failed to send backup alert: %s", exc)
+
+
+async def _get_last_successful_backup_ts() -> Optional[datetime]:
+    """created_at of the most recent successful DB/config backup, or None."""
+    try:
+        from shared.database import db_service
+        if not db_service.is_connected:
+            return None
+        async with db_service.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT created_at FROM backup_log "
+                "WHERE backup_type IN ('database','config') "
+                "AND status IN ('completed','success') "
+                "ORDER BY created_at DESC LIMIT 1"
+            )
+        return row["created_at"] if row else None
+    except Exception as exc:
+        logger.debug("Failed to read last backup: %s", exc)
+        return None
+
+
+async def _check_deadman() -> None:
+    """Alert (once a day) if no successful backup within backup_deadman_hours."""
+    global _last_deadman_alert_date
+    from shared.config_service import config_service
+
+    hours = int(config_service.get("backup_deadman_hours", 0) or 0)
+    if hours <= 0:
+        return
+
+    now = datetime.now(timezone.utc)
+    today = now.strftime("%Y-%m-%d")
+    if _last_deadman_alert_date == today:
+        return  # already alerted today
+
+    last = await _get_last_successful_backup_ts()
+    if last is not None and (now - last) <= timedelta(hours=hours):
+        return  # backup fresh enough
+
+    _last_deadman_alert_date = today
+    if last is None:
+        age = "успешных бэкапов не найдено"
+    else:
+        hrs = int((now - last).total_seconds() // 3600)
+        age = f"последний успешный бэкап был ~{hrs} ч назад"
+    await _notify_backup_failed(
+        title="Давно не было бэкапа",
+        body=f"Порог — {hours} ч, но {age}. Проверьте авто-бэкап.",
+        group_key="backup_deadman",
+    )
+
+
+async def _log_and_maybe_send(filename: str, backup_type: str, size_bytes: int, send_tg: bool) -> None:
+    """Write a history entry and optionally send the backup file to Telegram."""
+    try:
+        from web.backend.api.v2.backup import _log_backup
+
+        class _SchedulerAdmin:
+            id = None
+            username = "scheduler"
+            telegram_id = 0
+
+        await _log_backup(
+            filename=filename,
+            backup_type=backup_type,
+            size_bytes=size_bytes,
+            admin=_SchedulerAdmin(),
+            notes="Автоматический бэкап по расписанию",
+        )
+    except Exception as exc:
+        logger.debug("Scheduled backup log failed: %s", exc)
+
+    if not send_tg:
+        return
+    try:
+        from web.backend.core.config import get_web_settings
+        settings = get_web_settings()
+        chat_id = settings.notifications_chat_id
+        if not chat_id:
+            logger.warning("Scheduled backup: Telegram enabled but notifications_chat_id not set")
+            return
+        topic_id = None
+        topic_raw = settings.get_topic_for("service")
+        if topic_raw:
+            try:
+                topic_id = int(topic_raw)
+            except (TypeError, ValueError):
+                topic_id = None
+        await send_backup_to_telegram(filename=filename, chat_id=str(chat_id), topic_id=topic_id)
+        logger.info("Scheduled backup %s sent to Telegram", filename)
+    except Exception as exc:
+        logger.warning("Scheduled backup Telegram send failed: %s", exc)
+
+
+async def _run_auto_backup_if_due() -> None:
+    """Create a DB (and optionally config) backup when the schedule is due.
+
+    Two modes, config-driven:
+    - daily:    once a day at backup_auto_time (HH:MM UTC).
+    - interval: first at backup_auto_time, then every backup_auto_interval_hours.
+    """
+    global _last_auto_backup_ts
+    from shared.config_service import config_service
+
+    if not config_service.get("backup_auto_enabled", False):
+        return
+
+    now = datetime.now(timezone.utc)
+    current_time = now.strftime("%H:%M")
+    schedule_time = str(config_service.get("backup_auto_time", "03:00") or "03:00")
+    interval_hours = int(config_service.get("backup_auto_interval_hours", 0) or 0)
+
+    if interval_hours > 0:
+        # Interval mode: kick off at schedule_time, then every N hours
+        if _last_auto_backup_ts is None:
+            if current_time != schedule_time:
+                return
+        elif (now - _last_auto_backup_ts) < timedelta(hours=interval_hours) - timedelta(seconds=30):
+            return
+    else:
+        # Daily mode: once per day at schedule_time
+        if _last_auto_backup_ts is not None and \
+                _last_auto_backup_ts.strftime("%Y-%m-%d") == now.strftime("%Y-%m-%d"):
+            return
+        if current_time != schedule_time:
+            return
+
+    # Mark timestamp first to avoid a double run within the same minute
+    _last_auto_backup_ts = now
+
+    database_url = os.environ.get("DATABASE_URL")
+    if not database_url:
+        logger.warning("Scheduled backup skipped: DATABASE_URL not configured")
+        return
+
+    send_tg = bool(config_service.get("backup_auto_telegram", False))
+    also_config = bool(config_service.get("backup_auto_config", False))
+
+    # Database backup
+    logger.info("Running scheduled database backup...")
+    try:
+        result = await create_database_backup(database_url)
+    except Exception as exc:
+        logger.error("Scheduled DB backup failed: %s", exc)
+        await _notify_backup_failed("Бэкап БД не выполнен", f"Автоматический бэкап БД упал: {exc}")
+        return
+    logger.info("Scheduled DB backup created: %s (%s bytes)", result["filename"], result["size_bytes"])
+    await _log_and_maybe_send(result["filename"], "database", result["size_bytes"], send_tg)
+
+    # Config backup (optional)
+    if also_config:
+        try:
+            cfg = await export_config()
+            logger.info("Scheduled config backup created: %s (%s bytes)", cfg["filename"], cfg["size_bytes"])
+            await _log_and_maybe_send(cfg["filename"], "config", cfg["size_bytes"], send_tg)
+        except Exception as exc:
+            logger.warning("Scheduled config backup failed: %s", exc)
+            await _notify_backup_failed("Бэкап конфига не выполнен", f"Автоматический бэкап конфига упал: {exc}")
+
+    # Rotate old backups
+    try:
+        keep_count = int(config_service.get("backup_auto_keep_count", 10) or 10)
+        keep_days = int(config_service.get("backup_auto_keep_days", 30) or 30)
+        deleted = rotate_backups(keep_count=keep_count, keep_days=keep_days)
+        if deleted:
+            logger.info("Scheduled backup rotation: %d old backups removed", deleted)
+    except Exception as exc:
+        logger.warning("Scheduled backup rotation failed: %s", exc)
+
+
+async def backup_scheduler_loop() -> None:
+    """Background loop that triggers scheduled DB backups (config-driven)."""
+    await asyncio.sleep(120)  # startup delay
+    while True:
+        try:
+            await _run_auto_backup_if_due()
+        except Exception as exc:
+            logger.warning("Backup scheduler tick failed: %s", exc)
+        try:
+            await _check_deadman()
+        except Exception as exc:
+            logger.debug("Dead-man check failed: %s", exc)
+        await asyncio.sleep(60)

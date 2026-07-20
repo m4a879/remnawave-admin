@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { useQuery } from '@tanstack/react-query'
 import { useAuthStore } from '../store/authStore'
-import { authApi, TelegramUser, AuthMethods } from '../api/auth'
+import { authApi, TelegramUser, AuthMethods, OauthProvider } from '../api/auth'
 import client from '@/api/client'
 import {
   User,
@@ -313,6 +313,7 @@ export default function Login() {
   const {
     login,
     loginWithPassword,
+    loginWithPasskey,
     register,
     totpSetup,
     totpConfirmSetup,
@@ -341,6 +342,7 @@ export default function Login() {
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [showPasswordForm, setShowPasswordForm] = useState(false)
+  const [oauthProviders, setOauthProviders] = useState<OauthProvider[]>([])
 
   // TOTP state
   const [totpCode, setTotpCode] = useState('')
@@ -469,6 +471,31 @@ export default function Login() {
       }
     } catch (err) {
       console.error('Password login failed:', err)
+    }
+  }
+
+  const passkeySupported = typeof window !== 'undefined' && typeof window.PublicKeyCredential !== 'undefined'
+
+  useEffect(() => {
+    authApi.oauthProviders()
+      .then((p) => setOauthProviders(p.filter((x) => x.configured)))
+      .catch(() => {})
+  }, [])
+
+  const handlePasskeyLogin = async () => {
+    try {
+      await loginWithPasskey(showPasswordForm && username.trim() ? username.trim() : undefined)
+      navigate('/')
+    } catch (err) {
+      console.error('Passkey login failed:', err)
+    }
+  }
+
+  const handleOauth = async (slug: string) => {
+    try {
+      window.location.href = await authApi.oauthLoginUrl(slug)
+    } catch (err) {
+      console.error('OAuth login failed:', err)
     }
   }
 
@@ -1041,6 +1068,28 @@ export default function Login() {
                         </button>
                       </div>
                     )}
+
+                    {passkeySupported && (
+                      <button
+                        type="button"
+                        onClick={handlePasskeyLogin}
+                        className="w-full h-10 mt-3 rounded-xl border border-[var(--glass-border)] text-sm text-dark-100 hover:text-white hover:border-teal-500/40 transition-colors inline-flex items-center justify-center gap-2"
+                      >
+                        <KeyRound className="h-4 w-4" />
+                        {t('login.passkey')}
+                      </button>
+                    )}
+
+                    {oauthProviders.map((p) => (
+                      <button
+                        key={p.slug}
+                        type="button"
+                        onClick={() => handleOauth(p.slug)}
+                        className="w-full h-10 mt-3 rounded-xl border border-[var(--glass-border)] text-sm text-dark-100 hover:text-white hover:border-teal-500/40 transition-colors inline-flex items-center justify-center gap-2"
+                      >
+                        {t('login.oauthWith', { provider: p.name })}
+                      </button>
+                    ))}
                   </>
                 )}
               </>

@@ -1,5 +1,4 @@
 import { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useTabParam } from '@/lib/useTabParam'
 import { useTranslation } from 'react-i18next'
@@ -7,16 +6,15 @@ import { toast } from 'sonner'
 import {
   Plus,
   Trash2,
-  Copy,
-  Eye,
-  EyeOff,
-  FileText,
   Code,
   Settings,
   RefreshCw,
   FileJson,
 } from '@/components/brand/icons'
 import { resourcesApi, Template, Snippet, ConfigProfile } from '../api/resources'
+import { ProfileEditorDialog } from '@/components/code/ProfileEditorDialog'
+import { TemplateEditorDialog } from '@/components/code/TemplateEditorDialog'
+import { CodeEditor } from '@/components/code/CodeEditor'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
@@ -52,86 +50,24 @@ const TEMPLATE_TYPE_COLORS: Record<string, string> = {
   SINGBOX: 'bg-orange-500/15 text-orange-400 border-orange-500/20',
 }
 
-export default function Resources({ embedded }: { embedded?: boolean } = {}) {
+export default function Resources() {
   const { t } = useTranslation()
   const { formatDate } = useFormatters()
   const queryClient = useQueryClient()
-  const navigate = useNavigate()
 
   // Permissions
   const canCreate = useHasPermission('resources', 'create')
   const canUpdate = useHasPermission('resources', 'edit')
   const canDelete = useHasPermission('resources', 'delete')
 
-  // Tab state
-  const [activeTab, setActiveTab] = useTabParam('tokens', ['tokens', 'templates', 'snippets', 'profiles'])
-
-  // ── API Tokens ──────────────────────────────────────────────────
-  const [tokenDialogOpen, setTokenDialogOpen] = useState(false)
-  const [tokenName, setTokenName] = useState('')
-  const [createdToken, setCreatedToken] = useState<{ token: string; tokenName: string } | null>(null)
-  const [deleteTokenConfirm, setDeleteTokenConfirm] = useState<string | null>(null)
-  const [revealedTokens, setRevealedTokens] = useState<Set<string>>(new Set())
-
-  const { data: tokens = [], isLoading: tokensLoading, isError: isTokensError, refetch: refetchTokens } = useQuery({
-    queryKey: ['tokens'],
-    queryFn: resourcesApi.getTokens,
-  })
-
-  const createTokenMutation = useMutation({
-    mutationFn: (name: string) => resourcesApi.createToken(name),
-    onSuccess: (data) => {
-      setCreatedToken(data)
-      setTokenDialogOpen(false)
-      setTokenName('')
-      queryClient.invalidateQueries({ queryKey: ['tokens'] })
-      toast.success(t('resources.tokens.created'))
-    },
-    onError: () => {
-      toast.error(t('resources.tokens.createError'))
-    },
-  })
-
-  const deleteTokenMutation = useMutation({
-    mutationFn: (uuid: string) => resourcesApi.deleteToken(uuid),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['tokens'] })
-      toast.success(t('resources.tokens.deleted'))
-      setDeleteTokenConfirm(null)
-    },
-    onError: () => {
-      toast.error(t('resources.tokens.deleteError'))
-    },
-  })
-
-  const copyToClipboard = (text: string) => {
-    navigator.clipboard.writeText(text)
-    toast.success(t('common.copied'))
-  }
-
-  const toggleTokenReveal = (uuid: string) => {
-    setRevealedTokens((prev) => {
-      const next = new Set(prev)
-      if (next.has(uuid)) {
-        next.delete(uuid)
-      } else {
-        next.add(uuid)
-      }
-      return next
-    })
-  }
-
-  const maskToken = (token: string) => {
-    if (token.length <= 8) return '••••••••'
-    return token.slice(0, 4) + '••••••••' + token.slice(-4)
-  }
+  // Tab state — управление API-токенами панели убрано (только в самой Remnawave)
+  const [activeTab, setActiveTab] = useTabParam('templates', ['templates', 'snippets', 'profiles'])
 
   // ── Templates ───────────────────────────────────────────────────
   const [templateDialogOpen, setTemplateDialogOpen] = useState(false)
-  const [editTemplateDialogOpen, setEditTemplateDialogOpen] = useState(false)
   const [templateFormData, setTemplateFormData] = useState({ name: '', templateType: 'XRAY_JSON' })
+  // редактирование шаблона — вынесено во встроенный редактор (секции/дифф/история)
   const [editingTemplate, setEditingTemplate] = useState<Template | null>(null)
-  const [editTemplateForm, setEditTemplateForm] = useState({ name: '', templateJson: '' })
   const [deleteTemplateConfirm, setDeleteTemplateConfirm] = useState<string | null>(null)
 
   const { data: templates = [], isLoading: templatesLoading, isError: isTemplatesError, refetch: refetchTemplates } = useQuery({
@@ -153,20 +89,6 @@ export default function Resources({ embedded }: { embedded?: boolean } = {}) {
     },
   })
 
-  const updateTemplateMutation = useMutation({
-    mutationFn: (data: { uuid: string; name?: string; templateJson?: Record<string, unknown> }) =>
-      resourcesApi.updateTemplate(data.uuid, { name: data.name, templateJson: data.templateJson }),
-    onSuccess: () => {
-      setEditTemplateDialogOpen(false)
-      setEditingTemplate(null)
-      queryClient.invalidateQueries({ queryKey: ['templates'] })
-      toast.success(t('resources.templates.updated'))
-    },
-    onError: () => {
-      toast.error(t('resources.templates.updateError'))
-    },
-  })
-
   const deleteTemplateMutation = useMutation({
     mutationFn: (uuid: string) => resourcesApi.deleteTemplate(uuid),
     onSuccess: () => {
@@ -178,29 +100,6 @@ export default function Resources({ embedded }: { embedded?: boolean } = {}) {
       toast.error(t('resources.templates.deleteError'))
     },
   })
-
-  const openEditTemplate = (template: Template) => {
-    setEditingTemplate(template)
-    setEditTemplateForm({
-      name: template.name,
-      templateJson: JSON.stringify(template.templateJson, null, 2),
-    })
-    setEditTemplateDialogOpen(true)
-  }
-
-  const handleUpdateTemplate = () => {
-    if (!editingTemplate) return
-    try {
-      const json = JSON.parse(editTemplateForm.templateJson)
-      updateTemplateMutation.mutate({
-        uuid: editingTemplate.uuid,
-        name: editTemplateForm.name,
-        templateJson: json,
-      })
-    } catch {
-      toast.error(t('resources.templates.invalidJson'))
-    }
-  }
 
   // ── Snippets ────────────────────────────────────────────────────
   const [snippetDialogOpen, setSnippetDialogOpen] = useState(false)
@@ -284,63 +183,84 @@ export default function Resources({ embedded }: { embedded?: boolean } = {}) {
   }
 
   // ── Config Profiles ─────────────────────────────────────────────
-  const [viewConfigDialogOpen, setViewConfigDialogOpen] = useState(false)
-  const [viewingProfile, setViewingProfile] = useState<ConfigProfile | null>(null)
-  const [computedConfig, setComputedConfig] = useState<unknown>(null)
+  // встроенный редактор профиля (исходник + вычисленный, история версий)
+  const [editingProfile, setEditingProfile] = useState<ConfigProfile | null>(null)
+  const [createProfileOpen, setCreateProfileOpen] = useState(false)
+  const [newProfileName, setNewProfileName] = useState('')
+  const [renameProfile, setRenameProfile] = useState<{ uuid: string; name: string } | null>(null)
+  const [deleteProfileConfirm, setDeleteProfileConfirm] = useState<ConfigProfile | null>(null)
 
   const { data: configProfiles = [], isLoading: profilesLoading, isError: isProfilesError, refetch: refetchProfiles } = useQuery({
     queryKey: ['config-profiles'],
     queryFn: resourcesApi.getConfigProfiles,
   })
 
-  const hasError = isTokensError || isTemplatesError || isSnippetsError || isProfilesError
-  const handleRetry = () => { refetchTokens(); refetchTemplates(); refetchSnippets(); refetchProfiles() }
+  const createProfileMutation = useMutation({
+    mutationFn: (name: string) => resourcesApi.createConfigProfile(name),
+    onSuccess: (created) => {
+      queryClient.invalidateQueries({ queryKey: ['config-profiles'] })
+      setCreateProfileOpen(false)
+      setNewProfileName('')
+      toast.success(t('resources.profiles.created'))
+      // сразу в редактор — заполнять конфиг
+      if (created?.uuid) setEditingProfile(created)
+    },
+    onError: (e: { response?: { data?: { detail?: string } } }) =>
+      toast.error(e.response?.data?.detail || t('common.error')),
+  })
 
-  const viewComputedConfig = async (profile: ConfigProfile) => {
-    try {
-      const data = await resourcesApi.getComputedConfig(profile.uuid)
-      setViewingProfile(profile)
-      setComputedConfig(data)
-      setViewConfigDialogOpen(true)
-    } catch {
-      toast.error(t('resources.profiles.loadError'))
-    }
-  }
+  const renameProfileMutation = useMutation({
+    mutationFn: (p: { uuid: string; name: string }) => resourcesApi.renameConfigProfile(p.uuid, p.name),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['config-profiles'] })
+      setRenameProfile(null)
+      toast.success(t('common.saved'))
+    },
+    onError: (e: { response?: { data?: { detail?: string } } }) =>
+      toast.error(e.response?.data?.detail || t('common.saveError')),
+  })
+
+  const deleteProfileMutation = useMutation({
+    mutationFn: (uuid: string) => resourcesApi.deleteConfigProfile(uuid),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['config-profiles'] })
+      setDeleteProfileConfirm(null)
+      toast.success(t('common.deleted'))
+    },
+    // панель откажет, если профиль привязан к нодам — показываем причину
+    onError: (e: { response?: { data?: { detail?: string } } }) =>
+      toast.error(e.response?.data?.detail || t('common.error')),
+  })
+
+  const hasError = isTemplatesError || isSnippetsError || isProfilesError
+  const handleRetry = () => { refetchTemplates(); refetchSnippets(); refetchProfiles() }
 
   if (hasError) {
     return (
-      <div className={embedded ? 'space-y-4' : 'space-y-6'}>
-        {!embedded && (
-          <div className="page-header">
-            <div>
-              <h1 className="page-header-title">{t('resources.title')}</h1>
-              <p className="text-dark-200 mt-1">{t('resources.subtitle')}</p>
-            </div>
-          </div>
-        )}
-        <QueryError onRetry={handleRetry} />
-      </div>
-    )
-  }
-
-  return (
-    <div className={embedded ? 'space-y-4' : 'space-y-6'}>
-      {!embedded && (
+      <div className="space-y-6">
         <div className="page-header">
           <div>
             <h1 className="page-header-title">{t('resources.title')}</h1>
             <p className="text-dark-200 mt-1">{t('resources.subtitle')}</p>
           </div>
         </div>
-      )}
+        <QueryError onRetry={handleRetry} />
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-6">
+      <div className="page-header">
+        <div>
+          <h1 className="page-header-title">{t('resources.title')}</h1>
+          <p className="text-dark-200 mt-1">{t('resources.subtitle')}</p>
+        </div>
+      </div>
 
       {/* Tabs */}
       <Tabs value={activeTab} onValueChange={setActiveTab}>
         <TabsList>
-          <TabsTrigger value="tokens">
-            <FileText className="w-4 h-4 mr-2" />
-            {t('resources.tabs.tokens')}
-          </TabsTrigger>
           <TabsTrigger value="templates">
             <Code className="w-4 h-4 mr-2" />
             {t('resources.tabs.templates')}
@@ -354,92 +274,6 @@ export default function Resources({ embedded }: { embedded?: boolean } = {}) {
             {t('resources.tabs.profiles')}
           </TabsTrigger>
         </TabsList>
-
-        {/* ── Tab 1: API Tokens ────────────────────────────────── */}
-        <TabsContent value="tokens" className="space-y-4">
-          <div className="flex items-center justify-between">
-            <p className="text-sm text-dark-200">{t('resources.tokens.description')}</p>
-            <div className="flex gap-2">
-              <Button variant="outline" size="sm" onClick={() => refetchTokens()}>
-                <RefreshCw className="w-4 h-4" />
-              </Button>
-              {canCreate && (
-                <Button size="sm" onClick={() => setTokenDialogOpen(true)}>
-                  <Plus className="w-4 h-4 mr-2" />
-                  {t('resources.tokens.create')}
-                </Button>
-              )}
-            </div>
-          </div>
-
-          {tokensLoading ? (
-            <div className="space-y-3">
-              {[1, 2, 3].map((i) => (
-                <Skeleton key={i} className="h-24 w-full" />
-              ))}
-            </div>
-          ) : !Array.isArray(tokens) || tokens.length === 0 ? (
-            <Card className="border-[var(--glass-border)] bg-[var(--glass-bg)]">
-              <CardContent className="p-8 text-center">
-                <FileText className="w-12 h-12 mx-auto mb-3 text-dark-400" />
-                <p className="text-dark-200">{t('resources.tokens.empty')}</p>
-              </CardContent>
-            </Card>
-          ) : (
-            <div className="space-y-3">
-              {(Array.isArray(tokens) ? tokens : []).map((token) => {
-                const isRevealed = revealedTokens.has(token.uuid)
-                return (
-                  <Card key={token.uuid} className="border-[var(--glass-border)] bg-[var(--glass-bg)] hover:border-[var(--glass-border)] transition-colors">
-                    <CardContent className="p-4">
-                      <div className="flex items-start justify-between gap-4">
-                        <div className="flex-1 space-y-2">
-                          <div className="flex items-center gap-3">
-                            <h3 className="font-medium text-white">{token.tokenName}</h3>
-                            <Badge variant="outline" className="text-xs">
-                              {formatDate(token.createdAt)}
-                            </Badge>
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <code className="px-2 py-1 bg-[var(--glass-bg)] rounded text-xs font-mono text-dark-100 flex-1">
-                              {isRevealed ? token.token : maskToken(token.token)}
-                            </code>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => toggleTokenReveal(token.uuid)}
-                              className="h-7 px-2"
-                            >
-                              {isRevealed ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => copyToClipboard(token.token)}
-                              className="h-7 px-2"
-                            >
-                              <Copy className="w-4 h-4" />
-                            </Button>
-                          </div>
-                        </div>
-                        {canDelete && (
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => setDeleteTokenConfirm(token.uuid)}
-                            className="text-red-400 hover:text-red-300 hover:bg-red-500/10"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </Button>
-                        )}
-                      </div>
-                    </CardContent>
-                  </Card>
-                )
-              })}
-            </div>
-          )}
-        </TabsContent>
 
         {/* ── Tab 2: Templates ─────────────────────────────────── */}
         <TabsContent value="templates" className="space-y-4">
@@ -477,7 +311,7 @@ export default function Resources({ embedded }: { embedded?: boolean } = {}) {
                 <Card
                   key={template.uuid}
                   className="border-[var(--glass-border)] bg-[var(--glass-bg)] hover:border-[var(--glass-border)] transition-colors cursor-pointer"
-                  onClick={() => canUpdate && openEditTemplate(template)}
+                  onClick={() => canUpdate && setEditingTemplate(template)}
                 >
                   <CardContent className="p-4">
                     <div className="space-y-3">
@@ -594,9 +428,16 @@ export default function Resources({ embedded }: { embedded?: boolean } = {}) {
         <TabsContent value="profiles" className="space-y-4">
           <div className="flex items-center justify-between">
             <p className="text-sm text-dark-200">{t('resources.profiles.description')}</p>
-            <Button variant="outline" size="sm" onClick={() => refetchProfiles()}>
-              <RefreshCw className="w-4 h-4" />
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button variant="outline" size="sm" onClick={() => refetchProfiles()} aria-label={t('common.refresh')}>
+                <RefreshCw className="w-4 h-4" />
+              </Button>
+              {canCreate && (
+                <Button size="sm" className="gap-1.5" onClick={() => setCreateProfileOpen(true)}>
+                  <Plus className="w-4 h-4" /> {t('resources.profiles.create')}
+                </Button>
+              )}
+            </div>
           </div>
 
           {profilesLoading ? (
@@ -618,25 +459,37 @@ export default function Resources({ embedded }: { embedded?: boolean } = {}) {
                 <Card
                   key={profile.uuid}
                   className="border-[var(--glass-border)] bg-[var(--glass-bg)] hover:border-[var(--glass-border)] transition-colors cursor-pointer"
-                  onClick={() => viewComputedConfig(profile)}
+                  onClick={() => setEditingProfile(profile)}
                 >
                   <CardContent className="p-4">
                     <div className="space-y-3">
                       <div className="flex items-start justify-between gap-2">
                         <h3 className="font-medium text-white">{profile.name}</h3>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="h-7 px-2 text-xs shrink-0 text-dark-200 hover:text-white"
-                          title={t('resources.profiles.openInEditor')}
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            navigate(`/resources/xray?profile=${profile.uuid}`)
-                          }}
-                        >
-                          <FileJson className="w-3.5 h-3.5 mr-1" />
-                          {t('resources.profiles.openInEditor')}
-                        </Button>
+                        <div className="flex items-center shrink-0" onClick={(e) => e.stopPropagation()}>
+                          <Button
+                            variant="ghost" size="sm"
+                            className="h-7 px-2 text-xs text-dark-200 hover:text-white"
+                            title={t('resources.profiles.openInEditor')}
+                            onClick={() => setEditingProfile(profile)}
+                          >
+                            <FileJson className="w-3.5 h-3.5 mr-1" />
+                            {t('resources.profiles.openInEditor')}
+                          </Button>
+                          {canUpdate && (
+                            <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-dark-200 hover:text-white"
+                              title={t('resources.profiles.rename')} aria-label={t('resources.profiles.rename')}
+                              onClick={() => setRenameProfile({ uuid: profile.uuid, name: profile.name })}>
+                              <Settings className="w-3.5 h-3.5" />
+                            </Button>
+                          )}
+                          {canDelete && (
+                            <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-red-400 hover:text-red-300"
+                              title={t('common.delete')} aria-label={t('common.delete')}
+                              onClick={() => setDeleteProfileConfirm(profile)}>
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </Button>
+                          )}
+                        </div>
                       </div>
                       <div className="text-xs text-dark-300 space-y-1">
                         <div>{t('resources.uuid')} {profile.uuid.slice(0, 8)}...</div>
@@ -654,79 +507,67 @@ export default function Resources({ embedded }: { embedded?: boolean } = {}) {
 
       {/* ── Dialogs ────────────────────────────────────────────── */}
 
-      {/* Create Token Dialog */}
-      <Dialog open={tokenDialogOpen} onOpenChange={setTokenDialogOpen}>
-        <DialogContent>
+      {/* Встроенный редактор профиля xray */}
+      <ProfileEditorDialog profile={editingProfile} onClose={() => setEditingProfile(null)} />
+
+      {/* Встроенный редактор шаблона (секции/дифф/история) */}
+      <TemplateEditorDialog template={editingTemplate} onClose={() => setEditingTemplate(null)} />
+
+      {/* Создание профиля */}
+      <Dialog open={createProfileOpen} onOpenChange={setCreateProfileOpen}>
+        <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>{t('resources.tokens.createTitle')}</DialogTitle>
-            <DialogDescription>{t('resources.tokens.createDescription')}</DialogDescription>
+            <DialogTitle>{t('resources.profiles.createTitle')}</DialogTitle>
+            <DialogDescription>{t('resources.profiles.createDescription')}</DialogDescription>
           </DialogHeader>
-          <div className="space-y-4">
-            <div>
-              <Label htmlFor="tokenName">{t('resources.tokens.nameLabel')}</Label>
-              <Input
-                id="tokenName"
-                value={tokenName}
-                onChange={(e) => setTokenName(e.target.value)}
-                placeholder={t('resources.tokens.namePlaceholder')}
-                className="mt-1"
-              />
-            </div>
+          <div>
+            <Label htmlFor="newProfileName">{t('resources.profiles.nameLabel')}</Label>
+            <Input id="newProfileName" value={newProfileName} className="mt-1"
+              placeholder="Germany-Reality" maxLength={30}
+              onChange={(e) => setNewProfileName(e.target.value)} />
+            <p className="text-[11px] text-dark-300 mt-1">{t('resources.profiles.nameHint')}</p>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setTokenDialogOpen(false)}>
-              {t('common.cancel')}
-            </Button>
+            <Button variant="outline" onClick={() => setCreateProfileOpen(false)}>{t('common.cancel')}</Button>
             <Button
-              onClick={() => createTokenMutation.mutate(tokenName)}
-              disabled={!tokenName.trim() || createTokenMutation.isPending}
-            >
-              {createTokenMutation.isPending ? t('common.creating') : t('common.create')}
+              disabled={newProfileName.trim().length < 2 || !/^[A-Za-z0-9_\s-]+$/.test(newProfileName.trim()) || createProfileMutation.isPending}
+              onClick={() => createProfileMutation.mutate(newProfileName.trim())}>
+              {createProfileMutation.isPending ? t('common.creating') : t('common.create')}
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
-      {/* Show Created Token Dialog */}
-      <Dialog open={!!createdToken} onOpenChange={() => setCreatedToken(null)}>
-        <DialogContent>
+      {/* Переименование профиля */}
+      <Dialog open={renameProfile !== null} onOpenChange={(o) => !o && setRenameProfile(null)}>
+        <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>{t('resources.tokens.tokenCreated')}</DialogTitle>
-            <DialogDescription>{t('resources.tokens.tokenCreatedDescription')}</DialogDescription>
+            <DialogTitle>{t('resources.profiles.renameTitle')}</DialogTitle>
           </DialogHeader>
-          <div className="space-y-4">
-            <div>
-              <Label>{t('resources.tokens.nameLabel')}</Label>
-              <Input value={createdToken?.tokenName || ''} readOnly className="mt-1" />
-            </div>
-            <div>
-              <Label>{t('resources.tokens.tokenLabel')}</Label>
-              <div className="flex gap-2 mt-1">
-                <Input value={createdToken?.token || ''} readOnly className="font-mono" />
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => createdToken && copyToClipboard(createdToken.token)}
-                >
-                  <Copy className="w-4 h-4" />
-                </Button>
-              </div>
-            </div>
+          <div>
+            <Label htmlFor="renameProfileName">{t('resources.profiles.nameLabel')}</Label>
+            <Input id="renameProfileName" value={renameProfile?.name || ''} className="mt-1" maxLength={30}
+              onChange={(e) => renameProfile && setRenameProfile({ ...renameProfile, name: e.target.value })} />
           </div>
           <DialogFooter>
-            <Button onClick={() => setCreatedToken(null)}>{t('common.close')}</Button>
+            <Button variant="outline" onClick={() => setRenameProfile(null)}>{t('common.cancel')}</Button>
+            <Button
+              disabled={!renameProfile || renameProfile.name.trim().length < 2 || !/^[A-Za-z0-9_\s-]+$/.test(renameProfile.name.trim()) || renameProfileMutation.isPending}
+              onClick={() => renameProfile && renameProfileMutation.mutate({ uuid: renameProfile.uuid, name: renameProfile.name.trim() })}>
+              {renameProfileMutation.isPending ? t('common.saving') : t('common.save')}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
-      {/* Delete Token Confirm */}
+      {/* Удаление профиля */}
       <ConfirmDialog
-        open={!!deleteTokenConfirm}
-        onOpenChange={(open) => !open && setDeleteTokenConfirm(null)}
-        title={t('resources.tokens.deleteTitle')}
-        description={t('resources.tokens.deleteDescription')}
+        open={deleteProfileConfirm !== null}
+        onOpenChange={(open) => !open && setDeleteProfileConfirm(null)}
+        title={t('resources.profiles.deleteTitle', { name: deleteProfileConfirm?.name })}
+        description={t('resources.profiles.deleteDescription')}
         variant="destructive"
-        onConfirm={() => deleteTokenConfirm && deleteTokenMutation.mutate(deleteTokenConfirm)}
+        onConfirm={() => deleteProfileConfirm && deleteProfileMutation.mutate(deleteProfileConfirm.uuid)}
       />
 
       {/* Create Template Dialog */}
@@ -780,46 +621,6 @@ export default function Resources({ embedded }: { embedded?: boolean } = {}) {
         </DialogContent>
       </Dialog>
 
-      {/* Edit Template Dialog */}
-      <Dialog open={editTemplateDialogOpen} onOpenChange={setEditTemplateDialogOpen}>
-        <DialogContent className="w-[95vw] max-w-3xl">
-          <DialogHeader>
-            <DialogTitle>{t('resources.templates.editTitle')}</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4">
-            <div>
-              <Label htmlFor="editTemplateName">{t('resources.templates.nameLabel')}</Label>
-              <Input
-                id="editTemplateName"
-                value={editTemplateForm.name}
-                onChange={(e) => setEditTemplateForm({ ...editTemplateForm, name: e.target.value })}
-                className="mt-1"
-              />
-            </div>
-            <div>
-              <Label htmlFor="editTemplateJson">{t('resources.templates.jsonLabel')}</Label>
-              <textarea
-                id="editTemplateJson"
-                value={editTemplateForm.templateJson}
-                onChange={(e) => setEditTemplateForm({ ...editTemplateForm, templateJson: e.target.value })}
-                className="mt-1 w-full h-64 px-3 py-2 bg-[var(--glass-bg)] border border-[var(--glass-border)] rounded-md text-sm font-mono text-dark-50 focus:outline-none focus:ring-2 focus:ring-primary-500"
-                placeholder="{}"
-              />
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setEditTemplateDialogOpen(false)}>
-              {t('common.cancel')}
-            </Button>
-            <Button
-              onClick={handleUpdateTemplate}
-              disabled={!editTemplateForm.name.trim() || updateTemplateMutation.isPending}
-            >
-              {updateTemplateMutation.isPending ? t('common.saving') : t('common.save')}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
 
       {/* Delete Template Confirm */}
       <ConfirmDialog
@@ -851,13 +652,13 @@ export default function Resources({ embedded }: { embedded?: boolean } = {}) {
             </div>
             <div>
               <Label htmlFor="snippetJson">{t('resources.snippets.jsonLabel')}</Label>
-              <textarea
-                id="snippetJson"
-                value={snippetFormData.snippet}
-                onChange={(e) => setSnippetFormData({ ...snippetFormData, snippet: e.target.value })}
-                className="mt-1 w-full h-64 px-3 py-2 bg-[var(--glass-bg)] border border-[var(--glass-border)] rounded-md text-sm font-mono text-dark-50 focus:outline-none focus:ring-2 focus:ring-primary-500"
-                placeholder="{}"
-              />
+              <div className="mt-1 h-72">
+                <CodeEditor
+                  value={snippetFormData.snippet}
+                  onChange={(v) => setSnippetFormData({ ...snippetFormData, snippet: v })}
+                  schema="json"
+                />
+              </div>
             </div>
           </div>
           <DialogFooter>
@@ -893,13 +694,13 @@ export default function Resources({ embedded }: { embedded?: boolean } = {}) {
             </div>
             <div>
               <Label htmlFor="editSnippetJson">{t('resources.snippets.jsonLabel')}</Label>
-              <textarea
-                id="editSnippetJson"
-                value={editSnippetForm.snippet}
-                onChange={(e) => setEditSnippetForm({ ...editSnippetForm, snippet: e.target.value })}
-                className="mt-1 w-full h-64 px-3 py-2 bg-[var(--glass-bg)] border border-[var(--glass-border)] rounded-md text-sm font-mono text-dark-50 focus:outline-none focus:ring-2 focus:ring-primary-500"
-                placeholder="{}"
-              />
+              <div className="mt-1 h-72">
+                <CodeEditor
+                  value={editSnippetForm.snippet}
+                  onChange={(v) => setEditSnippetForm({ ...editSnippetForm, snippet: v })}
+                  schema="json"
+                />
+              </div>
             </div>
           </div>
           <DialogFooter>
@@ -926,32 +727,6 @@ export default function Resources({ embedded }: { embedded?: boolean } = {}) {
         onConfirm={() => deleteSnippetConfirm && deleteSnippetMutation.mutate(deleteSnippetConfirm)}
       />
 
-      {/* View Computed Config Dialog */}
-      <Dialog open={viewConfigDialogOpen} onOpenChange={setViewConfigDialogOpen}>
-        <DialogContent className="w-[95vw] max-w-3xl">
-          <DialogHeader>
-            <DialogTitle>
-              {t('resources.profiles.viewTitle')}: {viewingProfile?.name}
-            </DialogTitle>
-            <DialogDescription>{t('resources.profiles.viewDescription')}</DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4">
-            <pre className="w-full max-h-96 overflow-auto px-3 py-2 bg-[var(--glass-bg)] border border-[var(--glass-border)] rounded-md text-xs font-mono text-dark-50">
-              {JSON.stringify(computedConfig, null, 2)}
-            </pre>
-          </div>
-          <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => computedConfig && copyToClipboard(JSON.stringify(computedConfig, null, 2))}
-            >
-              <Copy className="w-4 h-4 mr-2" />
-              {t('common.copy')}
-            </Button>
-            <Button onClick={() => setViewConfigDialogOpen(false)}>{t('common.close')}</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </div>
   )
 }

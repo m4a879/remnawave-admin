@@ -3,11 +3,11 @@ import asyncio
 import json
 import logging
 from datetime import datetime
-from typing import Set, Dict, Any
+from typing import Set, Dict, Any, Optional, Tuple
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
-from web.backend.api.deps import get_current_admin_ws, AdminUser
+from web.backend.api.deps import get_current_admin_ws, ws_auth_invalid, AdminUser
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -19,6 +19,7 @@ class ConnectionManager:
     def __init__(self):
         self.active_connections: Set[WebSocket] = set()
         self._subscriptions: Dict[WebSocket, Set[str]] = {}
+        self._admins: Dict[WebSocket, AdminUser] = {}
         self._lock = asyncio.Lock()
 
     async def connect(self, websocket: WebSocket, admin: AdminUser):
@@ -29,6 +30,7 @@ class ConnectionManager:
         async with self._lock:
             self.active_connections.add(websocket)
             self._subscriptions[websocket] = set()
+            self._admins[websocket] = admin  # для RBAC-фильтра рассылки
         logger.info(f"WebSocket connected: admin {admin.telegram_id or admin.username} ({admin.auth_method})")
         logger.info(f"Active connections: {len(self.active_connections)}")
 
@@ -37,7 +39,19 @@ class ConnectionManager:
         async with self._lock:
             self.active_connections.discard(websocket)
             self._subscriptions.pop(websocket, None)
+            self._admins.pop(websocket, None)
         logger.info(f"WebSocket disconnected. Active: {len(self.active_connections)}")
+
+    @staticmethod
+    def _admin_can(admin: Optional[AdminUser], permission: Optional[Tuple[str, str]]) -> bool:
+        """Есть ли у админа право на событие (superadmin/legacy — всегда)."""
+        if permission is None:
+            return True
+        if admin is None:
+            return False
+        if getattr(admin, "account_id", None) is None or admin.role == "superadmin":
+            return True
+        return admin.has_permission(permission[0], permission[1])
 
     def subscribe(self, websocket: WebSocket, topics: list):
         """Подписать клиента на topics."""
@@ -48,8 +62,13 @@ class ConnectionManager:
         """Проверить есть ли подписчики на topic."""
         return any(topic in subs for subs in self._subscriptions.values())
 
-    async def broadcast(self, message: Dict[str, Any], topic: str = None):
-        """Отправить сообщение клиентам (параллельно). Если topic указан — только подписчикам."""
+    async def broadcast(self, message: Dict[str, Any], topic: str = None,
+                        permission: Optional[Tuple[str, str]] = None):
+        """Отправить сообщение клиентам (параллельно).
+
+        topic — только подписчикам; permission (resource, action) — только тем,
+        у кого есть право (RBAC-фильтр, чтобы события не текли между скоупами).
+        """
         if not self.active_connections:
             return
 
@@ -57,10 +76,15 @@ class ConnectionManager:
         if topic:
             targets = {ws for ws in self.active_connections
                        if topic in self._subscriptions.get(ws, set())}
-            if not targets:
-                return
         else:
             targets = self.active_connections.copy()
+
+        # RBAC-фильтр: событие уходит только админам с нужным правом
+        if permission is not None:
+            targets = {ws for ws in targets if self._admin_can(self._admins.get(ws), permission)}
+
+        if not targets:
+            return
 
         data = json.dumps(message, default=str)
 
@@ -126,6 +150,11 @@ async def websocket_endpoint(websocket: WebSocket):
 
         # Слушаем сообщения от клиента
         while True:
+            # Перепроверка авторизации: рвём push-поток после logout/отзыва (H1)
+            reason = ws_auth_invalid(websocket)
+            if reason:
+                await websocket.close(code=4001, reason=reason)
+                break
             try:
                 data = await asyncio.wait_for(
                     websocket.receive_text(),
@@ -189,7 +218,7 @@ async def broadcast_violation(violation_data: Dict[str, Any]):
         "type": "violation",
         "data": violation_data,
         "timestamp": datetime.utcnow().isoformat(),
-    })
+    }, permission=("violations", "view"))
     # Dispatch to automation engine (fire-and-forget)
     try:
         from web.backend.core.automation_engine import engine as automation_engine
@@ -204,7 +233,7 @@ async def broadcast_connection(connection_data: Dict[str, Any]):
         "type": "connection",
         "data": connection_data,
         "timestamp": datetime.utcnow().isoformat(),
-    })
+    }, permission=("users", "view"))
 
 
 async def broadcast_node_status(node_data: Dict[str, Any]):
@@ -213,7 +242,7 @@ async def broadcast_node_status(node_data: Dict[str, Any]):
         "type": "node_status",
         "data": node_data,
         "timestamp": datetime.utcnow().isoformat(),
-    })
+    }, permission=("nodes", "view"))
     # Dispatch to automation engine (fire-and-forget)
     try:
         from web.backend.core.automation_engine import engine as automation_engine
@@ -230,7 +259,7 @@ async def broadcast_user_update(user_data: Dict[str, Any]):
         "type": "user_update",
         "data": user_data,
         "timestamp": datetime.utcnow().isoformat(),
-    })
+    }, permission=("users", "view"))
     # Dispatch traffic exceeded events to automation engine (fire-and-forget)
     try:
         from web.backend.core.automation_engine import engine as automation_engine
@@ -264,7 +293,7 @@ async def broadcast_agent_v2_status(node_uuid: str, is_connected: bool):
             "connected": is_connected,
         },
         "timestamp": datetime.utcnow().isoformat(),
-    })
+    }, permission=("nodes", "view"))
 
 
 async def broadcast_audit_event(
@@ -283,7 +312,7 @@ async def broadcast_audit_event(
             "resource_id": resource_id,
         },
         "timestamp": datetime.utcnow().isoformat(),
-    })
+    }, permission=("admins", "view"))
 
 
 async def broadcast_dashboard_stats(stats: Dict[str, Any]):

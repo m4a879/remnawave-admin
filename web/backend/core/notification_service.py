@@ -335,6 +335,14 @@ async def send_webhook(
     extra: Optional[Dict[str, Any]] = None,
 ) -> bool:
     """Send notification to a webhook URL (Discord, Slack compatible)."""
+    # SSRF-защита: не даём слать на приватные/служебные адреса (метаданные облака и т.п.)
+    from web.backend.core.webhook_security import check_url_safety
+    ok, reason = check_url_safety(url)
+    if not ok:
+        logger.warning("send_webhook blocked (SSRF): %s", reason)
+        NOTIFICATIONS_FAILED.labels(channel="webhook").inc()
+        return False
+
     payload = {
         "title": title,
         "body": body,
@@ -744,6 +752,27 @@ async def notify_login_success(ip: str, username: str, auth_method: str) -> None
         f"<b>Time:</b> {_now_str()}",
     ]
     asyncio.create_task(_send_to_global_telegram("Admin login", "\n".join(lines), "info", "service"))
+
+
+async def notify_bscheck_drop(node: str, ip: str, passed: int, total: int, prev_passed: int) -> None:
+    """Алерт: у ноды упало число операторов, проходящих БС (авто-проверка)."""
+    lines = [
+        f"<b>Node:</b> {_esc_html(node)}",
+        f"<b>IP:</b> <code>{_esc_html(ip)}</code>",
+        f"<b>БС прошло:</b> {passed}/{total} (было {prev_passed})",
+        f"<b>Time:</b> {_now_str()}",
+    ]
+    asyncio.create_task(_send_to_global_telegram("BS-Check: просадка БС", "\n".join(lines), "warning", "service"))
+
+
+async def notify_rkn_blocked(target: str, rkn_domain) -> None:
+    """Алерт: цель попала в реестр РКН (авто-проверка репутации)."""
+    lines = [
+        f"<b>Target:</b> <code>{_esc_html(target)}</code>",
+        f"<b>РКН:</b> в реестре{(' · ' + _esc_html(str(rkn_domain))) if rkn_domain else ''}",
+        f"<b>Time:</b> {_now_str()}",
+    ]
+    asyncio.create_task(_send_to_global_telegram("BS-Check: блокировка РКН", "\n".join(lines), "warning", "service"))
 
 
 async def notify_ip_blocked(ip: str, lockout_seconds: int, failures: int) -> None:

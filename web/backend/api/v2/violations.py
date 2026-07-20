@@ -585,6 +585,89 @@ async def get_user_violations(
     return items
 
 
+@router.get("/score-distribution")
+async def get_score_distribution(
+    days: int = Query(30, ge=1, le=365),
+    admin: AdminUser = Depends(require_permission("violations", "view")),
+    db: DatabaseService = Depends(get_db),
+):
+    """Гистограмма score нарушений + текущий порог min_score — для тюнинга."""
+    from shared.config_service import config_service
+    hist = await db.get_violation_score_histogram(days=days, bucket=5)
+    try:
+        min_score = float(config_service.get("violations_min_score", 50) or 50)
+    except (TypeError, ValueError):
+        min_score = 50.0
+    hist["min_score"] = min_score
+    hist["days"] = days
+    return hist
+
+
+@router.get("/user/{user_uuid}/timeline")
+async def get_user_timeline(
+    user_uuid: str = Path(..., pattern=r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'),
+    days: int = Query(30, ge=1, le=365),
+    admin: AdminUser = Depends(require_permission("violations", "view")),
+    db: DatabaseService = Depends(get_db),
+):
+    """Единая лента событий юзера: нарушения + сессии подключений + HWID-устройства."""
+    from web.backend.core.rbac import get_visible_user_uuids
+    visible = await get_visible_user_uuids(admin)
+    if visible is not None and user_uuid.lower() not in visible:
+        raise api_error(403, E.FORBIDDEN)
+
+    events: list[dict] = []
+
+    # нарушения
+    for v in await db.get_user_violations(user_uuid=user_uuid, days=days):
+        ts = v.get('detected_at')
+        score = float(v.get('score', 0) or 0)
+        events.append({
+            'type': 'violation',
+            'ts': ts.isoformat() if hasattr(ts, 'isoformat') else str(ts),
+            'id': v.get('id'),
+            'score': score,
+            'severity': get_severity(score),
+            'action': v.get('recommended_action') or v.get('action_taken'),
+            'reasons': v.get('reasons') or [],
+        })
+
+    # сессии подключений
+    try:
+        for c in await db.get_user_connection_history(user_uuid, days=days, limit=300):
+            dev = c.get('device_info') or {}
+            events.append({
+                'type': 'connection',
+                'ts': c.get('connected_at'),
+                'ip': c.get('ip_address'),
+                'node_name': c.get('node_name'),
+                'disconnected_at': c.get('disconnected_at'),
+                'platform': (dev.get('platform') if isinstance(dev, dict) else None),
+                'user_agent': (dev.get('userAgent') or dev.get('user_agent') if isinstance(dev, dict) else None),
+            })
+    except Exception as e:
+        logger.warning("timeline connections failed for %s: %s", user_uuid, e)
+
+    # HWID-устройства (первое появление)
+    try:
+        for d in await db.get_user_hwid_devices(user_uuid):
+            ts = d.get('created_at')
+            events.append({
+                'type': 'hwid',
+                'ts': ts.isoformat() if hasattr(ts, 'isoformat') else str(ts),
+                'hwid': d.get('hwid'),
+                'platform': d.get('platform'),
+                'device_model': d.get('device_model'),
+                'app_version': d.get('app_version'),
+            })
+    except Exception as e:
+        logger.warning("timeline hwid failed for %s: %s", user_uuid, e)
+
+    # сортировка по времени (свежие сверху); пустые ts — в конец
+    events.sort(key=lambda e: e.get('ts') or '', reverse=True)
+    return {'items': events, 'total': len(events)}
+
+
 @router.get("/export/csv")
 @limiter.limit(RATE_EXPORT)
 async def export_violations_csv(

@@ -141,6 +141,7 @@ class HwidCrossAccountAnalyzer:
                 other_accounts_count=other_count,
                 other_accounts=all_other_usernames[:10],
                 matched_details=matched_details[:20],
+                max_accounts_per_hwid=max_distinct_accounts_per_hwid,
             )
 
         # Скоринг — чем сильнее превышение порога, тем выше
@@ -181,6 +182,7 @@ class HwidCrossAccountAnalyzer:
             other_accounts=all_other_usernames[:10],
             matched_details=matched_details[:20],
             per_account_abuse=per_account_threshold_hit,
+            max_accounts_per_hwid=max_distinct_accounts_per_hwid,
         )
 
 

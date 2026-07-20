@@ -38,6 +38,13 @@ SUBSCRIPTION_REQUEST_HISTORY_TABLE = "subscription_request_history"
 BLOCKED_IPS_TABLE = "blocked_ips"
 HWID_BLACKLIST_TABLE = "hwid_blacklist"
 USER_BLACKLIST_TABLE = "user_blacklist"
+FINANCE_CATEGORIES_TABLE = "finance_categories"
+FINANCE_PROVIDERS_TABLE = "finance_providers"
+FINANCE_ITEMS_TABLE = "finance_items"
+FINANCE_PAYMENTS_TABLE = "finance_payments"
+FINANCE_RATES_TABLE = "finance_rates"
+FINANCE_ACCOUNTS_TABLE = "finance_provider_accounts"
+FINANCE_SNAPSHOTS_TABLE = "finance_balance_snapshots"
 ACCESS_POLICIES_TABLE = "access_policies"
 ACCESS_POLICY_RULES_TABLE = "access_policy_rules"
 ROLE_ACCESS_POLICIES_TABLE = "role_access_policies"
@@ -64,6 +71,13 @@ EMAIL_INBOX_TABLE = "email_inbox"
 SMTP_CREDENTIALS_TABLE = "smtp_credentials"
 SCHEDULED_TASKS_TABLE = "scheduled_tasks"
 NODE_TRAFFIC_SNAPSHOTS_TABLE = "node_traffic_snapshots"
+CONFIG_VERSIONS_TABLE = "config_versions"
+USER_PRESETS_TABLE = "user_presets"
+NODE_BSCHECK_TABLE = "node_bscheck"
+BSCHECK_JOBS_TABLE = "bscheck_jobs"
+WEBAUTHN_CREDENTIALS_TABLE = "webauthn_credentials"
+OAUTH_LINKS_TABLE = "oauth_links"
+ADMIN_SESSIONS_TABLE = "admin_sessions"
 ONLINE_USERS_SNAPSHOTS_TABLE = "online_users_snapshots"
 USER_NODE_TRAFFIC_HISTORY_TABLE = "user_node_traffic_history"
 ASN_RUSSIA_TABLE = "asn_russia"
@@ -146,6 +160,7 @@ ADMIN_UPDATE_COLUMNS: List[str] = [
     "unlimited_traffic_policy",
     "unrestricted_user_access",
     "has_bot_access",
+    "allowed_auth_methods",
 ]
 
 ADMIN_UPDATE_COLUMNS_SET = frozenset(ADMIN_UPDATE_COLUMNS)

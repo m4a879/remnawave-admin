@@ -77,10 +77,8 @@ import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Separator } from '@/components/ui/separator'
-import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { cn } from '@/lib/utils'
 import { ConfirmDialog } from '@/components/ConfirmDialog'
-import Billing from './Billing'
 import { ViewToggle } from '@/components/ViewToggle'
 import { useViewMode } from '@/lib/useViewMode'
 import { NodesTable } from '@/components/nodes/NodesTable'
@@ -1523,17 +1521,7 @@ export default function Nodes() {
         </div>
       </div>
 
-      <Tabs defaultValue="nodes">
-        <TabsList>
-          <TabsTrigger value="nodes">{t('nodes.tabs.nodes')}</TabsTrigger>
-          <TabsTrigger value="billing">{t('nodes.tabs.billing')}</TabsTrigger>
-        </TabsList>
-
-        <TabsContent value="billing" className="mt-4">
-          <Billing embedded />
-        </TabsContent>
-
-        <TabsContent value="nodes" className="space-y-6 mt-4">
+      <div className="space-y-6">
 
       {/* Stats */}
       <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-3 md:gap-4">
@@ -1792,8 +1780,7 @@ export default function Nodes() {
           onClose={() => setIpsNode(null)}
         />
       )}
-        </TabsContent>
-      </Tabs>
+      </div>
     </div>
   )
 }

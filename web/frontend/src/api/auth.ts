@@ -1,5 +1,39 @@
 import axios, { AxiosError } from 'axios'
+import { startRegistration, startAuthentication } from '@simplewebauthn/browser'
 import client from './client'
+
+export interface Passkey {
+  id: number
+  name: string | null
+  created_at: string | null
+  last_used_at: string | null
+  transports: string | null
+}
+
+export interface OauthProvider {
+  slug: string
+  name: string
+  configured: boolean
+}
+
+export interface OauthLink {
+  id: number
+  provider: string
+  email: string | null
+  name: string | null
+  created_at: string | null
+  last_used_at: string | null
+}
+
+export interface AdminSession {
+  id: string
+  auth_method: string | null
+  ip: string | null
+  user_agent: string | null
+  created_at: string | null
+  last_seen_at: string | null
+  current: boolean
+}
 
 export interface TelegramUser {
   id: number
@@ -66,6 +100,7 @@ export interface AdminInfo {
   unlimited_traffic_policy: string
   auth_method: string
   password_is_generated: boolean
+  totp_enabled: boolean
   unrestricted_user_access: boolean
   permissions: PermissionEntry[]
 }
@@ -270,6 +305,79 @@ export const authApi = {
    */
   logout: async (): Promise<void> => {
     await client.post('/auth/logout')
+  },
+
+  // ── Passkeys / WebAuthn ──────────────────────────────────────
+  /** Зарегистрировать passkey (требует активной сессии) */
+  registerPasskey: async (name: string): Promise<void> => {
+    const { data } = await client.post('/auth/webauthn/register/begin', {})
+    const credential = await startRegistration({ optionsJSON: JSON.parse(data.options) })
+    await client.post('/auth/webauthn/register/finish', { token: data.token, credential, name })
+  },
+  /** Вход по passkey (Face ID / отпечаток / ключ) */
+  loginPasskey: async (username?: string): Promise<LoginResponse> => {
+    const { data } = await client.post('/auth/webauthn/login/begin', { username: username || null })
+    const credential = await startAuthentication({ optionsJSON: JSON.parse(data.options) })
+    const res = await client.post<LoginResponse>('/auth/webauthn/login/finish', { token: data.token, credential })
+    return res.data
+  },
+  listPasskeys: async (): Promise<Passkey[]> => {
+    const { data } = await client.get('/auth/webauthn/credentials'); return data.items
+  },
+  deletePasskey: async (id: number): Promise<void> => {
+    await client.delete(`/auth/webauthn/credentials/${id}`)
+  },
+
+  // ── OAuth2 SSO (Google / GitHub) ─────────────────────────────
+  oauthProviders: async (): Promise<OauthProvider[]> => {
+    const { data } = await client.get('/auth/oauth/providers'); return data.items
+  },
+  oauthLoginUrl: async (provider: string): Promise<string> => {
+    const { data } = await client.post(`/auth/oauth/${provider}/login-url`); return data.url
+  },
+  oauthLinkUrl: async (provider: string): Promise<string> => {
+    const { data } = await client.post(`/auth/oauth/${provider}/link-url`); return data.url
+  },
+  oauthCallback: async (code: string, state: string): Promise<{ mode: string; access_token?: string; provider?: string }> => {
+    const { data } = await client.post('/auth/oauth/callback', { code, state }); return data
+  },
+  oauthLinks: async (): Promise<OauthLink[]> => {
+    const { data } = await client.get('/auth/oauth/links'); return data.items
+  },
+  deleteOauthLink: async (id: number): Promise<void> => {
+    await client.delete(`/auth/oauth/links/${id}`)
+  },
+  setOauthProvider: async (provider: string, clientId: string, clientSecret: string): Promise<void> => {
+    await client.put(`/auth/oauth/providers/${provider}`, { client_id: clientId, client_secret: clientSecret })
+  },
+  deleteOauthProvider: async (provider: string): Promise<void> => {
+    await client.delete(`/auth/oauth/providers/${provider}`)
+  },
+
+  // ── Активные сессии ──────────────────────────────────────────
+  listSessions: async (): Promise<AdminSession[]> => {
+    const { data } = await client.get('/auth/sessions'); return data.items
+  },
+  revokeSession: async (sid: string): Promise<void> => {
+    await client.delete(`/auth/sessions/${sid}`)
+  },
+  revokeOtherSessions: async (): Promise<void> => {
+    await client.post('/auth/sessions/revoke-others')
+  },
+
+  // ── 2FA (TOTP) — управление из сессии ────────────────────────
+  setup2fa: async (): Promise<TotpSetupResponse> => {
+    const { data } = await client.post<TotpSetupResponse>('/auth/2fa/setup'); return data
+  },
+  enable2fa: async (code: string): Promise<void> => {
+    await client.post('/auth/2fa/enable', { code })
+  },
+  disable2fa: async (code: string): Promise<void> => {
+    await client.post('/auth/2fa/disable', { code })
+  },
+  regenBackupCodes: async (code: string): Promise<string[]> => {
+    const { data } = await client.post<TotpSetupResponse>('/auth/2fa/backup-codes', { code })
+    return data.backup_codes
   },
 
   /**

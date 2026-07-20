@@ -12,7 +12,8 @@ class DomainCreate(BaseModel):
     from_name: Optional[str] = None
     inbound_enabled: bool = False
     outbound_enabled: bool = True
-    max_send_per_hour: int = 100
+    # 0 = inherit the global mailserver_max_send_per_hour; >0 = per-domain override
+    max_send_per_hour: int = 0
 
 
 class DomainRead(BaseModel):
@@ -26,7 +27,7 @@ class DomainRead(BaseModel):
     from_name: Optional[str] = None
     inbound_enabled: bool = False
     outbound_enabled: bool = True
-    max_send_per_hour: int = 100
+    max_send_per_hour: int = 0  # 0 = inherit global mailserver_max_send_per_hour
     dns_mx_ok: bool = False
     dns_spf_ok: bool = False
     dns_dkim_ok: bool = False

@@ -43,6 +43,8 @@ import {
   type LucideIcon,
 } from '@/components/brand/icons'
 import client from '../api/client'
+import { UserTimelineDialog } from '@/components/violations/UserTimelineDialog'
+import { DetectorTuningTab } from '@/components/violations/DetectorTuningTab'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -56,6 +58,7 @@ import { ExportDropdown } from '@/components/ExportDropdown'
 import { SavedFiltersDropdown } from '@/components/SavedFiltersDropdown'
 import { exportJSON } from '@/lib/export'
 import Reports from './Reports'
+import { SharedHwidsCard } from '@/components/SharedHwidsCard'
 import type {
   Violation,
   ViolationDetail,
@@ -543,6 +546,7 @@ function ViolationDetailPanel({
   onAnnulAll,
   onWhitelist,
   onViewUser,
+  onViewTimeline,
 }: {
   violationId: number
   canResolve: boolean
@@ -553,6 +557,7 @@ function ViolationDetailPanel({
   onAnnulAll: (userUuid: string) => void
   onWhitelist: (userUuid: string) => void
   onViewUser: (uuid: string) => void
+  onViewTimeline: (uuid: string, username?: string) => void
 }) {
   const { t } = useTranslation()
   const { formatDate } = useFormatters()
@@ -652,9 +657,14 @@ function ViolationDetailPanel({
               <SeverityBadge severity={severity} />
               <ActionBadge action={detail.action_taken} />
             </div>
-            <Button variant="secondary" size="sm" onClick={() => onViewUser(detail.user_uuid)} className="gap-1">
-              <ExternalLink className="w-4 h-4" /> {t('common.profile')}
-            </Button>
+            <div className="flex gap-2">
+              <Button variant="secondary" size="sm" onClick={() => onViewTimeline(detail.user_uuid, detail.username || undefined)} className="gap-1">
+                <Clock className="w-4 h-4" /> {t('violations.timeline.title')}
+              </Button>
+              <Button variant="secondary" size="sm" onClick={() => onViewUser(detail.user_uuid)} className="gap-1">
+                <ExternalLink className="w-4 h-4" /> {t('common.profile')}
+              </Button>
+            </div>
           </div>
 
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-4">
@@ -1058,7 +1068,7 @@ function ViolationDetailPanel({
 
 // ── Top violators tab ────────────────────────────────────────────
 
-function TopViolatorsTab({ days, onViewUser, onViewViolations }: { days: number; onViewUser: (uuid: string) => void; onViewViolations: (uuid: string) => void }) {
+function TopViolatorsTab({ days, onViewUser, onViewViolations, onViewTimeline }: { days: number; onViewUser: (uuid: string) => void; onViewViolations: (uuid: string) => void; onViewTimeline: (uuid: string, username?: string) => void }) {
   const { t } = useTranslation()
   const { formatTimeAgo } = useFormatters()
 
@@ -1174,12 +1184,20 @@ function TopViolatorsTab({ days, onViewUser, onViewViolations }: { days: number;
                     <ActionBadge key={j} action={action} />
                   ))}
                 </div>
-                <button
-                  onClick={() => onViewViolations(v.user_uuid)}
-                  className="text-primary-400 hover:text-primary-300 flex items-center gap-1 text-xs transition-colors"
-                >
-                  <Eye className="w-3.5 h-3.5" /> {t('common.details')}
-                </button>
+                <div className="flex items-center gap-3">
+                  <button
+                    onClick={() => onViewTimeline(v.user_uuid, v.username || undefined)}
+                    className="text-muted-foreground hover:text-white flex items-center gap-1 text-xs transition-colors"
+                  >
+                    <Clock className="w-3.5 h-3.5" /> {t('violations.timeline.title')}
+                  </button>
+                  <button
+                    onClick={() => onViewViolations(v.user_uuid)}
+                    className="text-primary-400 hover:text-primary-300 flex items-center gap-1 text-xs transition-colors"
+                  >
+                    <Eye className="w-3.5 h-3.5" /> {t('common.details')}
+                  </button>
+                </div>
               </div>
             </CardContent>
           </Card>
@@ -1559,19 +1577,22 @@ function ViolationSkeleton() {
 
 // ── Main page component ──────────────────────────────────────────
 
-type Tab = 'all' | 'pending' | 'top' | 'reports'
+type Tab = 'all' | 'pending' | 'top' | 'hwids' | 'reports' | 'tuning'
 
 export default function Violations() {
   const { t } = useTranslation()
   const navigate = useNavigate()
   const queryClient = useQueryClient()
 
+  // таймлайн юзера (лента нарушений/коннектов/HWID)
+  const [timelineUser, setTimelineUser] = useState<{ uuid: string; username?: string } | null>(null)
+
   // ── URL-param-synced filter state ──
   const [searchParams, setSearchParams] = useSearchParams()
   const getP = (k: string, d: string) => searchParams.get(k) ?? d
   const getN = (k: string, d: number) => { const v = searchParams.get(k); return v !== null ? (Number(v) || d) : d }
 
-  const validTabs: Tab[] = ['all', 'pending', 'top', 'reports']
+  const validTabs: Tab[] = ['all', 'pending', 'top', 'hwids', 'reports', 'tuning']
   const rawTab = getP('tab', 'all') as Tab
   const tab = validTabs.includes(rawTab) ? rawTab : 'all'
   const page = getN('page', 1)
@@ -1877,7 +1898,9 @@ export default function Violations() {
           onAnnulAll={handleAnnulAll}
           onWhitelist={handleWhitelist}
           onViewUser={(uuid) => navigate(`/users/${uuid}?from=violations`)}
+          onViewTimeline={(uuid, username) => setTimelineUser({ uuid, username })}
         />
+        <UserTimelineDialog userUuid={timelineUser?.uuid ?? null} username={timelineUser?.username} onClose={() => setTimelineUser(null)} />
         <WhitelistAddDialog
           open={whitelistDialogOpen}
           onOpenChange={setWhitelistDialogOpen}
@@ -2173,7 +2196,9 @@ export default function Violations() {
           { key: 'all' as Tab, label: t('violations.tabs.all'), count: stats?.total },
           { key: 'pending' as Tab, label: t('violations.tabs.pending'), count: undefined },
           { key: 'top' as Tab, label: t('violations.tabs.topViolators'), count: undefined },
+          { key: 'hwids' as Tab, label: t('violations.tabs.hwids'), count: undefined },
           { key: 'reports' as Tab, label: t('violations.tabs.reports'), count: undefined },
+          { key: 'tuning' as Tab, label: t('violations.tabs.tuning'), count: undefined },
         ]).map((tabItem) => (
           <button
             key={tabItem.key}
@@ -2194,12 +2219,17 @@ export default function Violations() {
       </div>
 
       {/* Content based on tab */}
-      {tab === 'reports' ? (
+      {tab === 'tuning' ? (
+        <DetectorTuningTab />
+      ) : tab === 'reports' ? (
         <Reports embedded />
+      ) : tab === 'hwids' ? (
+        <SharedHwidsCard />
       ) : tab === 'top' ? (
         <TopViolatorsTab
           days={days}
           onViewUser={(uuid) => navigate(`/users/${uuid}?from=violations`)}
+          onViewTimeline={(uuid, username) => setTimelineUser({ uuid, username })}
           onViewViolations={(uuid) => {
             setParams({ user: uuid, tab: null, filters: '1', page: null, vid: null })
             autoSelectRef.current = true
@@ -2321,6 +2351,8 @@ export default function Violations() {
         userUuid={whitelistUserUuid}
         onSubmit={(data) => addToWhitelist.mutate(data)}
       />
+
+      <UserTimelineDialog userUuid={timelineUser?.uuid ?? null} username={timelineUser?.username} onClose={() => setTimelineUser(null)} />
 
       {/* Comment dialog for actions */}
       <Dialog open={!!commentDialog} onOpenChange={(open) => { if (!open) { setCommentDialog(null); setCommentText('') } }}>

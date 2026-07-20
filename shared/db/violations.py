@@ -697,6 +697,42 @@ class ViolationsMixin:
             logger.error("Error counting recent violations: %s", e, exc_info=True)
             return 0
 
+    async def get_violation_score_histogram(
+        self, days: int = 30, bucket: int = 5,
+    ) -> Dict[str, Any]:
+        """Гистограмма score нарушений за период (для тюнинга порога).
+
+        Возвращает {buckets: [{lo, hi, count}], total, avg} — по корзинам
+        ширины `bucket` на шкале 0..100.
+        """
+        if not self.is_connected:
+            return {"buckets": [], "total": 0, "avg": 0.0}
+        n = max(1, 100 // bucket)
+        async with self.acquire() as conn:
+            rows = await conn.fetch(
+                f"""SELECT LEAST(FLOOR(score / $2), $3)::int AS b, COUNT(*) AS c
+                    FROM {VIOLATIONS_TABLE}
+                    WHERE detected_at > NOW() - make_interval(days => $1)
+                    GROUP BY 1""",
+                int(days), int(bucket), n - 1,
+            )
+            agg = await conn.fetchrow(
+                f"""SELECT COUNT(*) AS total, COALESCE(AVG(score), 0) AS avg
+                    FROM {VIOLATIONS_TABLE}
+                    WHERE detected_at > NOW() - make_interval(days => $1)""",
+                int(days),
+            )
+        counts = {int(r["b"]): int(r["c"]) for r in rows}
+        buckets = [
+            {"lo": i * bucket, "hi": (i + 1) * bucket, "count": counts.get(i, 0)}
+            for i in range(n)
+        ]
+        return {
+            "buckets": buckets,
+            "total": int(agg["total"]) if agg else 0,
+            "avg": round(float(agg["avg"]), 1) if agg else 0.0,
+        }
+
     async def get_user_violations(
         self,
         user_uuid: str,
