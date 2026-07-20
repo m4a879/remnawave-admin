@@ -240,6 +240,7 @@ class SubmissionHandler:
             # Enqueue for each recipient
             from web.backend.core.mail.outbound_queue import outbound_queue
             username = getattr(session, "smtp_username", "unknown")
+            attempted = len(envelope.rcpt_tos)
             queued = 0
             for rcpt in envelope.rcpt_tos:
                 queue_id = await outbound_queue.enqueue(
@@ -255,9 +256,27 @@ class SubmissionHandler:
                     queued += 1
 
             logger.info(
-                "Submission: user='%s' from=%s to=%s queued=%d",
-                username, from_email, envelope.rcpt_tos, queued,
+                "Submission: user='%s' from=%s to=%s queued=%d/%d",
+                username, from_email, envelope.rcpt_tos, queued, attempted,
             )
+
+            # Nothing got queued (send limit hit or a transient error). Do NOT
+            # acknowledge with 250 — otherwise the client marks the mail "sent"
+            # while it was silently dropped. A 4xx tells the client it failed
+            # and it can retry later.
+            if attempted and queued == 0:
+                return "452 4.3.1 Message not queued (send limit reached), try again later"
+
+            # Partial acceptance: some recipients queued, some rejected. Keep the
+            # 250 (a 4xx would make the client resend to the already-queued ones
+            # and duplicate mail), but surface the shortfall in the log.
+            if queued < attempted:
+                logger.warning(
+                    "Partial submission for user='%s': %d/%d recipients queued "
+                    "(rest hit the send limit)",
+                    username, queued, attempted,
+                )
+
             return f"250 OK {queued} message(s) queued"
 
         except Exception as e:

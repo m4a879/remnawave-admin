@@ -3638,7 +3638,7 @@
       },
       "mailserver_max_send_per_hour": {
         "label": "🚦 Send limit per hour",
-        "description": "Max messages sent per domain per hour"
+        "description": "Global per-domain hourly send limit. Applies to domains without their own limit (domain value 0). 0 = unlimited"
       },
       "mailserver_queue_poll_interval": {
         "label": "⏱️ Queue poll interval",
@@ -3979,6 +3979,11 @@
     "senderNameHint": "Displayed in the 'From' field instead of email address",
     "senderNameUpdated": "Sender name updated",
     "notSet": "not set",
+    "domainLimit": "Hourly send limit",
+    "domainLimitValue": "{{n}} emails/hour",
+    "domainLimitInherit": "inherits the global limit",
+    "domainLimitHint": "0 = inherit the global limit from settings",
+    "limitUpdated": "Domain limit updated",
     "credentials": {
       "title": "SMTP Credentials",
       "subtitle": "Manage logins for sending emails via SMTP Submission (port 587)",

@@ -1077,7 +1077,7 @@ DEFAULT_CONFIG_DEFINITIONS: List[Dict[str, Any]] = [
         "value_type": "int",
         "category": "mailserver",
         "display_name": "Лимит отправки в час",
-        "description": "Максимальное количество писем с одного домена в час (по умолчанию)",
+        "description": "Глобальный лимит писем с одного домена в час. Применяется к доменам без собственного лимита (у домена 0). 0 = без лимита",
         "default_value": "100",
         "sort_order": 4,
     },
