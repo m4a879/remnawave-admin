@@ -397,7 +397,7 @@ async def _log_backup(
         from shared.database import db_service
         if not db_service.is_connected:
             return
-        admin_id = admin.id if hasattr(admin, "id") else None
+        admin_id = admin.account_id
         admin_username = admin.username or str(admin.telegram_id)
         async with db_service.acquire() as conn:
             await conn.execute(

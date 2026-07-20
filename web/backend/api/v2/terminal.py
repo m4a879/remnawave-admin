@@ -2,8 +2,10 @@
 
 Bridges browser xterm.js ↔ backend ↔ agent PTY session.
 
-WS /api/v2/fleet/{node_uuid}/terminal?token={jwt}
-Permission: fleet.terminal (superadmin only).
+WS /api/v2/fleet/{node_uuid}/terminal
+Permission: fleet.terminal — ГРАНТУЕМОЕ RBAC-право (НЕ только superadmin).
+Даёт интерактивный root-shell на ноде (эквивалент root на хосте) — выдавать
+с осторожностью, только доверенным ролям.
 """
 import asyncio
 import base64
@@ -97,7 +99,7 @@ async def terminal_websocket(
     # Create terminal session
     session = await terminal_manager.create_session(
         node_uuid=node_uuid,
-        admin_id=admin.id if hasattr(admin, 'id') else 0,
+        admin_id=admin.account_id or 0,
         admin_username=admin.username or str(admin.telegram_id),
         browser_ws=websocket,
     )
@@ -107,7 +109,7 @@ async def terminal_websocket(
         await asyncio.sleep(SESSION_COOLDOWN_SECONDS + 0.5)
         session = await terminal_manager.create_session(
             node_uuid=node_uuid,
-            admin_id=admin.id if hasattr(admin, 'id') else 0,
+            admin_id=admin.account_id or 0,
             admin_username=admin.username or str(admin.telegram_id),
             browser_ws=websocket,
         )

@@ -183,7 +183,7 @@ async def create_script(
     if not db_service.is_connected:
         raise api_error(503, E.DB_UNAVAILABLE)
 
-    admin_id = admin.id if hasattr(admin, 'id') else None
+    admin_id = admin.account_id
 
     async with db_service.acquire() as conn:
         row = await conn.fetchrow(
@@ -366,7 +366,7 @@ async def exec_script(
     if not script:
         raise api_error(404, E.SCRIPT_NOT_FOUND)
 
-    admin_id = admin.id if hasattr(admin, 'id') else None
+    admin_id = admin.account_id
     admin_username = admin.username or str(admin.telegram_id)
 
     result = await _exec_one(db_service, script, body.node_uuid, body.env_vars, admin_id, admin_username)
@@ -400,7 +400,7 @@ async def exec_script_bulk(
     if not script:
         raise api_error(404, E.SCRIPT_NOT_FOUND)
 
-    admin_id = admin.id if hasattr(admin, 'id') else None
+    admin_id = admin.account_id
     admin_username = admin.username or str(admin.telegram_id)
 
     # Dedup node UUIDs preserving order
@@ -554,7 +554,7 @@ async def import_script_from_url(
     except Exception as e:
         raise HTTPException(status_code=400, detail="Failed to download script")
 
-    admin_id = admin.id if hasattr(admin, 'id') else None
+    admin_id = admin.account_id
 
     async with db_service.acquire() as conn:
         row = await conn.fetchrow(
@@ -642,7 +642,7 @@ async def bulk_import_scripts(
     if not db_service.is_connected:
         raise api_error(503, E.DB_UNAVAILABLE)
 
-    admin_id = admin.id if hasattr(admin, 'id') else None
+    admin_id = admin.account_id
     imported = 0
     errors = []
 

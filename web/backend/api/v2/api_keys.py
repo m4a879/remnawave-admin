@@ -130,7 +130,7 @@ async def create_api_key(
         except ValueError:
             raise api_error(400, E.INVALID_ACTION, "Invalid expires_at format")
 
-    admin_id = admin.id if hasattr(admin, "id") else (admin.account_id or None)
+    admin_id = admin.account_id
     admin_username = admin.username or str(admin.telegram_id)
 
     from web.backend.core.api_key_auth import create_api_key_record
