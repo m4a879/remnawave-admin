@@ -653,7 +653,10 @@ async def bulk_delete_users(
     body: BulkUuidsRequest,
     api_key: ApiKeyUser = Depends(require_scope("bulk:write")),
 ):
-    """Delete multiple users at once. Requires both bulk:write scope."""
+    """Delete multiple users at once. Requires bulk:write AND users:delete."""
+    # Деструктивное массовое удаление требует и права на удаление, не только bulk.
+    if not api_key.has_scope("users:delete"):
+        raise HTTPException(status_code=403, detail="Missing scope: users:delete")
     api = _get_api_client()
     success, failed, errors = 0, 0, []
     for uuid in body.uuids:

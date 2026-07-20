@@ -108,6 +108,17 @@ _ROUTE_MAP: list[Tuple[str, str, str, str]] = [
     ("POST", r"/api/v2/auth/telegram$", "auth", "login_telegram"),
     ("POST", r"/api/v2/auth/change-password$", "auth", "change_password"),
     ("POST", r"/api/v2/auth/logout$", "auth", "logout"),
+
+    # Public API v3 (аутентификация по API-ключу) — те же resource/action
+    ("POST", r"/api/v3/users/bulk/(enable|disable|delete|reset-traffic)", "users", "bulk_{1}"),
+    ("POST", r"/api/v3/users/([^/]+)/enable$", "users", "enable"),
+    ("POST", r"/api/v3/users/([^/]+)/disable$", "users", "disable"),
+    ("POST", r"/api/v3/users/([^/]+)/reset-traffic$", "users", "reset_traffic"),
+    ("POST", r"/api/v3/users$", "users", "create"),
+    ("DELETE", r"/api/v3/users/([^/]+)$", "users", "delete"),
+    ("POST", r"/api/v3/nodes/([^/]+)/enable$", "nodes", "enable"),
+    ("POST", r"/api/v3/nodes/([^/]+)/disable$", "nodes", "disable"),
+    ("POST", r"/api/v3/nodes/([^/]+)/restart$", "nodes", "restart"),
 ]
 
 # Actions already logged manually in admins.py/roles.py/auth.py — skip to avoid duplicates
@@ -158,8 +169,8 @@ class AuditMiddleware(BaseHTTPMiddleware):
 
         path = request.url.path
 
-        # Skip non-API paths and health checks
-        if not path.startswith("/api/v2/") or path == "/api/v2/health":
+        # Skip non-API paths and health checks (аудитим и v2, и публичный v3)
+        if not (path.startswith("/api/v2/") or path.startswith("/api/v3/")) or path == "/api/v2/health":
             return await call_next(request)
 
         # Skip read-only POST endpoints (lookups, search, etc.)
@@ -279,6 +290,12 @@ async def _write_audit_entry(
                             admin_username = account["username"]
                     except (ValueError, TypeError):
                         pass
+
+        # v3 аутентифицируется API-ключом, а не JWT — актор берётся из ключа
+        api_key_user = getattr(request.state, "api_key_user", None)
+        if api_key_user is not None:
+            admin_id = None
+            admin_username = f"apikey:{getattr(api_key_user, 'key_name', None) or getattr(api_key_user, 'key_id', '?')}"
 
         # Get client IP (unified logic from deps.get_client_ip)
         from web.backend.api.deps import get_client_ip
