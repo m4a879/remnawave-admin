@@ -2,6 +2,7 @@
 import hmac
 import hashlib
 import json
+from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import FastAPI, HTTPException, Request
@@ -62,6 +63,27 @@ async def catch_invalid_requests(request: Request, call_next):
         return JSONResponse(status_code=400, content={"error": "Bad request"})
 
 
+_WEBHOOK_MAX_AGE_SEC = 300  # окно анти-replay для timestamp вебхука
+
+
+def _webhook_timestamp_fresh(ts: Optional[str]) -> bool:
+    """True если timestamp свежий (или отсутствует/нераспознан — не ломаем совместимость).
+
+    Timestamp входит в подписанное тело, подменить его без инвалидации подписи
+    нельзя — проверка свежести ограничивает окно повторного проигрывания (replay).
+    """
+    if not ts:
+        return True  # timestamp опционален
+    try:
+        parsed = datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
+    except (ValueError, TypeError):
+        return True  # нераспознанный формат — не отклоняем
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    delta = (datetime.now(timezone.utc) - parsed).total_seconds()
+    return -60 <= delta <= _WEBHOOK_MAX_AGE_SEC  # старый → replay; небольшой сдвиг в будущее допускаем
+
+
 def verify_webhook_secret(request: Request, body: bytes) -> bool:
     """
     Проверяет подпись webhook из заголовка X-Remnawave-Signature.
@@ -105,8 +127,8 @@ def verify_webhook_secret(request: Request, body: bytes) -> bool:
         )
         return False
     
-    # Метод 1: Простое сравнение строк (для обратной совместимости)
-    if signature == settings.webhook_secret:
+    # Метод 1: Простое сравнение строк (для обратной совместимости) — тайминг-безопасно
+    if hmac.compare_digest(signature, settings.webhook_secret):
         logger.debug("Webhook signature verified using simple string comparison")
         return True
     
@@ -203,6 +225,11 @@ async def remnawave_webhook(request: Request):
         event = data.get("event", "")
         timestamp = data.get("timestamp")
         meta = data.get("meta") or {}
+
+        # Анти-replay: устаревший подписанный вебхук отклоняем
+        if not _webhook_timestamp_fresh(timestamp):
+            logger.warning("Webhook rejected: stale timestamp %r (possible replay)", timestamp)
+            raise HTTPException(status_code=401, detail="Stale webhook timestamp")
 
         logger.info("📩 Webhook: %s", event)
         
