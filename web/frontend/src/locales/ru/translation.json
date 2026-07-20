@@ -3348,6 +3348,10 @@
         "label": "💬 ID чата уведомлений",
         "description": "Telegram ID чата/группы для уведомлений"
       },
+      "notifications_rich_enabled": {
+        "label": "✨ Rich-оформление уведомлений",
+        "description": "Отправлять Telegram-уведомления «документами» (Bot API 10.1): настоящие заголовки, списки полей, сворачиваемые секции. При отказе Telegram бот сам откатится на обычный HTML"
+      },
       "notifications_topic_users": {
         "label": "👤 Топик: Пользователи",
         "description": "ID топика для уведомлений о пользователях"

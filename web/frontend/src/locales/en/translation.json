@@ -3348,6 +3348,10 @@
         "label": "💬 Notifications chat ID",
         "description": "Telegram chat/group ID for notifications"
       },
+      "notifications_rich_enabled": {
+        "label": "✨ Rich notification styling",
+        "description": "Send Telegram notifications as Bot API 10.1 rich messages: real headings, field lists, collapsible sections. Falls back to plain HTML automatically if Telegram rejects it"
+      },
       "notifications_topic_users": {
         "label": "👤 Topic: Users",
         "description": "Topic ID for user notifications"

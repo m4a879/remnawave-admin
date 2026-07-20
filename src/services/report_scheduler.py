@@ -214,18 +214,13 @@ class ReportScheduler:
             logger.info("Skipping empty %s report (no violations)", report_type.value)
             return
 
-        # Отправляем отчёт
+        # Отправляем отчёт (rich-карточкой с фолбэком на HTML)
         try:
-            kwargs = {
-                "chat_id": chat_id,
-                "text": report.message_text,
-                "parse_mode": "HTML"
-            }
-
-            if topic_id:
-                kwargs["message_thread_id"] = topic_id
-
-            await self._bot.send_message(**kwargs)
+            from shared import tg_rich
+            await tg_rich.send_rich_or_html(
+                self._bot.token, chat_id, report.message_text,
+                message_thread_id=topic_id,
+            )
 
             # Отмечаем отчёт как отправленный
             last_report = await db_service.get_last_report(report_type.value)
@@ -268,17 +263,12 @@ class ReportScheduler:
         # Генерируем отчёт
         report = await violation_report_service.generate_report(report_type, save_to_db=True)
 
-        # Отправляем
-        kwargs = {
-            "chat_id": chat_id,
-            "text": report.message_text,
-            "parse_mode": "HTML"
-        }
-
-        if topic_id:
-            kwargs["message_thread_id"] = topic_id
-
-        await self._bot.send_message(**kwargs)
+        # Отправляем (rich-карточкой с фолбэком на HTML)
+        from shared import tg_rich
+        await tg_rich.send_rich_or_html(
+            self._bot.token, chat_id, report.message_text,
+            message_thread_id=topic_id,
+        )
 
         return report.message_text
 

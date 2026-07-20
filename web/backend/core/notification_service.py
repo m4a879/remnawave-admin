@@ -295,30 +295,24 @@ async def send_telegram(
             return False
 
         text = f"<b>{title}</b>\n\n{body}"
-        payload: Dict[str, Any] = {
-            "chat_id": chat_id,
-            "text": text,
-            "parse_mode": "HTML",
-            "disable_web_page_preview": True,
-        }
-        if topic_id and str(topic_id) != "0":
-            payload["message_thread_id"] = int(topic_id)
-        if reply_markup:
-            payload["reply_markup"] = reply_markup
 
+        # Rich-уведомление (Bot API 10.1) с фолбэком на HTML внутри
+        from shared import tg_rich
         logger.debug("Sending Telegram notification to chat_id=%s", chat_id)
-        async with httpx.AsyncClient(timeout=15) as client:
-            resp = await client.post(
-                f"https://api.telegram.org/bot{bot_token}/sendMessage",
-                json=payload,
-            )
-            if resp.status_code == 200:
-                logger.info("Telegram notification sent to chat_id=%s", chat_id)
-                NOTIFICATIONS_SENT.labels(channel="telegram").inc()
-                return True
-            logger.error("Telegram send failed (chat_id=%s): %s %s", chat_id, resp.status_code, resp.text, exc_info=True)
-            NOTIFICATIONS_FAILED.labels(channel="telegram").inc()
-            return False
+        ok = await tg_rich.send_rich_or_html(
+            bot_token,
+            chat_id,
+            text,
+            message_thread_id=int(topic_id) if topic_id and str(topic_id) != "0" else None,
+            reply_markup=reply_markup,
+        )
+        if ok:
+            logger.info("Telegram notification sent to chat_id=%s", chat_id)
+            NOTIFICATIONS_SENT.labels(channel="telegram").inc()
+            return True
+        logger.error("Telegram send failed (chat_id=%s)", chat_id)
+        NOTIFICATIONS_FAILED.labels(channel="telegram").inc()
+        return False
     except Exception as e:
         logger.error("Telegram notification error (chat_id=%s): %s", chat_id, e, exc_info=True)
         NOTIFICATIONS_FAILED.labels(channel="telegram").inc()

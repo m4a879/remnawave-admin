@@ -182,6 +182,15 @@ DEFAULT_CONFIG_DEFINITIONS: List[Dict[str, Any]] = [
         "sort_order": 1,
     },
     {
+        "key": "notifications_rich_enabled",
+        "value_type": "bool",
+        "category": "notifications",
+        "display_name": "Rich-оформление уведомлений",
+        "description": "Отправлять Telegram-уведомления «документами» Bot API 10.1: настоящие заголовки, списки, сворачиваемые секции. При отказе Telegram автоматически откатывается на обычный HTML",
+        "default_value": "true",
+        "sort_order": 2,
+    },
+    {
         "key": "notifications_topic_id",
         "value_type": "int",
         "category": "notifications",

@@ -20,6 +20,30 @@ def _strip_html(text: str) -> str:
     return re.sub(r"<[^>]+>", "", text)
 
 
+async def _send_card(bot: Bot, message_kwargs: Dict[str, Any]) -> None:
+    """Отправить карточку уведомления rich-сообщением (Bot API 10.1).
+
+    Первая строка становится настоящим заголовком, поля с отступом — списком.
+    При отказе rich-пути (или выключенном тумблере notifications_rich_enabled)
+    внутри send_rich_or_html срабатывает фолбэк на обычный HTML — уведомление
+    доходит в любом случае. aiogram у бота старый (3.12, без Rich-типов),
+    поэтому шлём raw-запросом с токеном бота.
+    """
+    from shared import tg_rich
+
+    reply_markup = message_kwargs.get("reply_markup")
+    if reply_markup is not None and hasattr(reply_markup, "model_dump"):
+        reply_markup = reply_markup.model_dump(exclude_none=True, by_alias=True)
+
+    await tg_rich.send_rich_or_html(
+        bot.token,
+        message_kwargs["chat_id"],
+        message_kwargs["text"],
+        message_thread_id=message_kwargs.get("message_thread_id"),
+        reply_markup=reply_markup,
+    )
+
+
 def _push_dispatch(
     title: str,
     body: str,
@@ -312,7 +336,7 @@ async def send_user_notification(
         if topic_id is not None:
             message_kwargs["message_thread_id"] = topic_id
 
-        await bot.send_message(**message_kwargs)
+        await _send_card(bot, message_kwargs)
         logger.info("User notification sent successfully action=%s chat_id=%s", action, settings.notifications_chat_id)
 
         # Маппинг коротких action-имён → event_id из catalog
@@ -395,7 +419,7 @@ async def send_generic_notification(
         if topic_id is not None:
             message_kwargs["message_thread_id"] = topic_id
 
-        await bot.send_message(**message_kwargs)
+        await _send_card(bot, message_kwargs)
         logger.info("Generic notification sent successfully title=%s topic_id=%s", title, topic_id)
 
     except Exception as exc:
@@ -468,7 +492,7 @@ async def send_node_notification(
         if topic_id is not None:
             message_kwargs["message_thread_id"] = topic_id
 
-        await bot.send_message(**message_kwargs)
+        await _send_card(bot, message_kwargs)
         logger.info("Node notification sent successfully event=%s node_uuid=%s topic_id=%s", event, node_uuid, topic_id)
 
         # FCM push: критичные события про ноды отправляем как category=alerts,
@@ -558,7 +582,7 @@ async def send_service_notification(
         if topic_id is not None:
             message_kwargs["message_thread_id"] = topic_id
 
-        await bot.send_message(**message_kwargs)
+        await _send_card(bot, message_kwargs)
         logger.info("Service notification sent successfully event=%s topic_id=%s", event, topic_id)
 
         # Сервисные события (бэкап, рестарт панели и т.п.) — alert-категория,
@@ -664,7 +688,7 @@ async def send_hwid_notification(
         if topic_id is not None:
             message_kwargs["message_thread_id"] = topic_id
 
-        await bot.send_message(**message_kwargs)
+        await _send_card(bot, message_kwargs)
         logger.info("HWID notification sent successfully event=%s topic_id=%s", event, topic_id)
 
         # FCM push: соответствует событиям user_hwid_devices.added/.deleted в
@@ -738,7 +762,7 @@ async def send_error_notification(
         if topic_id is not None:
             message_kwargs["message_thread_id"] = topic_id
 
-        await bot.send_message(**message_kwargs)
+        await _send_card(bot, message_kwargs)
         logger.info("Error notification sent successfully event=%s topic_id=%s", event, topic_id)
 
         # Ошибки/системные алерты обязательно пушим — это то, ради чего пуши и нужны.
@@ -872,7 +896,7 @@ async def send_crm_notification(
         if topic_id is not None:
             message_kwargs["message_thread_id"] = topic_id
 
-        await bot.send_message(**message_kwargs)
+        await _send_card(bot, message_kwargs)
         logger.info("CRM notification sent successfully event=%s topic_id=%s", event, topic_id)
 
     except Exception as exc:
@@ -1154,7 +1178,7 @@ async def send_violation_notification(
         if topic_id is not None:
             message_kwargs["message_thread_id"] = topic_id
 
-        await bot.send_message(**message_kwargs)
+        await _send_card(bot, message_kwargs)
 
         # Обновляем кэш после успешной отправки
         _violation_notification_cache[user_uuid] = datetime.utcnow()
