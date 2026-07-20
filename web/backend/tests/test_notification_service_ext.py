@@ -18,6 +18,13 @@ from web.backend.core.notification_service import (
 from web.backend.core import notification_service as ns_mod
 
 
+@pytest.fixture(autouse=True)
+def _allow_private_webhook_urls(monkeypatch):
+    # send_webhook теперь SSRF-фильтрует URL; тут проверяем механику отправки,
+    # а не фильтр (для него — test_webhook_ssrf.py). Разрешаем приватные URL.
+    monkeypatch.setattr("web.backend.core.webhook_security.WEBHOOK_ALLOW_PRIVATE_URL", True)
+
+
 # ── send_telegram ──────────────────────────────────────────────
 
 
