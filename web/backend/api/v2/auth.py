@@ -833,6 +833,12 @@ async def change_password(
         raise api_error(500, E.PASSWORD_UPDATE_FAILED)
 
     logger.info("Password changed for user '%s'", admin.username)
+    # Инвалидируем прочие сессии этого админа: старые токены на других устройствах
+    # больше не продлятся при refresh (текущую сессию сохраняем).
+    try:
+        await _sessions.revoke_others(account["id"], _current_sid(request))
+    except Exception as e:  # noqa: BLE001
+        logger.debug("revoke_others after password change: %s", e)
     return SuccessResponse(message="Password changed successfully")
 
 
@@ -976,6 +982,12 @@ async def reset_password(request: Request, data: ResetPasswordRequest):
 
     # Blacklist the token to prevent reuse
     token_blacklist.add(data.token, float(payload["exp"]))
+
+    # Password reset — рвём ВСЕ сессии этого аккаунта (сброс вне сессии, current нет)
+    try:
+        await _sessions.revoke_others(admin_id, None)
+    except Exception as e:  # noqa: BLE001
+        logger.debug("revoke sessions after password reset: %s", e)
 
     client_ip = get_client_ip(request)
     logger.info("Password reset completed for user '%s' (id=%d) from %s", account["username"], admin_id, client_ip)
