@@ -18,6 +18,10 @@ import {
   EyeOff,
   Copy,
   KeyRound,
+  Wrench,
+  Mail,
+  Gauge,
+  Server,
 } from '@/components/brand/icons'
 import { toast } from 'sonner'
 import client from '../api/client'
@@ -845,80 +849,89 @@ function IpWhitelistBlock() {
 }
 
 
+// Разделы FAQ: порядок + иконка + ключи пунктов (тексты — в i18n settings.faq.*)
+const FAQ_CATEGORIES: { id: string; icon: React.ComponentType<{ className?: string }>; items: string[] }[] = [
+  { id: 'setup', icon: Wrench, items: ['dockerNetwork', 'panelPort', 'update', 'backup', 'resourceLimits'] },
+  { id: 'access', icon: Lock, items: ['authMethods', 'twoFactor', 'sessions', 'methodPolicy', 'passwordReset', 'passwordLogin'] },
+  { id: 'mail', icon: Mail, items: ['smtpRelay', 'mailServerSetup', 'notifyChannels'] },
+  { id: 'performance', icon: Gauge, items: ['highCpu', 'dbPool', 'violationQueue'] },
+  { id: 'infra', icon: Server, items: ['nodeOffline', 'agentInstall', 'alertSpam'] },
+]
+
 function FaqSection() {
   const { t } = useTranslation()
-  const [openItem, setOpenItem] = useState<number | null>(null)
+  const [openItem, setOpenItem] = useState<string | null>(null)
+  const [query, setQuery] = useState('')
 
-  const faqItems = [
-    {
-      q: t('settings.faq.items.panelPort.q'),
-      a: t('settings.faq.items.panelPort.a'),
-    },
-    {
-      q: t('settings.faq.items.passwordLogin.q'),
-      a: t('settings.faq.items.passwordLogin.a'),
-    },
-    {
-      q: t('settings.faq.items.highCpu.q'),
-      a: t('settings.faq.items.highCpu.a'),
-    },
-    {
-      q: t('settings.faq.items.nodeOffline.q'),
-      a: t('settings.faq.items.nodeOffline.a'),
-    },
-    {
-      q: t('settings.faq.items.alertSpam.q'),
-      a: t('settings.faq.items.alertSpam.a'),
-    },
-    {
-      q: t('settings.faq.items.dockerRestart.q'),
-      a: t('settings.faq.items.dockerRestart.a'),
-    },
-    {
-      q: t('settings.faq.items.dbPool.q'),
-      a: t('settings.faq.items.dbPool.a'),
-    },
-    {
-      q: t('settings.faq.items.passwordReset.q'),
-      a: t('settings.faq.items.passwordReset.a'),
-    },
-    {
-      q: t('settings.faq.items.smtp.q'),
-      a: t('settings.faq.items.smtp.a'),
-    },
-    {
-      q: t('settings.faq.items.violationQueue.q'),
-      a: t('settings.faq.items.violationQueue.a'),
-    },
-    {
-      q: t('settings.faq.items.resourceLimits.q'),
-      a: t('settings.faq.items.resourceLimits.a'),
-    },
-  ]
+  const q = query.trim().toLowerCase()
+  const categories = FAQ_CATEGORIES
+    .map((cat) => ({
+      ...cat,
+      entries: cat.items
+        .map((key) => ({ key, q: t(`settings.faq.items.${key}.q`), a: t(`settings.faq.items.${key}.a`) }))
+        .filter((it) => !q || it.q.toLowerCase().includes(q) || it.a.toLowerCase().includes(q)),
+    }))
+    .filter((cat) => cat.entries.length > 0)
 
   return (
-    <div className="space-y-2">
-      <p className="text-sm text-dark-300 mb-4">{t('settings.faq.description')}</p>
-      {faqItems.map((item, idx) => (
-        <Card key={idx} className="p-0 overflow-hidden">
-          <button
-            onClick={() => setOpenItem(openItem === idx ? null : idx)}
-            className="w-full flex items-center justify-between p-4 hover:bg-[var(--glass-bg)] transition-colors text-left"
-          >
-            <span className="text-sm font-medium text-white pr-4">{item.q}</span>
-            {openItem === idx ? (
-              <ChevronDown className="w-4 h-4 text-dark-300 shrink-0" />
-            ) : (
-              <ChevronRight className="w-4 h-4 text-dark-300 shrink-0" />
-            )}
-          </button>
-          {openItem === idx && (
-            <div className="px-4 pb-4 text-sm text-dark-300 whitespace-pre-line border-t border-[var(--glass-border)]">
-              <div className="pt-3">{item.a}</div>
+    <div className="space-y-6">
+      <div className="space-y-3">
+        <p className="text-sm text-dark-300">{t('settings.faq.description')}</p>
+        <div className="relative">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-dark-300 pointer-events-none" />
+          <Input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder={t('settings.faq.searchPlaceholder')}
+            className="pl-9"
+          />
+        </div>
+      </div>
+
+      {categories.length === 0 ? (
+        <p className="text-sm text-dark-300 text-center py-8">{t('settings.faq.empty')}</p>
+      ) : (
+        categories.map((cat) => {
+          const Icon = cat.icon
+          return (
+            <div key={cat.id} className="space-y-2">
+              <div className="flex items-center gap-2.5 px-1">
+                <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-primary-500/10 text-primary-400 shrink-0">
+                  <Icon className="w-4 h-4" />
+                </div>
+                <h3 className="text-sm font-semibold text-white">{t(`settings.faq.categories.${cat.id}`)}</h3>
+                <Badge variant="outline" className="ml-auto text-[10px]">{cat.entries.length}</Badge>
+              </div>
+              <div className="space-y-2">
+                {cat.entries.map((item) => {
+                  const id = `${cat.id}:${item.key}`
+                  const open = openItem === id
+                  return (
+                    <Card key={id} className="p-0 overflow-hidden">
+                      <button
+                        onClick={() => setOpenItem(open ? null : id)}
+                        className="w-full flex items-center justify-between p-4 hover:bg-[var(--glass-bg)] transition-colors text-left"
+                      >
+                        <span className="text-sm font-medium text-white pr-4">{item.q}</span>
+                        {open ? (
+                          <ChevronDown className="w-4 h-4 text-dark-300 shrink-0" />
+                        ) : (
+                          <ChevronRight className="w-4 h-4 text-dark-300 shrink-0" />
+                        )}
+                      </button>
+                      {open && (
+                        <div className="px-4 pb-4 text-sm text-dark-300 whitespace-pre-line border-t border-[var(--glass-border)]">
+                          <div className="pt-3">{item.a}</div>
+                        </div>
+                      )}
+                    </Card>
+                  )
+                })}
+              </div>
             </div>
-          )}
-        </Card>
-      ))}
+          )
+        })
+      )}
     </div>
   )
 }

@@ -3100,51 +3100,96 @@
       "admin_restrictions": "🔐 Admin restrictions"
     },
     "faq": {
-      "description": "Frequently asked questions and solutions to common problems",
+      "description": "Common questions, setup guides, and fixes for typical problems. Expand a question to see the answer.",
+      "searchPlaceholder": "Search FAQ…",
+      "empty": "Nothing found. Try a different query.",
+      "categories": {
+        "setup": "Setup & maintenance",
+        "access": "Access & login",
+        "mail": "Mail & notifications",
+        "performance": "Performance & database",
+        "infra": "Nodes & violations"
+      },
       "items": {
+        "dockerNetwork": {
+          "q": "After docker compose up, services can't see each other",
+          "a": "Make sure the shared network exists:\ndocker network create remnawave-network\n\nThen restart the stack:\ndocker compose down && docker compose up -d\n\nIf you run several compose files (panel + Remnawave + bot), they must all attach to the same external network remnawave-network — otherwise the containers land in separate networks and can't resolve each other's names."
+        },
         "panelPort": {
-          "q": "Panel only opens with port :3000",
-          "a": "Reverse proxy issue (Nginx/Caddy). After server reboot, the proxy starts before containers are ready and can't resolve DNS names.\n\nFor Caddy — add lb_try_duration 30s to each reverse_proxy block:\nreverse_proxy web-frontend:80 {\n    lb_try_duration 30s\n}\n\nFor Nginx — add resolver 127.0.0.11 valid=10s to the upstream block.\n\nQuick fix: docker restart caddy (or nginx) after reboot."
+          "q": "Panel only opens with port :3000, doesn't work by domain",
+          "a": "The frontend listens on port 3000 (WEB_FRONTEND_PORT:3000 mapped to port 80 inside the container). To open the panel by domain without a port, put a reverse proxy in front.\n\nCaddy (Caddyfile):\nyour-domain.com {\n    reverse_proxy web-frontend:80 {\n        lb_try_duration 30s\n    }\n}\nlb_try_duration is needed because after a server reboot the proxy starts before the containers and can't immediately resolve their DNS names.\n\nNginx — add to the upstream/location block:\nresolver 127.0.0.11 valid=10s;\n\nIf the panel broke right after a server reboot — docker restart caddy (or nginx) helps."
+        },
+        "update": {
+          "q": "How do I update the panel to a new version?",
+          "a": "1. Back up the DB (Backups → Create) just in case.\n2. Pull new images and restart:\ndocker compose pull\ndocker compose up -d\nDB migrations apply automatically on backend start.\n3. Check the version in the panel footer and the logs: docker compose logs -f web-backend.\n\nRollback: docker compose down, restore the previous image tag in .env/compose, docker compose up -d again, restore the DB backup if needed."
+        },
+        "backup": {
+          "q": "How do I back up and restore the database?",
+          "a": "The Backups section in the left menu (requires the backups permission):\n- Manual backup — the Create button.\n- Scheduled auto-backup — enable an interval and set the frequency; a copy and notifications can go to Telegram, with a failure alert.\n- Restore — upload a backup file and confirm. Before restoring, the panel automatically snapshots the current DB so you can roll back.\n\nA backup also includes the panel config. Keep copies off-site (external disk / S3) — copies on the same server won't help if the disk is lost."
+        },
+        "resourceLimits": {
+          "q": "How do I limit CPU/RAM consumption?",
+          "a": "Hard limits are set at the Docker level, not the application level.\n\nIn docker-compose.yml for a service:\nservices:\n  web-backend:\n    deploy:\n      resources:\n        limits:\n          cpus: '2.0'\n          memory: 1G\n        reservations:\n          cpus: '0.5'\n          memory: 256M\n\nAt the app level, load is tuned via: DB pool size, sync intervals, violation pipeline parameters — see Settings → Performance."
+        },
+        "authMethods": {
+          "q": "What login methods are there and where do I enable them?",
+          "a": "The panel supports: password, Telegram login, passkey (Face ID / fingerprint / hardware key), OAuth (Google/GitHub), and 2FA (one-time codes).\n\nAll personal management is in Settings → Auth methods: change password, Telegram link status, enable/disable 2FA and regenerate backup codes, add/remove passkeys, link Google/GitHub. OAuth login only works via an existing link — there is no auto-creation of accounts.\n\nTo globally enable/disable methods (password/Telegram) and make 2FA mandatory for everyone — Settings → Security section."
+        },
+        "twoFactor": {
+          "q": "How do I enable two-factor authentication (2FA)?",
+          "a": "Settings → Auth methods → 2FA block → 'Enable 2FA':\n1. Scan the QR in an authenticator app (Google Authenticator, Aegis, 1Password, etc.) or enter the key manually.\n2. Save the backup codes — each works once, they cover a lost phone.\n3. Enter the code from the app and confirm.\n\nDisabling and regenerating backup codes is in the same place, via an app code or a backup code. A superadmin can make 2FA mandatory for everyone in the Security section."
+        },
+        "sessions": {
+          "q": "How do I see where I'm logged in and end other sessions?",
+          "a": "Settings → Auth methods → 'Active sessions'. It lists the devices and browsers signed in as your account: device (from the user-agent), IP, and last-active time; the current session is marked.\n\n- 'Revoke' next to a session ends that specific login.\n- 'Sign out other devices' terminates all sessions except the current one.\nA revoked session stops renewing and dies; active access on the device is cut shortly after."
+        },
+        "methodPolicy": {
+          "q": "Can I restrict which method a specific admin logs in with?",
+          "a": "Yes. Admins → admin card → 'Restrict login methods', check the allowed ones (password / Telegram / passkey / OAuth). The other methods will be rejected for that admin right at login.\n\nWith the restriction off, all methods are allowed. You can't enable the restriction without selecting at least one method — that's a lockout guard."
+        },
+        "passwordReset": {
+          "q": "How do I reset the admin password?",
+          "a": "Method 1 — via email (if SMTP is configured): on the login page click 'Forgot password?', enter your email — a reset link will arrive.\n\nMethod 2 — via CLI on the server:\ndocker exec -it <container> python3 scripts/admin_cli.py reset-password --username admin\n\nMethod 3 — create a new superadmin:\ndocker exec -it <container> python3 scripts/admin_cli.py create-superadmin --username newadmin\n\n<container> is the backend container name (check with docker ps)."
         },
         "passwordLogin": {
-          "q": "Can't log in with password after registration",
-          "a": "Possible causes:\n1. Password contains Cyrillic look-alike characters (С instead of C, А instead of A). Switch keyboard to EN and re-enter.\n2. Browser autofilled incorrectly. Try entering manually.\n3. If nothing helps — reset via CLI:\ndocker exec -it <container> python3 scripts/admin_cli.py reset-password --username admin"
+          "q": "Can't log in with password",
+          "a": "Check in order:\n1. Layout — type the password in Latin. The panel rejects Cyrillic in passwords (a common source of errors due to look-alikes С/C, А/A), so a Cyrillic character simply won't match.\n2. Browser autofill may have inserted an old or broken password — enter it manually.\n3. Brute-force protection kicked in? After several failures login is temporarily blocked by IP — wait the stated time.\n4. Forgot the password — see 'How do I reset the admin password'."
+        },
+        "smtpRelay": {
+          "q": "How do I set up email sending via external SMTP (Gmail, Mailgun, etc.)?",
+          "a": "Notifications → Channels → 'SMTP Configuration' (superadmin only). Fill in:\n- SMTP host and port. Port 587 — STARTTLS (enable TLS), 465 — SSL, 25 — no encryption (not recommended).\n- Username and password of the mailbox or relay.\n- Sender email and name (From) — the address must be allowed by the provider, otherwise mail is rejected.\n- Toggle it on and hit 'Test' — a test email will arrive.\n\nExamples:\n• Gmail — smtp.gmail.com, port 587, TLS on. The password is NOT your main one but an App Password (requires 2FA on the Google account).\n• Mailgun — smtp.mailgun.org, port 587, login/password from the domain's SMTP credentials.\n• Yandex — smtp.yandex.ru, port 465 (SSL).\n\nMail won't send — check the port↔encryption pairing, the password (App Password for Gmail), and that the From address is allowed by the provider. Many hosts block outbound 25/465 — use 587 then."
+        },
+        "mailServerSetup": {
+          "q": "How do I run the built-in mail server on my own domain?",
+          "a": "Mail Server section → Domains tab → 'Add domain'. On creation the panel generates DKIM keys.\n\nOpen 'DNS records' for the domain and add them at your DNS provider:\n- MX — routes mail to your server;\n- SPF (TXT) — which servers may send mail for the domain;\n- DKIM (TXT) — signs mail with the generated key;\n- DMARC (TXT) — policy for mail that fails SPF/DKIM.\nPTR (reverse DNS) is set at the VPS host, not in the domain's DNS — without it mail often lands in spam.\n\nAfter adding the records, click 'Check DNS'. Inbound mail — the 'Enable inbound' toggle on the domain. If you send via an external provider, you don't need the built-in server — use 'SMTP Configuration'."
+        },
+        "notifyChannels": {
+          "q": "How do I get notifications outside the panel (Telegram, webhooks, email)?",
+          "a": "Notifications → Channels → add a channel:\n- Telegram — provide a Chat ID (for a group, its id; the bot must be in the group).\n- Webhook — a URL; Discord, Slack, and generic JSON are supported.\n- Email — requires configured SMTP (see 'SMTP Configuration').\n\nWhat exactly gets sent and on which event is defined in the 'Alert rules' tab."
         },
         "highCpu": {
-          "q": "PostgreSQL using 99% CPU",
-          "a": "Check that indexes exist on frequently queried tables. Key indexes:\n- users: idx_users_username_lower, idx_users_email_lower\n- user_connections: idx_user_connections_user_active\n\nAlso configure in Performance settings:\n- DB Pool max size (default 50)\n- Statement timeout (default 60s)\n\nMonitor via: SELECT * FROM pg_stat_user_tables ORDER BY seq_scan DESC;"
-        },
-        "nodeOffline": {
-          "q": "Node shows as offline but is actually running",
-          "a": "Check:\n1. Agent is running and AGENT_COLLECTOR_URL points to web-backend (port 8081)\n2. Agent token matches the token in the panel\n3. No firewall between node and backend\n4. Server time is synchronized (NTP)"
-        },
-        "alertSpam": {
-          "q": "Alerts keep spamming about long-disconnected nodes",
-          "a": "In the alert rule settings, use the 'Ignore nodes offline longer than (min)' field. For example, set 1440 (24 hours) — nodes disconnected for more than a day won't trigger repeat alerts."
-        },
-        "dockerRestart": {
-          "q": "After docker compose up, services can't see each other",
-          "a": "Make sure the network exists:\ndocker network create remnawave-network\n\nThen:\ndocker compose down && docker compose up -d\n\nIf using multiple docker-compose files — all must use the same external network."
+          "q": "PostgreSQL running at near 100% CPU",
+          "a": "1. Check indexes on hot tables (created by migrations):\n- users: idx_users_username_lower, idx_users_email_lower\n- user_connections: idx_user_connections_user_active\nIf migrations didn't apply — a backend restart applies them automatically.\n\n2. Configure Settings → Performance:\n- DB Pool: max connections (default 50);\n- DB: statement timeout (default 60s).\n\n3. Find heavy queries:\nSELECT * FROM pg_stat_user_tables ORDER BY seq_scan DESC;\nLots of seq_scan on a large table → a missing index.\n\n4. With a large online count, lower the sync and violation-check frequency (see the violation queue question)."
         },
         "dbPool": {
           "q": "'Too many connections' errors in logs",
-          "a": "PostgreSQL has a connection limit (default 100). Each service (bot, backend) uses a pool.\n\nSolutions:\n1. Reduce DB Pool max size in Settings → Performance\n2. Increase max_connections in PostgreSQL:\n   ALTER SYSTEM SET max_connections = 200;\n3. Restart PostgreSQL"
-        },
-        "passwordReset": {
-          "q": "How to reset admin password?",
-          "a": "Method 1 — via email (if SMTP configured):\nOn the login page, click 'Forgot password?' and enter your email.\n\nMethod 2 — via CLI:\ndocker exec -it <container> python3 scripts/admin_cli.py reset-password --username admin\n\nMethod 3 — create new superadmin:\ndocker exec -it <container> python3 scripts/admin_cli.py create-superadmin --username newadmin"
-        },
-        "smtp": {
-          "q": "How to set up email sending?",
-          "a": "Two options:\n\n1. Built-in mail server — go to Mail Server section, add a domain, configure DNS records (MX, SPF, DKIM, DMARC).\n\n2. External SMTP relay — go to Notifications → Channels → 'SMTP Configuration' (superadmin only) and enter your SMTP server details (Gmail, Mailgun, etc.)."
+          "a": "PostgreSQL has a connection limit (default 100), and each service (backend, bot) keeps its own pool.\n\n1. Reduce 'DB Pool: max connections' in Settings → Performance (the sum of all service pools must fit the PostgreSQL limit).\n2. Or raise the DB limit:\nALTER SYSTEM SET max_connections = 200;\nand restart PostgreSQL.\n3. Check for stray external connections (pgAdmin, scripts, old containers)."
         },
         "violationQueue": {
-          "q": "How to tell if the violation detection pipeline is keeping up?",
-          "a": "Open /api/v2/collector/stats — it shows:\n- pending_users: users waiting for check\n- health: idle/ok/busy/overloaded\n- backlog: difference between enqueued and processed\n- last_drain_duration_ms: last processing time\n\nIf health = 'overloaded' (>2000 in queue):\n1. Increase 'Chunk size' in Settings → Performance → Pipeline\n2. Decrease 'Drain interval' (e.g. from 3 to 1 sec)\n3. Increase check cooldown (Violation Detection → Cooldown)\n\nIf resources are underutilized but queue grows — increase chunk_size. If CPU is maxed — increase interval and cooldown."
+          "q": "How can I tell if the violation detection pipeline is keeping up?",
+          "a": "Open /api/v2/collector/stats — it shows:\n- pending_users — users waiting for a check;\n- health — idle / ok / busy / overloaded;\n- backlog — difference between enqueued and processed;\n- last_drain_duration_ms — last processing cycle time.\n\nIf health = overloaded (over 2000 in queue):\n1. Increase 'Violation queue: chunk size' in Settings → Performance → Pipeline.\n2. Decrease 'Violation queue: drain interval' (e.g. from 3 to 1 sec).\n3. Increase 'Check cooldown' in the Violation Detection section.\n\nQueue grows while resources are free — raise the chunk size. CPU maxed out — raise the interval and cooldown."
         },
-        "resourceLimits": {
-          "q": "How to limit resource consumption (CPU/RAM)?",
-          "a": "Resource limits are configured at the Docker level, not the application level.\n\nIn docker-compose.yml add:\nservices:\n  web-backend:\n    deploy:\n      resources:\n        limits:\n          cpus: '2.0'\n          memory: 1G\n        reservations:\n          cpus: '0.5'\n          memory: 256M\n\nAt the application level, configure: DB pool, sync intervals, cache size — see Performance settings."
+        "nodeOffline": {
+          "q": "Node shows as offline but is actually running",
+          "a": "Check in order:\n1. The agent container on the node is running: docker ps on the node's server (the agent is installed via docker compose).\n2. AGENT_COLLECTOR_URL points to your web-backend (port 8081, usually via the same domain/proxy over https).\n3. The agent token matches the node's token in the panel.\n4. No firewall / port block between the node and the backend.\n5. Server time is synchronized (NTP) — clock drift breaks agent auth.\nThe agent logs on the node usually show the cause right away (DNS, TLS, 401)."
+        },
+        "agentInstall": {
+          "q": "How do I install the agent on a new node?",
+          "a": "1. Create the node in the panel and copy its UUID and token.\n2. On the node's server run the agent installer:\nbash install.sh --uuid <NODE_UUID> --url https://admin.yourdomain.com --token <AUTH_TOKEN>\n(--url is your web-backend address: port 8081 or via a reverse proxy).\n3. Within a minute the node goes online in the panel.\nStill offline — see 'Node shows as offline but is actually running'."
+        },
+        "alertSpam": {
+          "q": "Alerts keep spamming about long-disconnected nodes",
+          "a": "In the alert rule, set the 'Ignore nodes offline longer than (min)' field. For example 1440 (24 hours) — nodes offline for more than a day stop triggering repeat alerts."
         }
       }
     },
