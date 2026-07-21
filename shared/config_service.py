@@ -1762,7 +1762,7 @@ class DynamicConfigService:
         if self._auto_reload_task is not None:
             return
         self._auto_reload_task = asyncio.create_task(self._auto_reload_loop())
-        logger.info("Config auto-reload started (every %ds)", interval_seconds)
+        logger.debug("Config auto-reload started (every %ds)", interval_seconds)
 
     def stop_auto_reload(self) -> None:
         """Останавливает фоновую задачу перезагрузки конфигурации."""

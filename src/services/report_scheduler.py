@@ -59,7 +59,7 @@ class ReportScheduler:
 
         self._running = True
         self._task = asyncio.create_task(self._scheduler_loop())
-        logger.info("📊 Report scheduler started")
+        logger.debug("📊 Report scheduler started")
 
     async def stop(self) -> None:
         """Останавливает планировщик."""

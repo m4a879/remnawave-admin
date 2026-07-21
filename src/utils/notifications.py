@@ -169,7 +169,7 @@ async def send_user_notification(
         return  # Уведомления отключены
     
     topic_id = settings.get_topic_for_users()
-    logger.info(
+    logger.debug(
         "Sending user notification action=%s chat_id=%s topic_id=%s",
         action,
         settings.notifications_chat_id,

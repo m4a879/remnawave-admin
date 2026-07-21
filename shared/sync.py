@@ -61,7 +61,7 @@ class SyncService:
             return
 
         self._running = True
-        logger.info("🔄 Sync service started (interval: %ds)", settings.sync_interval_seconds)
+        logger.debug("Sync service started (interval: %ds)", settings.sync_interval_seconds)
 
         if background:
             # Non-blocking: initial sync + periodic loop in background
@@ -93,7 +93,7 @@ class SyncService:
     
     async def _run_initial_sync(self) -> None:
         """Run initial synchronization of all data."""
-        logger.info("🔄 Running initial sync...")
+        logger.debug("Running initial sync...")
 
         try:
             results = await asyncio.gather(

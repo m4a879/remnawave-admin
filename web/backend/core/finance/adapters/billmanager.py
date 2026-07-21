@@ -213,7 +213,9 @@ class BillmanagerAdapter(HosterAdapter):
         for func in _UNIFIED_SERVICE_FUNCS:
             rows = await self._try_list(client, endpoint, func, credentials)
             if rows:
-                return self._services_from_rows(rows)
+                services = self._services_from_rows(rows)
+                logger.info("BILLmanager: услуг %d (func=%s)", len(services), func)
+                return services
         # 2) фолбэк: списки по типам, склеиваем и дедупим по id
         services: List[Service] = []
         seen: set = set()
@@ -241,6 +243,13 @@ class BillmanagerAdapter(HosterAdapter):
                         continue
                     seen.add(key)
                     services.append(svc)
+        # один итог вместо строки на каждую опрошенную функцию: детали
+        # перебора (что доступно/недоступно) живут на debug
+        if services:
+            logger.info("BILLmanager: услуг %d", len(services))
+        else:
+            logger.warning("BILLmanager: услуги не найдены — проверьте доступные "
+                           "модули инстанса (детали перебора на DEBUG)")
         return services
 
     async def _menu_service_funcs(self, client, endpoint, credentials) -> List[str]:
@@ -252,7 +261,7 @@ class BillmanagerAdapter(HosterAdapter):
         try:
             doc = await self._call(client, endpoint, "menu", credentials)
         except AdapterError as e:
-            logger.info("BILLmanager func=menu недоступна (%s)", e)
+            logger.debug("BILLmanager func=menu недоступна (%s)", e)
             return []
 
         def node_name(node: Dict[str, Any]) -> Optional[str]:
@@ -287,12 +296,12 @@ class BillmanagerAdapter(HosterAdapter):
 
         section = find_section(doc, "mainmenuservice")
         if section is None:
-            logger.info("BILLmanager: секция mainmenuservice в меню не найдена")
+            logger.debug("BILLmanager: секция mainmenuservice в меню не найдена")
             return []
         names: List[str] = []
         collect_names(section, names)
         funcs = [n for n in names if n != "mainmenuservice"][:20]
-        logger.info("BILLmanager funcs секции услуг: %s", funcs)
+        logger.debug("BILLmanager funcs секции услуг: %s", funcs)
         return funcs
 
     async def _try_list(self, client, endpoint, func, credentials) -> List[Dict[str, Any]]:
@@ -304,11 +313,11 @@ class BillmanagerAdapter(HosterAdapter):
         try:
             doc = await self._call(client, endpoint, func, credentials)
         except AdapterError as e:
-            logger.info("BILLmanager func=%s недоступна (%s)", func, e)
+            logger.debug("BILLmanager func=%s недоступна (%s)", func, e)
             return []
         rows = _rows(doc)
         if rows:
-            logger.info("BILLmanager func=%s: услуг %d", func, len(rows))
+            logger.debug("BILLmanager func=%s: услуг %d", func, len(rows))
         else:
             # функция отвечает, но список пуст — ключи и elem покажут,
             # в каком поле инстанс держит услуги (не doc.elem)

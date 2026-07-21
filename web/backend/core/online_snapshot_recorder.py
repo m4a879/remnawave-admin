@@ -31,7 +31,7 @@ class OnlineSnapshotRecorder:
             return
         self._running = True
         self._task = asyncio.create_task(self._run_loop())
-        logger.info("Online snapshot recorder started")
+        logger.debug("Online snapshot recorder started")
 
     async def stop(self) -> None:
         self._running = False

@@ -37,7 +37,7 @@ class TrafficRateMonitor:
             return
         self._running = True
         self._task = asyncio.create_task(self._run_loop())
-        logger.info("Traffic rate monitor started")
+        logger.debug("Traffic rate monitor started")
 
     async def stop(self):
         self._running = False

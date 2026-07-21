@@ -359,7 +359,7 @@ class GaugeUpdater:
             return
         self._running = True
         self._task = asyncio.create_task(self._loop())
-        logger.info("Prometheus gauge updater started (every %ds)", self.interval)
+        logger.debug("Prometheus gauge updater started (every %ds)", self.interval)
 
     async def stop(self) -> None:
         self._running = False

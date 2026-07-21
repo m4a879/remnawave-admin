@@ -96,7 +96,15 @@ async def sync_account(account_id: int) -> Dict[str, Any]:
         encrypted = await db_service.get_finance_account_credentials(account_id)
         credentials = json.loads(decrypt_field(encrypted or ""))
         adapter = get_adapter(account["adapter"])
-        result = await adapter.fetch(account.get("base_url"), credentials)
+        # имя хостера — контекстом во все строки адаптера (structlog
+        # merge_contextvars): иначе «BILLmanager func=… недоступна» в логах
+        # невозможно привязать к конкретному хостеру
+        import structlog
+        structlog.contextvars.bind_contextvars(hoster=account.get("name") or account["adapter"])
+        try:
+            result = await adapter.fetch(account.get("base_url"), credentials)
+        finally:
+            structlog.contextvars.unbind_contextvars("hoster")
     except (AdapterError, ValueError) as e:
         await db_service.set_finance_account_sync_result(account_id, ok=False, error=str(e))
         return {"status": "error", "error": str(e)}

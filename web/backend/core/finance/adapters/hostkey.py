@@ -140,7 +140,7 @@ class HostkeyAdapter(HosterAdapter):
             if token:
                 self._auth_payload = self._payload_of(resp)
                 # лог без токена — вдруг есть валюта/полезные поля
-                logger.info("Hostkey auth ok, ключи payload=%s", list(self._auth_payload.keys()))
+                logger.debug("Hostkey auth ok, ключи payload=%s", list(self._auth_payload.keys()))
                 return token
             last = f"{mode} ({','.join(fields)}): HTTP {resp.status_code}, тело {resp.text[:200]!r}"
             logger.info("Hostkey auth не дал токен: %s", last)

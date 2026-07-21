@@ -77,12 +77,6 @@ async def run_migrations() -> bool:
                 script = ScriptDirectory.from_config(alembic_cfg)
                 heads = set(script.get_heads())
 
-                logger.info(
-                    "📊 DB revision: current=%s, heads=%s",
-                    sorted(current_heads) or "None",
-                    sorted(heads),
-                )
-
                 pending = heads - current_heads
                 # unresolvable — ревизии из alembic_version, которых нет в
                 # нашем графе вообще (плагин-ветки, чей wheel не загружен).
@@ -98,10 +92,13 @@ async def run_migrations() -> bool:
                     )
 
                 if not pending:
-                    logger.info("✅ Database up to date (no pending)")
+                    logger.info("📊 БД-схема: %s (актуальна)",
+                                ", ".join(sorted(current_heads)) or "пусто")
                     return True
 
-                logger.info("🔄 Pending migrations: %s", sorted(pending))
+                logger.info("📊 БД-схема: %s → миграции: %s",
+                            ", ".join(sorted(current_heads)) or "пусто",
+                            ", ".join(sorted(pending)))
 
                 # Одно соединение — используем его и в main.py, и в env.py
                 # (env.py проверяет config.attributes['connection'])
@@ -169,12 +166,11 @@ async def check_api_connection() -> bool:
     delay = 3
 
     api_url = str(settings.api_base_url).rstrip("/")
-    logger.info("🔗 Connecting to API: %s", api_url)
 
     for attempt in range(1, max_attempts + 1):
         try:
             await internal_api_client.get_health()
-            logger.info("✅ API connection OK")
+            logger.debug("API connection OK (%s)", api_url)
             return True
         except Exception as exc:
             logger.warning(
@@ -239,17 +235,9 @@ async def run_webhook_server(bot: Bot, port: int) -> None:
 async def main() -> None:
     settings = get_settings()
 
-    # Конфигурация администраторов
-    if settings.allowed_admins:
-        logger.info("🔐 Admins: %s", settings.allowed_admins)
-    else:
+    # Конфигурация администраторов (штатные значения — в сводке запуска)
+    if not settings.allowed_admins:
         logger.warning("⚠️ No administrators configured! Set ADMINS env var")
-
-    # Уведомления
-    if settings.notifications_chat_id:
-        logger.info("📢 Notifications: chat_id=%s", settings.notifications_chat_id)
-    else:
-        logger.info("📢 Notifications disabled")
 
     # Проверяем подключение к API перед стартом
     if not await check_api_connection():
@@ -263,7 +251,6 @@ async def main() -> None:
     # Подключаемся к базе данных (если настроена)
     db_connected = False
     if settings.database_enabled:
-        logger.info("🗄️ Connecting to PostgreSQL...")
         migrations_ok = await run_migrations()
         if not migrations_ok:
             logger.warning(
@@ -302,7 +289,6 @@ async def main() -> None:
     # Запускаем webhook сервер в фоне, если настроен порт
     webhook_task = None
     if settings.webhook_port:
-        logger.info("🌐 Webhook on port %d", settings.webhook_port)
         try:
             webhook_task = asyncio.create_task(run_webhook_server(bot, settings.webhook_port))
         except Exception as exc:
@@ -343,11 +329,14 @@ async def main() -> None:
         api_mode = "proxy (RBAC)" if os.environ.get("INTERNAL_API_SECRET") else "direct (legacy)"
         logger.info("─" * 62)
         logger.info("🤖 Remnawave Admin v%s — Bot готов", _version)
-        logger.info("   API: %s · БД: %s · Вебхук: %s · Уведомления: %s",
+        logger.info("   API: %s · БД: %s · Вебхук: %s",
                     api_mode,
                     "ok" if db_connected else "OFF",
-                    f"порт {settings.webhook_port}" if settings.webhook_port else "выкл",
-                    settings.notifications_chat_id or "выкл")
+                    f"порт {settings.webhook_port}" if settings.webhook_port else "выкл")
+        logger.info("   Админы: %d · Уведомления: %s · Отчёты: %s",
+                    len(settings.allowed_admins or []),
+                    settings.notifications_chat_id or "выкл",
+                    "вкл" if report_scheduler and report_scheduler.is_running else "выкл")
         logger.info("─" * 62)
     except Exception as e:  # сводка не должна уметь ронять старт
         logger.debug("Startup summary failed: %s", e)

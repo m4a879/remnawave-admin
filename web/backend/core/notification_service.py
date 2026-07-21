@@ -307,7 +307,7 @@ async def send_telegram(
             reply_markup=reply_markup,
         )
         if ok:
-            logger.info("Telegram notification sent to chat_id=%s", chat_id)
+            logger.debug("Telegram notification sent to chat_id=%s", chat_id)
             NOTIFICATIONS_SENT.labels(channel="telegram").inc()
             return True
         logger.error("Telegram send failed (chat_id=%s)", chat_id)

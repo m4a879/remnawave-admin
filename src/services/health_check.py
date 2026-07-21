@@ -144,7 +144,7 @@ class PanelHealthChecker:
             return
         
         self.is_running = True
-        logger.info("🏥 Health checker started | interval=%ds", self.check_interval)
+        logger.debug("🏥 Health checker started | interval=%ds", self.check_interval)
         
         # Первая проверка сразу при старте
         await self.check_panel_health()

@@ -54,7 +54,7 @@ class MailService:
                 self.submission = SubmissionServer(hostname=mail_hostname, port=submission_port)
                 await self.submission.start()
 
-            logger.info("Mail service started")
+            logger.debug("Mail service started")
         except Exception as e:
             logger.error("Mail service start error: %s", e)
 

@@ -391,12 +391,6 @@ async def _run_migrations(database_url: str) -> bool:
                 script = ScriptDirectory.from_config(alembic_cfg)
                 heads = set(script.get_heads())
 
-                logger.info(
-                    "DB revision: current=%s, heads=%s",
-                    sorted(current_heads) or "None",
-                    sorted(heads),
-                )
-
                 pending = heads - current_heads
                 # ``unresolvable`` = revisions stamped in alembic_version
                 # that don't exist in our script graph at all — plugin
@@ -416,10 +410,13 @@ async def _run_migrations(database_url: str) -> bool:
                     )
 
                 if not pending:
-                    logger.info("Database schema up to date (no pending)")
+                    logger.info("📊 БД-схема: %s (актуальна)",
+                                ", ".join(sorted(current_heads)) or "пусто")
                     return True
 
-                logger.info("Pending migrations to apply: %s", sorted(pending))
+                logger.info("📊 БД-схема: %s → миграции: %s",
+                            ", ".join(sorted(current_heads)) or "пусто",
+                            ", ".join(sorted(pending)))
 
                 connection = engine.connect()
                 try:
@@ -532,7 +529,8 @@ async def lifespan(app: FastAPI):
             from shared.database import db_service
             connected = await db_service.connect(database_url=database_url)
             if connected:
-                logger.info("Database connected")
+                # сам факт коннекта логирует db-слой; здесь собираем сводку
+                _svc_names: list[str] = []
 
                 # First-run admin setup
                 # Verify RBAC tables exist
@@ -557,13 +555,16 @@ async def lifespan(app: FastAPI):
                 if app_mode in ("api", "full"):
                     from web.backend.core.automation_engine import engine as automation_engine
                     await automation_engine.start()
+                    _svc_names.append("automation")
 
                     from web.backend.core.alert_engine import alert_engine
                     await alert_engine.start()
+                    _svc_names.append("alerts")
 
                     try:
                         from web.backend.core.mail.mail_service import mail_service
                         await mail_service.start()
+                        _svc_names.append("mail")
                     except Exception as e:
                         logger.warning("Mail service start failed: %s", e)
 
@@ -703,12 +704,14 @@ async def lifespan(app: FastAPI):
                     try:
                         from shared.sync import sync_service
                         await sync_service.start(background=True)
+                        _svc_names.append("sync")
                     except Exception as e:
                         logger.warning("Sync service start failed: %s", e)
 
                     try:
                         from web.backend.core.traffic_rate_monitor import traffic_rate_monitor
                         await traffic_rate_monitor.start()
+                        _svc_names.append("traffic_monitor")
                     except Exception as e:
                         logger.warning("Traffic rate monitor start failed: %s", e)
 
@@ -717,6 +720,7 @@ async def lifespan(app: FastAPI):
                     try:
                         from web.backend.core.online_snapshot_recorder import online_snapshot_recorder
                         await online_snapshot_recorder.start()
+                        _svc_names.append("online_snapshots")
                     except Exception as e:
                         logger.warning("Online snapshot recorder start failed: %s", e)
 
@@ -740,6 +744,7 @@ async def lifespan(app: FastAPI):
                 try:
                     from web.backend.core.metrics import gauge_updater
                     await gauge_updater.start()
+                    _svc_names.append("prometheus")
                 except Exception as e:
                     logger.warning("Prometheus gauge updater start failed: %s", e)
             else:
@@ -812,6 +817,9 @@ async def lifespan(app: FastAPI):
                     _version, mode_label)
         logger.info("   БД: %s · Кэш: %s · Слушаем: %s:%s",
                     db_state, cache_state, settings.host, settings.port)
+        _services = locals().get("_svc_names") or []
+        if _services:
+            logger.info("   Сервисы (%d): %s", len(_services), ", ".join(_services))
         if _bg_names:
             logger.info("   Фоновые циклы (%d): %s",
                         len(_bg_names), ", ".join(_bg_names))

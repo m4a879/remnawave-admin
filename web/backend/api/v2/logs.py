@@ -596,4 +596,4 @@ async def stream_logs(
     except Exception as e:
         logger.error("Log stream error: %s", e)
     finally:
-        logger.info("Log stream ended: %s", file)
+        logger.debug("Log stream ended: %s", file)
