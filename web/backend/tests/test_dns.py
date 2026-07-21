@@ -47,7 +47,10 @@ class TestCloudflare:
             assert request.headers.get("Authorization") == "Bearer T"
             p = request.url.path
             if p == "/client/v4/user/tokens/verify":
-                return httpx.Response(200, json={"success": True, "result": {"status": "active"}})
+                # Account owned tokens этим эндпоинтом отвергаются, хотя для
+                # зон/записей валидны — verify НЕ должен на него ходить
+                return httpx.Response(400, json={
+                    "success": False, "errors": [{"message": "Invalid API Token"}]})
             if p == "/client/v4/zones":
                 return httpx.Response(200, json={"success": True, "result": [
                     {"id": "z1", "name": "a.com"}]})
