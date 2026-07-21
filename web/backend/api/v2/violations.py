@@ -974,7 +974,19 @@ async def resolve_violation(
         if user_uuid:
             try:
                 from shared.api_client import api_client
-                await api_client.disable_user(user_uuid)
+                try:
+                    await api_client.disable_user(user_uuid)
+                except Exception as disable_err:
+                    # Панель отвечает ошибкой на disable УЖЕ отключённого юзера —
+                    # для блокировки это успех, а не «Сервис API недоступен»
+                    # (без этого нарушение по отключённому юзеру нельзя закрыть)
+                    try:
+                        u = await api_client.get_user_by_uuid(user_uuid)
+                        u = u.get("response") if isinstance(u.get("response"), dict) else u
+                    except Exception:
+                        u = None
+                    if str((u or {}).get("status") or "").upper() != "DISABLED":
+                        raise disable_err
                 logger.info(
                     "User %s disabled via violation resolve by admin '%s'",
                     user_uuid, admin.username,

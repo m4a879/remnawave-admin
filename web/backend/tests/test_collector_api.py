@@ -463,3 +463,27 @@ class TestConsoleNoiseFilter:
         from shared.logger import ConsoleNoiseFilter
         f = ConsoleNoiseFilter()
         assert f.filter(self._rec("some.other.module", "Batch received whatever")) is True
+
+
+class TestHandleViolationDisabledUser:
+    """_handle_violation скипает юзеров со статусом DISABLED в панели.
+
+    Кейс из сообщества: заблокированный (отключённый) юзер продолжал
+    порождать нарушения по остаточным коннектам каждый детект-цикл —
+    «нарушения по кругу» на всю сеть кросс-аккаунтов.
+    """
+
+    @pytest.mark.asyncio
+    async def test_disabled_user_skipped(self):
+        db = make_db_mock()
+        db.save_violation = AsyncMock(return_value=(1, True))
+        monitor = MagicMock()
+        monitor.get_user_active_connections = AsyncMock(return_value=[])
+        with patch.object(collector, "db_service", db), \
+             patch.object(collector, "connection_monitor", monitor):
+            await collector._handle_violation(
+                USER_UUID, make_violation_score(100.0),
+                {"username": "alice", "status": "DISABLED"}, [], False,
+            )
+        monitor.get_user_active_connections.assert_not_awaited()
+        db.save_violation.assert_not_awaited()

@@ -918,6 +918,14 @@ async def _handle_violation(
     is_whitelisted: bool,
 ):
     """Post-process a single detected violation: notify, save, auto-block."""
+    # Юзер уже отключён в панели (заблокирован админом/автоблоком) — не плодим
+    # новые нарушения и уведомления по остаточным коннектам: админ меру принял,
+    # а «нарушения по кругу» на всю сеть кросс-аккаунтов только заваливают его
+    status = str((user_info or {}).get("status") or "").upper()
+    if status == "DISABLED":
+        logger.debug("Skipping violation for disabled user %s", user_uuid)
+        return
+
     active_conns = await connection_monitor.get_user_active_connections(user_uuid, max_age_minutes=5)
 
     ip_metadata = {}
