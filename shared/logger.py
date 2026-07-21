@@ -263,6 +263,9 @@ def setup_logger() -> logging.Logger:
     # httpx/httpcore — каждый HTTP): только предупреждения и ошибки.
     for noisy in ("urllib3", "httpx", "httpcore", "google", "googleapiclient", "apscheduler"):
         logging.getLogger(noisy).setLevel(logging.WARNING)
+    # Кэш-трейс шумит даже на DEBUG («expired/set/hit» на каждый api-вызов) —
+    # включается точечно: logging.getLogger("bot.cache").setLevel(DEBUG)
+    logging.getLogger("bot.cache").setLevel(logging.WARNING)
 
     root = logging.getLogger()
     root.handlers.clear()
