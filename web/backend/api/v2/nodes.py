@@ -30,7 +30,9 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-@router.get("/nodes/agent-meta")
+# ВАЖНО: роутер монтируется с префиксом /api/v2/nodes — путь здесь БЕЗ /nodes.
+# Статический роут обязан быть объявлен раньше динамического /{node_uuid}.
+@router.get("/agent-meta")
 async def agent_meta(admin: AdminUser = Depends(require_permission("nodes", "view"))):
     """Метаданные node-agent: эталонная версия для сравнения в UI."""
     from shared.agent_version import LATEST_AGENT_VERSION
@@ -271,6 +273,13 @@ async def get_node(
     admin: AdminUser = Depends(require_permission("nodes", "view")),
 ):
     """Get detailed node information."""
+    # Не-UUID (например, промахнувшийся статический путь) — чистый 404,
+    # а не поход в Panel API с мусором и необработанный 500.
+    import uuid as _uuid
+    try:
+        _uuid.UUID(node_uuid)
+    except ValueError:
+        raise api_error(404, E.NODE_NOT_FOUND)
     if not await check_access(admin, "node", node_uuid, "view"):
         raise api_error(403, E.FORBIDDEN)
     try:
