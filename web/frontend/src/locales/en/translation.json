@@ -1139,7 +1139,11 @@
         "today": "Today's traffic (↓)",
         "lastSeen": "Last ping (↓)",
         "created": "Created date (↓)",
-        "custom": "Custom order"
+        "custom": "Custom order",
+        "address": "By address",
+        "total": "By total traffic",
+        "xray": "By Xray version",
+        "agent": "By agent status"
       }
     },
     "deferred": {
@@ -4165,20 +4169,62 @@
           "dns": "DNS"
         },
         "items": {
-          "freedomDirect": { "label": "Freedom (direct)", "desc": "Direct egress, tag: direct" },
-          "blackhole": { "label": "Blackhole (block)", "desc": "Traffic sink, tag: block" },
-          "dnsOut": { "label": "DNS outbound", "desc": "DNS query handler, tag: dns-out" },
-          "warp": { "label": "WARP (WireGuard)", "desc": "Cloudflare WARP; fill secretKey/address" },
-          "fragment": { "label": "Freedom + fragment", "desc": "TLS-hello fragmentation vs DPI" },
-          "vlessReality": { "label": "VLESS + Reality", "desc": "Selfsteal inbound; set target/serverNames/key" },
-          "ss2022": { "label": "Shadowsocks 2022", "desc": "2022-blake3; fill password" },
-          "dokodemoDns": { "label": "Dokodemo (DNS)", "desc": "DNS intercept to 1.1.1.1" },
-          "blockTorrent": { "label": "Block BitTorrent", "desc": "Cut torrent → block" },
-          "blockAds": { "label": "Block ads", "desc": "geosite:category-ads-all → block" },
-          "blockPrivate": { "label": "Block private IP", "desc": "geoip:private → block" },
-          "openaiWarp": { "label": "OpenAI → WARP", "desc": "geosite:openai via WARP" },
-          "googleWarp": { "label": "Google → WARP", "desc": "geosite:google via WARP" },
-          "dnsBasic": { "label": "Basic DNS", "desc": "servers 1.1.1.1/8.8.8.8, UseIP" }
+          "freedomDirect": {
+            "label": "Freedom (direct)",
+            "desc": "Direct egress, tag: direct"
+          },
+          "blackhole": {
+            "label": "Blackhole (block)",
+            "desc": "Traffic sink, tag: block"
+          },
+          "dnsOut": {
+            "label": "DNS outbound",
+            "desc": "DNS query handler, tag: dns-out"
+          },
+          "warp": {
+            "label": "WARP (WireGuard)",
+            "desc": "Cloudflare WARP; fill secretKey/address"
+          },
+          "fragment": {
+            "label": "Freedom + fragment",
+            "desc": "TLS-hello fragmentation vs DPI"
+          },
+          "vlessReality": {
+            "label": "VLESS + Reality",
+            "desc": "Selfsteal inbound; set target/serverNames/key"
+          },
+          "ss2022": {
+            "label": "Shadowsocks 2022",
+            "desc": "2022-blake3; fill password"
+          },
+          "dokodemoDns": {
+            "label": "Dokodemo (DNS)",
+            "desc": "DNS intercept to 1.1.1.1"
+          },
+          "blockTorrent": {
+            "label": "Block BitTorrent",
+            "desc": "Cut torrent → block"
+          },
+          "blockAds": {
+            "label": "Block ads",
+            "desc": "geosite:category-ads-all → block"
+          },
+          "blockPrivate": {
+            "label": "Block private IP",
+            "desc": "geoip:private → block"
+          },
+          "openaiWarp": {
+            "label": "OpenAI → WARP",
+            "desc": "geosite:openai via WARP"
+          },
+          "googleWarp": {
+            "label": "Google → WARP",
+            "desc": "geosite:google via WARP"
+          },
+          "dnsBasic": {
+            "label": "Basic DNS",
+            "desc": "servers 1.1.1.1/8.8.8.8, UseIP"
+          }
         }
       }
     },
@@ -4427,7 +4473,8 @@
       "noNode": "No node",
       "nextDue": "Next payment",
       "paymentDate": "Payment date",
-      "url": "Dashboard URL"
+      "url": "Dashboard URL",
+      "comment": "Comment"
     },
     "recurringExpense": "Recurring expenses",
     "recurringIncome": "Recurring income",
@@ -4589,7 +4636,19 @@
       "once": "one-time",
       "days": "/{{count}}d",
       "months": "/{{count}}mo"
-    }
+    },
+    "range": {
+      "all": "All time",
+      "thisMonth": "This month",
+      "prevMonth": "Last month",
+      "last90": "90 days",
+      "custom": "Custom range",
+      "from": "From",
+      "to": "To"
+    },
+    "addPayment": "Add operation",
+    "paymentAdded": "Operation added",
+    "paymentNamePh": "e.g. server payment for March"
   },
   "reports": {
     "title": "Reports",

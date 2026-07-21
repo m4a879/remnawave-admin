@@ -97,11 +97,13 @@ function OverviewTab() {
   const { t } = useTranslation()
   const chart = useChartTheme()
 
+  // 12 месяцев истории — хватает и графику, и селектору месяца KPI
   const { data: summary, isLoading, isError, refetch } = useQuery({
     queryKey: ['finance-summary'],
-    queryFn: () => financeApi.getSummary(6),
+    queryFn: () => financeApi.getSummary(12),
     staleTime: 60_000,
   })
+  const [kpiMonth, setKpiMonth] = useState('current')
   const { data: upcoming } = useQuery({
     queryKey: ['finance-upcoming'],
     queryFn: () => financeApi.getUpcoming(30),
@@ -150,9 +152,21 @@ function OverviewTab() {
     [summary],
   )
 
-  // Текущий месяц: фактические платежи + предстоящие списания активных записей
-  // до конца месяца (иначе расходы = 0, пока продления хостеров впереди).
+  // KPI-месяц: «current» = факт + предстоящие списания до конца месяца
+  // (с сервера); прошлый месяц — чистый факт из monthly[] (upcoming не бывает).
+  const monthOptions = useMemo(() => {
+    const nowKey = (() => { const n = new Date(); return `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, '0')}` })()
+    return (summary?.monthly || []).map((m) => m.month).filter((m) => m !== nowKey).reverse()
+  }, [summary])
   const thisMonth = useMemo(() => {
+    if (kpiMonth !== 'current') {
+      const b = (summary?.monthly || []).find((m) => m.month === kpiMonth)
+      return {
+        income: b?.income ?? 0, expense: b?.expense ?? 0, net: b?.net ?? 0,
+        expense_actual: b?.expense ?? 0, income_actual: b?.income ?? 0,
+        expense_upcoming: 0, income_upcoming: 0,
+      }
+    }
     const tm = summary?.this_month
     if (tm) return tm
     const now = new Date()
@@ -163,11 +177,12 @@ function OverviewTab() {
       expense_actual: b?.expense ?? 0, income_actual: b?.income ?? 0,
       expense_upcoming: 0, income_upcoming: 0,
     }
-  }, [summary])
+  }, [summary, kpiMonth])
+  const periodLabel = kpiMonth === 'current' ? t('finance.thisMonth') : kpiMonth
   const kpiHint = (actual: number, upcoming: number) =>
     upcoming > 0
       ? t('finance.factPlusUpcoming', { actual: fmtMoney(actual, base), upcoming: fmtMoney(upcoming, base) })
-      : t('finance.thisMonth')
+      : periodLabel
   // человекочитаемые названия способов оплаты; неизвестные бренды — капитализация слага
   const pmLabel = (m: string) =>
     t(`finance.pm.${m}`, { defaultValue: m.charAt(0).toUpperCase() + m.slice(1).replace(/_/g, ' ') })
@@ -176,6 +191,17 @@ function OverviewTab() {
 
   return (
     <div className="space-y-4">
+      {/* Селектор месяца KPI: текущий (факт+предстоящие) или любой из истории */}
+      <div className="flex items-center gap-2">
+        <Select value={kpiMonth} onValueChange={setKpiMonth}>
+          <SelectTrigger className="w-44 h-8 text-xs"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="current">{t('finance.range.thisMonth')}</SelectItem>
+            {monthOptions.map((m) => <SelectItem key={m} value={m}>{m}</SelectItem>)}
+          </SelectContent>
+        </Select>
+      </div>
+
       {/* KPI строка */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
         {isLoading ? (
@@ -200,7 +226,7 @@ function OverviewTab() {
               icon={<Wallet className="w-5 h-5 text-primary-400" />}
               label={t('finance.monthProfit')}
               value={fmtMoney(thisMonth.net, base)}
-              hint={t('finance.thisMonth')}
+              hint={periodLabel}
               tone={thisMonth.net >= 0 ? 'green' : 'red'}
             />
           </>
@@ -768,25 +794,105 @@ function ItemsTab({ canCreate, canEdit, canDelete, prefillProvider, onPrefillCon
 
 // ── Payments tab ─────────────────────────────────────────────────
 
-function PaymentsTab({ canDelete }: { canDelete: boolean }) {
+// Пресеты периода операций: ключ → (since, until) в ISO-датах
+function paymentsRange(preset: string, from: string, to: string): { since?: string; until?: string } {
+  const today = new Date()
+  const iso = (d: Date) => d.toISOString().slice(0, 10)
+  const startOfMonth = (d: Date) => new Date(d.getFullYear(), d.getMonth(), 1)
+  switch (preset) {
+    case 'thisMonth':
+      return { since: iso(startOfMonth(today)) }
+    case 'prevMonth': {
+      const prev = new Date(today.getFullYear(), today.getMonth() - 1, 1)
+      return { since: iso(prev), until: iso(new Date(today.getFullYear(), today.getMonth(), 0)) }
+    }
+    case '90d': {
+      const d = new Date(today); d.setDate(d.getDate() - 90)
+      return { since: iso(d) }
+    }
+    case 'custom':
+      return { ...(from ? { since: from } : {}), ...(to ? { until: to } : {}) }
+    default:
+      return {}
+  }
+}
+
+const EMPTY_PAYMENT = { kind: 'expense', item_name: '', amount: '', currency: 'RUB', paid_at: '', comment: '' }
+
+function PaymentsTab({ canCreate, canDelete }: { canCreate: boolean; canDelete: boolean }) {
   const { t } = useTranslation()
   const qc = useQueryClient()
+  const [preset, setPreset] = useState('all')
+  const [from, setFrom] = useState('')
+  const [to, setTo] = useState('')
+  const [addOpen, setAddOpen] = useState(false)
+  const [pf, setPf] = useState({ ...EMPTY_PAYMENT })
+
+  const range = useMemo(() => paymentsRange(preset, from, to), [preset, from, to])
   const { data, isLoading, isError, refetch } = useQuery({
-    queryKey: ['finance-payments'],
-    queryFn: () => financeApi.listPayments({ limit: 200 }),
+    queryKey: ['finance-payments', range.since ?? '', range.until ?? ''],
+    queryFn: () => financeApi.listPayments({ limit: 500, ...range }),
     staleTime: 30_000,
   })
   const delMut = useMutation({
     mutationFn: (id: number) => financeApi.deletePayment(id),
     onSuccess: () => { toast.success(t('common.deleted')); qc.invalidateQueries({ queryKey: ['finance-payments'] }); qc.invalidateQueries({ queryKey: ['finance-summary'] }) },
   })
+  const addMut = useMutation({
+    mutationFn: () => financeApi.createPayment({
+      kind: pf.kind as 'expense' | 'income',
+      item_name: pf.item_name.trim() || undefined,
+      amount: parseFloat(pf.amount),
+      currency: pf.currency.trim().toUpperCase() || 'RUB',
+      paid_at: pf.paid_at,
+      comment: pf.comment.trim() || undefined,
+    }),
+    onSuccess: () => {
+      toast.success(t('finance.paymentAdded'))
+      setAddOpen(false); setPf({ ...EMPTY_PAYMENT })
+      qc.invalidateQueries({ queryKey: ['finance-payments'] })
+      qc.invalidateQueries({ queryKey: ['finance-summary'] })
+    },
+    onError: (e: any) => toast.error(e?.response?.data?.detail || t('common.error')),
+  })
+  const pfValid = pf.paid_at && parseFloat(pf.amount) > 0
 
   if (isError) return <QueryError onRetry={refetch} />
-  if (isLoading) return <div className="space-y-2">{Array.from({ length: 6 }).map((_, i) => <Skeleton key={i} className="h-12" />)}</div>
-  if (!data?.items.length) return <EmptyState icon={Wallet} title={t('finance.noPayments')} />
 
   return (
-    <div className="space-y-1.5">
+    <div className="space-y-3">
+      {/* Период + добавление операции (в т.ч. задним числом) */}
+      <div className="flex flex-wrap items-center gap-2">
+        <Select value={preset} onValueChange={setPreset}>
+          <SelectTrigger className="w-44 h-9"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">{t('finance.range.all')}</SelectItem>
+            <SelectItem value="thisMonth">{t('finance.range.thisMonth')}</SelectItem>
+            <SelectItem value="prevMonth">{t('finance.range.prevMonth')}</SelectItem>
+            <SelectItem value="90d">{t('finance.range.last90')}</SelectItem>
+            <SelectItem value="custom">{t('finance.range.custom')}</SelectItem>
+          </SelectContent>
+        </Select>
+        {preset === 'custom' && (
+          <>
+            <Input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className="w-40 h-9" aria-label={t('finance.range.from')} />
+            <span className="text-muted-foreground text-sm">—</span>
+            <Input type="date" value={to} onChange={(e) => setTo(e.target.value)} className="w-40 h-9" aria-label={t('finance.range.to')} />
+          </>
+        )}
+        {canCreate && (
+          <Button size="sm" className="ml-auto gap-1.5" onClick={() => setAddOpen(true)}>
+            <Plus className="w-4 h-4" />{t('finance.addPayment')}
+          </Button>
+        )}
+      </div>
+
+      {isLoading ? (
+        <div className="space-y-2">{Array.from({ length: 6 }).map((_, i) => <Skeleton key={i} className="h-12" />)}</div>
+      ) : !data?.items.length ? (
+        <EmptyState icon={Wallet} title={t('finance.noPayments')} />
+      ) : (
+      <div className="space-y-1.5">
       {data.items.map((p) => (
         <Card key={p.id}>
           <CardContent className="py-2.5 flex items-center gap-3">
@@ -809,6 +915,59 @@ function PaymentsTab({ canDelete }: { canDelete: boolean }) {
           </CardContent>
         </Card>
       ))}
+      </div>
+      )}
+
+      {/* Диалог: ручная операция произвольной датой (в т.ч. старая) */}
+      <Dialog open={addOpen} onOpenChange={setAddOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader><DialogTitle>{t('finance.addPayment')}</DialogTitle></DialogHeader>
+          <div className="space-y-3">
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <Label>{t('finance.field.kind')}</Label>
+                <Select value={pf.kind} onValueChange={(v) => setPf({ ...pf, kind: v })}>
+                  <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="expense">{t('finance.kind.expense')}</SelectItem>
+                    <SelectItem value="income">{t('finance.kind.income')}</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label>{t('finance.field.paymentDate')}</Label>
+                <Input type="date" value={pf.paid_at} onChange={(e) => setPf({ ...pf, paid_at: e.target.value })} className="h-9" />
+              </div>
+            </div>
+            <div>
+              <Label>{t('finance.field.name')}</Label>
+              <Input value={pf.item_name} placeholder={t('finance.paymentNamePh')}
+                onChange={(e) => setPf({ ...pf, item_name: e.target.value })} className="h-9" />
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <Label>{t('finance.field.amount')}</Label>
+                <Input type="number" min="0" step="0.01" value={pf.amount}
+                  onChange={(e) => setPf({ ...pf, amount: e.target.value })} className="h-9" />
+              </div>
+              <div>
+                <Label>{t('finance.field.currency')}</Label>
+                <Input value={pf.currency} onChange={(e) => setPf({ ...pf, currency: e.target.value })} className="h-9 font-mono" />
+              </div>
+            </div>
+            <div>
+              <Label>{t('finance.field.comment')}</Label>
+              <Input value={pf.comment} onChange={(e) => setPf({ ...pf, comment: e.target.value })} className="h-9" />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setAddOpen(false)}>{t('common.cancel')}</Button>
+            <Button disabled={!pfValid || addMut.isPending} onClick={() => addMut.mutate()}>
+              {addMut.isPending ? t('common.saving') : t('common.save')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
@@ -1761,7 +1920,7 @@ export default function Finance() {
           <ItemsTab canCreate={canCreate} canEdit={canEdit} canDelete={canDelete}
             prefillProvider={prefillProvider} onPrefillConsumed={() => setPrefillProvider(null)} />
         </TabsContent>
-        <TabsContent value="payments"><PaymentsTab canDelete={canDelete} /></TabsContent>
+        <TabsContent value="payments"><PaymentsTab canCreate={canCreate} canDelete={canDelete} /></TabsContent>
         <TabsContent value="hosters">
           <HostersTab canCreate={canCreate} canEdit={canEdit} canDelete={canDelete}
             onAddItem={(id) => { setPrefillProvider(id); setTab('items') }} />

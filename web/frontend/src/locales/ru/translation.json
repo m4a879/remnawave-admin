@@ -1139,7 +1139,11 @@
         "today": "По трафику за сегодня (↓)",
         "lastSeen": "По последнему пингу (↓)",
         "created": "По дате создания (↓)",
-        "custom": "Свой порядок"
+        "custom": "Свой порядок",
+        "address": "По адресу",
+        "total": "По общему трафику",
+        "xray": "По версии Xray",
+        "agent": "По статусу агента"
       }
     },
     "deferred": {
@@ -4165,20 +4169,62 @@
           "dns": "DNS"
         },
         "items": {
-          "freedomDirect": { "label": "Freedom (прямой)", "desc": "Прямой выход, tag: direct" },
-          "blackhole": { "label": "Blackhole (блок)", "desc": "Глушилка трафика, tag: block" },
-          "dnsOut": { "label": "DNS outbound", "desc": "Обработчик DNS-запросов, tag: dns-out" },
-          "warp": { "label": "WARP (WireGuard)", "desc": "Cloudflare WARP; впиши secretKey/address" },
-          "fragment": { "label": "Freedom + fragment", "desc": "Дробление TLS-hello против DPI" },
-          "vlessReality": { "label": "VLESS + Reality", "desc": "Selfsteal-инбаунд; задай target/serverNames/ключ" },
-          "ss2022": { "label": "Shadowsocks 2022", "desc": "2022-blake3; впиши password" },
-          "dokodemoDns": { "label": "Dokodemo (DNS)", "desc": "Перехват DNS на 1.1.1.1" },
-          "blockTorrent": { "label": "Блок BitTorrent", "desc": "Резать torrent → block" },
-          "blockAds": { "label": "Блок рекламы", "desc": "geosite:category-ads-all → block" },
-          "blockPrivate": { "label": "Блок private IP", "desc": "geoip:private → block" },
-          "openaiWarp": { "label": "OpenAI → WARP", "desc": "geosite:openai через WARP" },
-          "googleWarp": { "label": "Google → WARP", "desc": "geosite:google через WARP" },
-          "dnsBasic": { "label": "Базовый DNS", "desc": "servers 1.1.1.1/8.8.8.8, UseIP" }
+          "freedomDirect": {
+            "label": "Freedom (прямой)",
+            "desc": "Прямой выход, tag: direct"
+          },
+          "blackhole": {
+            "label": "Blackhole (блок)",
+            "desc": "Глушилка трафика, tag: block"
+          },
+          "dnsOut": {
+            "label": "DNS outbound",
+            "desc": "Обработчик DNS-запросов, tag: dns-out"
+          },
+          "warp": {
+            "label": "WARP (WireGuard)",
+            "desc": "Cloudflare WARP; впиши secretKey/address"
+          },
+          "fragment": {
+            "label": "Freedom + fragment",
+            "desc": "Дробление TLS-hello против DPI"
+          },
+          "vlessReality": {
+            "label": "VLESS + Reality",
+            "desc": "Selfsteal-инбаунд; задай target/serverNames/ключ"
+          },
+          "ss2022": {
+            "label": "Shadowsocks 2022",
+            "desc": "2022-blake3; впиши password"
+          },
+          "dokodemoDns": {
+            "label": "Dokodemo (DNS)",
+            "desc": "Перехват DNS на 1.1.1.1"
+          },
+          "blockTorrent": {
+            "label": "Блок BitTorrent",
+            "desc": "Резать torrent → block"
+          },
+          "blockAds": {
+            "label": "Блок рекламы",
+            "desc": "geosite:category-ads-all → block"
+          },
+          "blockPrivate": {
+            "label": "Блок private IP",
+            "desc": "geoip:private → block"
+          },
+          "openaiWarp": {
+            "label": "OpenAI → WARP",
+            "desc": "geosite:openai через WARP"
+          },
+          "googleWarp": {
+            "label": "Google → WARP",
+            "desc": "geosite:google через WARP"
+          },
+          "dnsBasic": {
+            "label": "Базовый DNS",
+            "desc": "servers 1.1.1.1/8.8.8.8, UseIP"
+          }
         }
       }
     },
@@ -4427,7 +4473,8 @@
       "noNode": "Без ноды",
       "nextDue": "Следующее списание",
       "paymentDate": "Дата платежа",
-      "url": "Ссылка на кабинет"
+      "url": "Ссылка на кабинет",
+      "comment": "Комментарий"
     },
     "recurringExpense": "Регулярные расходы",
     "recurringIncome": "Регулярные доходы",
@@ -4589,7 +4636,19 @@
       "once": "разово",
       "days": "за {{count}} дн.",
       "months": "за {{count}} мес."
-    }
+    },
+    "range": {
+      "all": "За всё время",
+      "thisMonth": "Этот месяц",
+      "prevMonth": "Прошлый месяц",
+      "last90": "90 дней",
+      "custom": "Свой период",
+      "from": "С даты",
+      "to": "По дату"
+    },
+    "addPayment": "Добавить операцию",
+    "paymentAdded": "Операция добавлена",
+    "paymentNamePh": "Например: оплата сервера за март"
   },
   "reports": {
     "title": "Отчёты",

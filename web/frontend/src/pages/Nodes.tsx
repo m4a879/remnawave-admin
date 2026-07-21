@@ -1202,9 +1202,11 @@ function NodeSkeleton() {
 
 // ── Sorting presets ─────────────────────────────────────────────
 
-type SortPreset = 'auto' | 'name' | 'users' | 'today' | 'lastSeen' | 'created' | 'custom'
+type SortPreset = 'auto' | 'name' | 'address' | 'users' | 'today' | 'total' | 'lastSeen'
+  | 'created' | 'xray' | 'agent' | 'custom'
 
-const SORT_PRESETS: SortPreset[] = ['auto', 'name', 'users', 'today', 'lastSeen', 'created', 'custom']
+const SORT_PRESETS: SortPreset[] = ['auto', 'name', 'address', 'users', 'today', 'total',
+  'lastSeen', 'created', 'xray', 'agent', 'custom']
 
 interface SortState {
   preset: SortPreset
@@ -1246,14 +1248,25 @@ function autoPriority(n: Node): number {
   return 2
 }
 
+// Статус агента для сортировки: подключён → есть токен, но офлайн → нет агента
+function agentPriority(n: Node): number {
+  if (n.agent_v2_connected) return 0
+  if (n.has_agent_token) return 1
+  return 2
+}
+
 function compareByPreset(preset: SortPreset, a: Node, b: Node): number {
   switch (preset) {
     case 'name':
       return (a.name || '').localeCompare(b.name || '')
+    case 'address':
+      return (a.address || '').localeCompare(b.address || '', undefined, { numeric: true })
     case 'users':
       return (b.users_online || 0) - (a.users_online || 0)
     case 'today':
       return (b.traffic_today_bytes || 0) - (a.traffic_today_bytes || 0)
+    case 'total':
+      return (b.traffic_total_bytes || 0) - (a.traffic_total_bytes || 0)
     case 'lastSeen': {
       const at = a.last_seen_at ? Date.parse(a.last_seen_at) : 0
       const bt = b.last_seen_at ? Date.parse(b.last_seen_at) : 0
@@ -1261,6 +1274,12 @@ function compareByPreset(preset: SortPreset, a: Node, b: Node): number {
     }
     case 'created':
       return Date.parse(b.created_at || '') - Date.parse(a.created_at || '')
+    case 'xray':
+      return (b.xray_version || '').localeCompare(a.xray_version || '', undefined, { numeric: true })
+    case 'agent': {
+      const diff = agentPriority(a) - agentPriority(b)
+      return diff !== 0 ? diff : (a.name || '').localeCompare(b.name || '')
+    }
     case 'auto':
     default: {
       const diff = autoPriority(a) - autoPriority(b)
