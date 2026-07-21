@@ -116,9 +116,15 @@ class BillmanagerAdapter(HosterAdapter):
         base = (base_url or "").strip().rstrip("/")
         if not base:
             raise AdapterError("Не указан адрес биллинга")
-        # base_url может быть https://host, https://host/billmgr или .../billmgr?func=logon
+        # base_url может быть https://host, https://host/billmgr,
+        # .../billmgr?func=logon или нестандартный путь вида /billmgr-api
+        # (serv.host) — доклеиваем /billmgr только если последний сегмент
+        # ПУТИ ещё не billmgr* (хост вида billmgr.example.com не считается)
         base = base.split("?")[0].rstrip("/")
-        if not base.endswith("/billmgr"):
+        from urllib.parse import urlsplit
+        path = urlsplit(base).path.rstrip("/")
+        last_segment = path.rsplit("/", 1)[-1] if path else ""
+        if not last_segment.startswith("billmgr"):
             base = base + "/billmgr"
         return base
 
@@ -227,22 +233,22 @@ class BillmanagerAdapter(HosterAdapter):
                     continue
                 seen.add(key)
                 services.append(svc)
-        if not services:
-            # 3) автообнаружение: у части инстансов услуги в подмодулях
-            # (Waicore: vds пуст, реальные VPS в vds.vps) — берём funcs из
-            # секции «Товары/услуги» клиентского меню и пробуем их
-            tried = set(_UNIFIED_SERVICE_FUNCS) | set(_TYPED_SERVICE_FUNCS)
-            for func in await self._menu_service_funcs(client, endpoint, credentials):
-                if func in tried:
+        # 3) автообнаружение по клиентскому меню — ВСЕГДА, не только при пустом
+        # списке: у части инстансов услуги в подмодулях, которых нет в typed-
+        # переборе (Waicore: vhost отдаёт бесплатный хостинг, а реальные VPS
+        # живут в vds.vps — без прохода по меню они терялись)
+        tried = set(_UNIFIED_SERVICE_FUNCS) | set(_TYPED_SERVICE_FUNCS)
+        for func in await self._menu_service_funcs(client, endpoint, credentials):
+            if func in tried:
+                continue
+            tried.add(func)
+            rows = await self._try_list(client, endpoint, func, credentials)
+            for svc in self._services_from_rows(rows):
+                key = svc.external_id or f"{func}:{svc.name}"
+                if key in seen:
                     continue
-                tried.add(func)
-                rows = await self._try_list(client, endpoint, func, credentials)
-                for svc in self._services_from_rows(rows):
-                    key = svc.external_id or f"{func}:{svc.name}"
-                    if key in seen:
-                        continue
-                    seen.add(key)
-                    services.append(svc)
+                seen.add(key)
+                services.append(svc)
         # один итог вместо строки на каждую опрошенную функцию: детали
         # перебора (что доступно/недоступно) живут на debug
         if services:
