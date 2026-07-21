@@ -95,31 +95,6 @@ async def run_agent() -> None:
                     and handler.baseFilename.endswith("nodeagent_WARNING.log")):
                 handler.setLevel(effective)
 
-    # Коллектор
-    if settings.log_parsing_mode.lower() == "realtime":
-        collector = XrayLogRealtimeCollector(settings)
-        logger.info("Mode: realtime, interval: %ss", settings.interval_seconds)
-    else:
-        collector = XrayLogCollector(settings)
-        logger.info("Mode: polling, interval: %ss", settings.interval_seconds)
-
-    sender = CollectorSender(settings)
-    system_metrics_collector = SystemMetricsCollector()
-
-    # Инициализация CPU baseline
-    await system_metrics_collector.collect()
-
-    # Проверяем связь
-    if not await sender.check_connectivity():
-        logger.warning("Cannot reach Collector API at %s", settings.collector_url)
-
-    # Проверяем файл логов
-    log_path = Path(settings.xray_log_path)
-    if log_path.exists():
-        logger.info("Log file: %s (%d bytes)", settings.xray_log_path, log_path.stat().st_size)
-    else:
-        logger.warning("Log file not found: %s", settings.xray_log_path)
-
     # Auto-restart
     max_uptime_sec = settings.max_uptime_hours * 3600 if settings.max_uptime_hours > 0 else 0
     start_time = time.monotonic()
@@ -137,6 +112,29 @@ async def run_agent() -> None:
                 log_level,
                 f" · auto-restart={settings.max_uptime_hours:.1f}h" if max_uptime_sec > 0 else "")
     logger.info("─" * 60)
+
+    # Коллектор
+    if settings.log_parsing_mode.lower() == "realtime":
+        collector = XrayLogRealtimeCollector(settings)
+    else:
+        collector = XrayLogCollector(settings)
+
+    sender = CollectorSender(settings)
+    system_metrics_collector = SystemMetricsCollector()
+
+    # Инициализация CPU baseline
+    await system_metrics_collector.collect()
+
+    # Проверяем связь
+    if not await sender.check_connectivity():
+        logger.warning("Cannot reach Collector API at %s", settings.collector_url)
+
+    # Проверяем файл логов
+    log_path = Path(settings.xray_log_path)
+    if log_path.exists():
+        logger.info("Log file: %s (%d bytes)", settings.xray_log_path, log_path.stat().st_size)
+    else:
+        logger.warning("Log file not found: %s", settings.xray_log_path)
 
     cycle_count = 0
     check_interval = settings.realtime_check_interval_seconds or settings.interval_seconds
