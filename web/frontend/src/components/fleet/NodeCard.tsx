@@ -14,6 +14,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Separator } from '@/components/ui/separator'
 import { cn } from '@/lib/utils'
+import { useFormatters } from '@/lib/useFormatters'
 import CircularGauge from './CircularGauge'
 
 // ── Types ────────────────────────────────────────────────────────
@@ -45,6 +46,7 @@ export interface FleetNode {
   download_speed_bps: number
   upload_speed_bps: number
   metrics_updated_at: string | null
+  agent_version?: string | null
 }
 
 export type NodeStatus = 'online' | 'offline' | 'disabled'
@@ -124,6 +126,7 @@ interface NodeCardProps {
 export default function NodeCard({ node, isExpanded, onToggle, onTerminalConnect, children }: NodeCardProps) {
   const { t } = useTranslation()
   const status = getNodeStatus(node)
+  const { formatTimeAgo } = useFormatters()
 
   const memoryGb = node.memory_total_bytes != null
     ? (node.memory_total_bytes / (1024 * 1024 * 1024)).toFixed(2)
@@ -165,6 +168,13 @@ export default function NodeCard({ node, isExpanded, onToggle, onTerminalConnect
         </div>
         {/* Address line */}
         <div className="text-dark-400 text-xs font-mono truncate mb-3">{node.address}:{node.port}</div>
+
+        {/* Оффлайн: сколько времени назад нода была в сети */}
+        {status === 'offline' && node.last_seen_at && (
+          <div className="text-xs text-red-300/90 mb-3" title={node.last_seen_at}>
+            {t('fleet.card.lastSeen', { ago: formatTimeAgo(node.last_seen_at) })}
+          </div>
+        )}
 
         {/* Row 2: System specs */}
         <div className="flex items-center gap-3 text-xs text-dark-200 mb-3">

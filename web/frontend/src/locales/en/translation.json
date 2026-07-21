@@ -1070,7 +1070,14 @@
       "offlineSince": "Agent offline · last ping {{ago}}",
       "offlineNever": "Token is issued, but the agent has never connected",
       "missing": "No agent",
-      "missingHint": "Generate a token and install Node Agent on the server"
+      "missingHint": "Generate a token and install Node Agent on the server",
+      "version": "Agent v{{version}}",
+      "versionUnknown": "Agent version unknown (old agent — update it)",
+      "versionLabel": "Agent version",
+      "versionUnknownShort": "unknown",
+      "upToDate": "up to date",
+      "updateAvailable": "Update available: v{{version}}",
+      "updateHint": "Version v{{version}} is available — update the agent on the node (git pull in the agent folder or the “Update agent” fleet script); the version refreshes with the next batch."
     },
     "actions": {
       "restart": "Restart",
@@ -1226,7 +1233,8 @@
       "core": "Core",
       "cores": "Cores",
       "network": "Network",
-      "disk": "Disk"
+      "disk": "Disk",
+      "lastSeen": "Last seen {{ago}}"
     },
     "sort": {
       "label": "Sort",

@@ -90,7 +90,8 @@ class NodesMixin:
                         uuid,
                         (agent_token IS NOT NULL AND agent_token <> '') AS has_agent_token,
                         COALESCE(agent_v2_connected, false) AS agent_v2_connected,
-                        agent_v2_last_ping
+                        agent_v2_last_ping,
+                        agent_version
                     """)
             )
 
@@ -98,10 +99,17 @@ class NodesMixin:
         for row in rows:
             uid = str(row["uuid"]).lower()
             last_ping = row["agent_v2_last_ping"]
+            # naive datetime = UTC: без tz-суффикса JS распарсит как локальное
+            # время и относительное «N назад» на фронте соврёт на часовой пояс
+            if last_ping is not None and last_ping.tzinfo is None:
+                ping_iso = last_ping.isoformat() + "Z"
+            else:
+                ping_iso = last_ping.isoformat() if last_ping else None
             result[uid] = {
                 "has_agent_token": bool(row["has_agent_token"]),
                 "agent_v2_connected": bool(row["agent_v2_connected"]),
-                "agent_v2_last_ping": last_ping.isoformat() if last_ping else None,
+                "agent_v2_last_ping": ping_iso,
+                "agent_version": row["agent_version"],
             }
         return result
     
@@ -282,6 +290,26 @@ class NodesMixin:
                 disk_read_speed_bps,
                 disk_write_speed_bps,
                 uptime_seconds,
+            )
+            return result == "UPDATE 1"
+
+    async def update_node_agent_version(self, node_uuid: str, version: str) -> bool:
+        """Записать версию node-agent (репортится в каждом батче).
+
+        UPDATE срабатывает только при отличии — коллектор зовёт это на каждый
+        батч, и без гарда мы бы дёргали строку ноды раз в несколько секунд.
+        """
+        if not self.is_connected:
+            return False
+        async with self.acquire() as conn:
+            result = await conn.execute(
+                update_sql(
+                    NODES_TABLE,
+                    "agent_version = $2",
+                    "uuid = $1 AND agent_version IS DISTINCT FROM $2",
+                ),
+                node_uuid,
+                version,
             )
             return result == "UPDATE 1"
 

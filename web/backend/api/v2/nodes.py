@@ -30,6 +30,13 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
+@router.get("/nodes/agent-meta")
+async def agent_meta(admin: AdminUser = Depends(require_permission("nodes", "view"))):
+    """Метаданные node-agent: эталонная версия для сравнения в UI."""
+    from shared.agent_version import LATEST_AGENT_VERSION
+    return {"latest_agent_version": LATEST_AGENT_VERSION}
+
+
 def _ensure_node_snake_case(node: dict) -> dict:
     """Ensure node dict has snake_case keys for pydantic schemas."""
     result = dict(node)
@@ -189,6 +196,7 @@ async def list_nodes(
                         n["has_agent_token"] = state["has_agent_token"]
                         n["agent_v2_connected"] = state["agent_v2_connected"]
                         n["agent_v2_last_ping"] = state["agent_v2_last_ping"]
+                        n["agent_version"] = state.get("agent_version")
         except Exception as e:
             logger.debug("Agent state enrichment failed: %s", e)
 

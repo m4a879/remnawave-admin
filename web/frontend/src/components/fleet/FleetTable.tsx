@@ -74,7 +74,7 @@ export function FleetTable({
   history,
 }: FleetTableProps) {
   const { t } = useTranslation()
-  const { formatSpeed } = useFormatters()
+  const { formatSpeed, formatTimeAgo } = useFormatters()
 
   const columns: ColumnSpec<FleetNode>[] = useMemo(
     () => [
@@ -147,6 +147,11 @@ export function FleetTable({
                   <span className={cn('w-2 h-2 rounded-full shrink-0', STATUS_STYLE[status])} />
                   {t(`fleet.filter.${status}`)}
                 </span>
+                {status === 'offline' && node.last_seen_at && (
+                  <div className="text-[10px] text-red-300/80 mt-0.5" title={node.last_seen_at}>
+                    {formatTimeAgo(node.last_seen_at)}
+                  </div>
+                )}
               </TableCell>
               <TableCell className="text-right">
                 <div className="flex items-center justify-end gap-2">
