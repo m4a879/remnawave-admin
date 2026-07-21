@@ -1094,6 +1094,9 @@ async def wa_login_finish(request: Request, response: Response, data: WaLoginFin
 class OAuthCredsIn(BaseModel):
     client_id: str
     client_secret: str
+    # только для generic OIDC («oidc»): базовый URL провайдера и имя кнопки
+    issuer: Optional[str] = None
+    display_name: Optional[str] = None
 
 
 class OAuthCallbackIn(BaseModel):
@@ -1114,7 +1117,10 @@ async def oauth_set_provider(provider: str, data: OAuthCredsIn,
     from web.backend.core import oauth_svc as oa
     if not oa.is_provider(provider):
         raise api_error(404, E.FORBIDDEN, "Неизвестный провайдер")
-    await oa.save_creds(provider, data.client_id, data.client_secret)
+    if provider == "oidc" and not (data.issuer or "").strip():
+        raise api_error(400, E.INVALID_INPUT, "Для generic OIDC обязателен issuer URL")
+    await oa.save_creds(provider, data.client_id, data.client_secret,
+                        issuer=data.issuer, display_name=data.display_name)
     await write_audit_log(admin_id=admin.account_id, admin_username=admin.username,
                           action="oauth.provider.set", resource="oauth", resource_id=provider)
     return {"configured": oa.is_configured(provider)}
@@ -1137,7 +1143,7 @@ async def oauth_login_url(request: Request, provider: str):
     if not oa.is_provider(provider):
         raise api_error(404, E.FORBIDDEN, "Неизвестный провайдер")
     try:
-        return {"url": oa.build_authorize_url(request, provider, "login", None)}
+        return {"url": await oa.build_authorize_url(request, provider, "login", None)}
     except oa.OAuthError as e:
         raise api_error(400, E.FORBIDDEN, str(e))
 
@@ -1151,7 +1157,7 @@ async def oauth_link_url(request: Request, provider: str,
     if not oa.is_provider(provider):
         raise api_error(404, E.FORBIDDEN, "Неизвестный провайдер")
     try:
-        return {"url": oa.build_authorize_url(request, provider, "link", admin.account_id)}
+        return {"url": await oa.build_authorize_url(request, provider, "link", admin.account_id)}
     except oa.OAuthError as e:
         raise api_error(400, E.FORBIDDEN, str(e))
 

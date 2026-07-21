@@ -347,8 +347,13 @@ export const authApi = {
   deleteOauthLink: async (id: number): Promise<void> => {
     await client.delete(`/auth/oauth/links/${id}`)
   },
-  setOauthProvider: async (provider: string, clientId: string, clientSecret: string): Promise<void> => {
-    await client.put(`/auth/oauth/providers/${provider}`, { client_id: clientId, client_secret: clientSecret })
+  setOauthProvider: async (
+    provider: string, clientId: string, clientSecret: string,
+    extra?: { issuer?: string; display_name?: string },
+  ): Promise<void> => {
+    await client.put(`/auth/oauth/providers/${provider}`, {
+      client_id: clientId, client_secret: clientSecret, ...(extra || {}),
+    })
   },
   deleteOauthProvider: async (provider: string): Promise<void> => {
     await client.delete(`/auth/oauth/providers/${provider}`)

@@ -429,6 +429,27 @@ DEFAULT_CONFIG_DEFINITIONS: List[Dict[str, Any]] = [
         "display_name": "OAuth: GitHub secret (зашифр.)", "description": "Управляется в настройках OAuth",
         "default_value": "", "is_secret": True, "is_readonly": True, "sort_order": 106,
     },
+    # Generic OIDC (PocketID / Authentik / Keycloak / Zitadel и т.п.)
+    {
+        "key": "oauth_oidc_client_id", "value_type": "string", "category": "general",
+        "display_name": "OAuth: OIDC client_id", "description": "Управляется в настройках OAuth",
+        "default_value": "", "is_readonly": True, "sort_order": 107,
+    },
+    {
+        "key": "oauth_oidc_client_secret", "value_type": "string", "category": "general",
+        "display_name": "OAuth: OIDC secret (зашифр.)", "description": "Управляется в настройках OAuth",
+        "default_value": "", "is_secret": True, "is_readonly": True, "sort_order": 108,
+    },
+    {
+        "key": "oauth_oidc_issuer", "value_type": "string", "category": "general",
+        "display_name": "OAuth: OIDC issuer URL", "description": "Управляется в настройках OAuth",
+        "default_value": "", "is_readonly": True, "sort_order": 109,
+    },
+    {
+        "key": "oauth_oidc_name", "value_type": "string", "category": "general",
+        "display_name": "OAuth: OIDC имя кнопки", "description": "Управляется в настройках OAuth",
+        "default_value": "", "is_readonly": True, "sort_order": 110,
+    },
     # === SYNC ===
     {
         "key": "sync_interval_seconds",
