@@ -487,3 +487,36 @@ class TestHandleViolationDisabledUser:
             )
         monitor.get_user_active_connections.assert_not_awaited()
         db.save_violation.assert_not_awaited()
+
+
+class TestPublicIpForAgent:
+    """_public_ip_for_agent: за внутренним прокси agent_ip не должен
+    становиться приватным 172.x (у всех нод был «IP» docker-nginx)."""
+
+    def _req(self, headers=None):
+        req = MagicMock()
+        req.headers = headers or {}
+        return req
+
+    def test_public_peer_wins(self):
+        assert collector._public_ip_for_agent(
+            self._req({"x-forwarded-for": "1.2.3.4"}), "5.6.7.8") == "5.6.7.8"
+
+    def test_private_peer_takes_rightmost_public_xff(self):
+        req = self._req({"x-forwarded-for": "9.9.9.9, 77.88.55.66, 172.19.0.10"})
+        assert collector._public_ip_for_agent(req, "172.19.0.10") == "77.88.55.66"
+
+    def test_private_peer_falls_back_to_real_ip(self):
+        req = self._req({"x-real-ip": "77.88.55.66"})
+        assert collector._public_ip_for_agent(req, "172.19.0.10") == "77.88.55.66"
+
+    def test_private_everything_returns_none(self):
+        req = self._req({"x-forwarded-for": "10.0.0.5, 192.168.1.1"})
+        assert collector._public_ip_for_agent(req, "172.19.0.10") is None
+
+    @pytest.mark.asyncio
+    async def test_remember_skips_empty(self):
+        db = make_db_mock()
+        with patch.object(collector, "db_service", db):
+            await collector._remember_agent_ip("node-1", None)
+        db.acquire.assert_not_called()
