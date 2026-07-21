@@ -729,23 +729,21 @@ async def send_backup_telegram(
     admin: AdminUser = Depends(require_permission("backups", "view")),
 ):
     """Send a backup file to a Telegram chat/topic. Auto-splits files >49 MB."""
-    from web.backend.core.backup_service import send_backup_to_telegram
-    from web.backend.core.config import get_web_settings
+    from web.backend.core.backup_service import (
+        resolve_backup_tg_destination,
+        send_backup_to_telegram,
+    )
 
-    settings = get_web_settings()
-    chat_id = data.chat_id or settings.notifications_chat_id
+    # Настройки из UI (БД) приоритетнее env — иначе chat_id, заданный в
+    # разделе «Уведомления», здесь не виден и отправка падает NO_CHAT_ID.
+    default_chat, default_topic = resolve_backup_tg_destination()
+    chat_id = data.chat_id or default_chat
     if not chat_id:
-        raise api_error(400, "NO_CHAT_ID", "Specify chat_id or configure NOTIFICATIONS_CHAT_ID")
+        raise api_error(400, "NO_CHAT_ID",
+                        "Specify chat_id or configure notifications_chat_id "
+                        "(UI section «Notifications» or NOTIFICATIONS_CHAT_ID env)")
 
-    # Default to the "Services" topic from settings unless explicitly overridden
-    topic_id = data.topic_id
-    if topic_id is None:
-        topic_raw = settings.get_topic_for("service")
-        if topic_raw:
-            try:
-                topic_id = int(topic_raw)
-            except (TypeError, ValueError):
-                topic_id = None
+    topic_id = data.topic_id if data.topic_id is not None else default_topic
 
     try:
         result = await send_backup_to_telegram(
