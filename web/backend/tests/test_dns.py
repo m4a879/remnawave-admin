@@ -301,3 +301,54 @@ class TestCredsStorage:
         with patch("shared.config_service.config_service") as cfg:
             cfg.get.return_value = None
             assert dns.get_creds("cloudflare") is None
+
+
+class TestTimewebPagination:
+    """Timeweb: limit ≤ 500 (limit=1000 давал 400 и «записи не грузятся»)."""
+
+    def _provider(self, pages):
+        from unittest.mock import AsyncMock
+        from web.backend.core.dns.timeweb import TimewebProvider
+        p = TimewebProvider()
+        p._req = AsyncMock(side_effect=pages)
+        return p
+
+    @pytest.mark.asyncio
+    async def test_records_single_page(self):
+        pages = [{
+            "meta": {"total": 2},
+            "dns_records": [
+                {"id": 1, "type": "A", "ttl": 600, "data": {"value": "1.2.3.4"}},
+                {"id": 2, "type": "TXT", "ttl": 600,
+                 "data": {"subdomain": "www", "value": "v=spf1"}},
+            ],
+        }]
+        p = self._provider(pages)
+        recs = await p.list_records({"token": "t"}, "stijoin.com")
+        assert [r.name for r in recs] == ["@", "www"]
+        # запрос ушёл с допустимым лимитом ≤ 500
+        url = p._req.await_args_list[0].args[2]
+        assert "limit=500" in url and "limit=1000" not in url
+
+    @pytest.mark.asyncio
+    async def test_records_paginated(self):
+        first = {"meta": {"total": 501},
+                 "dns_records": [{"id": i, "type": "A", "data": {"value": "x"}}
+                                 for i in range(500)]}
+        second = {"meta": {"total": 501},
+                  "dns_records": [{"id": 500, "type": "A", "data": {"value": "x"}}]}
+        p = self._provider([first, second])
+        recs = await p.list_records({"token": "t"}, "z")
+        assert len(recs) == 501
+        assert p._req.await_count == 2
+        assert "offset=500" in p._req.await_args_list[1].args[2]
+
+    @pytest.mark.asyncio
+    async def test_zones_paginated(self):
+        first = {"meta": {"total": 101},
+                 "domains": [{"fqdn": f"d{i}.com"} for i in range(100)]}
+        second = {"meta": {"total": 101}, "domains": [{"fqdn": "last.com"}]}
+        p = self._provider([first, second])
+        zones = await p.list_zones({"token": "t"})
+        assert len(zones) == 101
+        assert zones[-1].name == "last.com"
