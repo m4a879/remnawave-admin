@@ -300,19 +300,50 @@ async def verify_agent_token(
         raise HTTPException(status_code=403, detail="Invalid or expired token")
 
     logger.debug("Agent token verified for node: %s from %s", node_uuid, client_ip)
-    await _remember_agent_ip(node_uuid, client_ip)
+    await _remember_agent_ip(node_uuid, _public_ip_for_agent(request, client_ip))
     return node_uuid
+
+
+def _is_private_ip(ip: str) -> bool:
+    import ipaddress
+    try:
+        parsed = ipaddress.ip_address(ip)
+    except ValueError:
+        return True
+    return parsed.is_private or parsed.is_loopback or parsed.is_link_local
+
+
+def _public_ip_for_agent(request: Request, peer_ip: str) -> Optional[str]:
+    """Публичный IP ноды для nodes.agent_ip.
+
+    Когда батч заходит через внутренний прокси (nginx в docker-сети),
+    peer — приватный 172.x: у всех нод получался один и тот же «IP».
+    В этом случае берём правый ПУБЛИЧНЫЙ hop X-Forwarded-For (его дописал
+    наш прокси — снаружи не подделывается) или X-Real-IP. Приватный адрес
+    как agent_ip бесполезен для BS-Check/финансов — лучше ничего.
+    """
+    if peer_ip and not _is_private_ip(peer_ip):
+        return peer_ip
+    xff = request.headers.get("x-forwarded-for", "")
+    for hop in reversed([h.strip() for h in xff.split(",") if h.strip()]):
+        if not _is_private_ip(hop):
+            return hop
+    real_ip = request.headers.get("x-real-ip", "").strip()
+    if real_ip and not _is_private_ip(real_ip):
+        return real_ip
+    return None
 
 
 # Последний записанный agent_ip по нодам — чтобы не долбить UPDATE каждым батчем
 _agent_ip_cache: Dict[str, str] = {}
 
 
-async def _remember_agent_ip(node_uuid: str, client_ip: str) -> None:
+async def _remember_agent_ip(node_uuid: str, client_ip: Optional[str]) -> None:
     """Публичный IP ноды по source-IP батча (nodes.agent_ip).
 
     За оверлеем (NetBird) nodes.address — туннельный, а хостерские API отдают
     публичные адреса; agent_ip — мост для сопоставления серверов с нодами.
+    Приватные адреса сюда не попадают (см. _public_ip_for_agent).
     """
     if not client_ip or _agent_ip_cache.get(node_uuid) == client_ip:
         return
