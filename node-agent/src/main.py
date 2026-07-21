@@ -80,20 +80,44 @@ logger = _setup_logging()
 async def run_agent() -> None:
     settings = Settings()
 
-    # Уровень логирования
+    # Уровень логирования: двигаем и root, и ХЕНДЛЕРЫ. Раньше root опускался
+    # до DEBUG, но console/file-хендлеры были зажаты на INFO — из-за этого
+    # AGENT_LOG_LEVEL=DEBUG не показывал ни одной debug-строки.
     log_level = settings.log_level.upper()
-    if log_level in ("DEBUG", "INFO", "WARNING", "ERROR"):
-        logging.getLogger().setLevel(getattr(logging, log_level))
-    else:
-        logging.getLogger().setLevel(logging.INFO)
+    effective = getattr(logging, log_level, logging.INFO) \
+        if log_level in ("DEBUG", "INFO", "WARNING", "ERROR") else logging.INFO
+    root_logger = logging.getLogger()
+    root_logger.setLevel(effective)
+    for handler in root_logger.handlers:
+        # WARNING-файл оставляем как есть (он и задуман для warning+)
+        if handler.level < logging.WARNING or effective < handler.level:
+            if not (isinstance(handler, RotatingFileHandler)
+                    and handler.baseFilename.endswith("nodeagent_WARNING.log")):
+                handler.setLevel(effective)
+
+    # Auto-restart
+    max_uptime_sec = settings.max_uptime_hours * 3600 if settings.max_uptime_hours > 0 else 0
+    start_time = time.monotonic()
+
+    # ── Сводка запуска: версия и вся конфигурация одной рамкой ─────
+    from .version import AGENT_VERSION
+    logger.info("─" * 60)
+    logger.info("Remnawave Node Agent v%s", AGENT_VERSION)
+    logger.info("  node=%s", settings.node_uuid)
+    logger.info("  collector=%s · interval=%ss · mode=%s",
+                settings.collector_url, settings.interval_seconds,
+                settings.log_parsing_mode)
+    logger.info("  host_mode=%s · commands=%s · log_level=%s%s",
+                settings.host_mode, settings.command_enabled,
+                log_level,
+                f" · auto-restart={settings.max_uptime_hours:.1f}h" if max_uptime_sec > 0 else "")
+    logger.info("─" * 60)
 
     # Коллектор
     if settings.log_parsing_mode.lower() == "realtime":
         collector = XrayLogRealtimeCollector(settings)
-        logger.info("Mode: realtime, interval: %ss", settings.interval_seconds)
     else:
         collector = XrayLogCollector(settings)
-        logger.info("Mode: polling, interval: %ss", settings.interval_seconds)
 
     sender = CollectorSender(settings)
     system_metrics_collector = SystemMetricsCollector()
@@ -111,17 +135,6 @@ async def run_agent() -> None:
         logger.info("Log file: %s (%d bytes)", settings.xray_log_path, log_path.stat().st_size)
     else:
         logger.warning("Log file not found: %s", settings.xray_log_path)
-
-    # Auto-restart
-    max_uptime_sec = settings.max_uptime_hours * 3600 if settings.max_uptime_hours > 0 else 0
-    start_time = time.monotonic()
-    if max_uptime_sec > 0:
-        logger.info(
-            "Node Agent started (node=%s, auto-restart in %.1fh)",
-            settings.node_uuid, settings.max_uptime_hours,
-        )
-    else:
-        logger.info("Node Agent started (node=%s)", settings.node_uuid)
 
     cycle_count = 0
     check_interval = settings.realtime_check_interval_seconds or settings.interval_seconds

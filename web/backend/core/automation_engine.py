@@ -107,7 +107,7 @@ class AutomationEngine:
         self._schedule_task = asyncio.create_task(self._schedule_loop())
         self._threshold_task = asyncio.create_task(self._threshold_loop())
         self._event_detect_task = asyncio.create_task(self._event_detection_loop())
-        logger.info("Automation engine started")
+        logger.debug("Automation engine started")
 
     async def stop(self):
         """Stop all background tasks."""

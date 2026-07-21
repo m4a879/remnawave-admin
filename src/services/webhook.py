@@ -115,21 +115,18 @@ def verify_webhook_secret(request: Request, body: bytes) -> bool:
         request.headers.get("X-REMNAWAVE-SIGNATURE")
     )
     
-    # Логируем все заголовки для отладки (без секретных данных)
-    all_headers = dict(request.headers)
-    logger.debug("Webhook request headers: %s", {k: v for k, v in all_headers.items() if k.lower() not in ['x-remnawave-signature']})
-    
     if not signature:
+        # Заголовки логируем только при проблеме — на каждый успешный вебхук
+        # они превращали docker-логи в простыню
         logger.error(
             "X-Remnawave-Signature header missing. Available headers: %s. "
             "Проверьте, что в панели Remnawave установлена переменная WEBHOOK_SECRET_HEADER",
             list(request.headers.keys())
         )
         return False
-    
+
     # Метод 1: Простое сравнение строк (для обратной совместимости) — тайминг-безопасно
     if hmac.compare_digest(signature, settings.webhook_secret):
-        logger.debug("Webhook signature verified using simple string comparison")
         return True
     
     # Метод 2: HMAC-SHA256 подпись от тела запроса
@@ -145,7 +142,6 @@ def verify_webhook_secret(request: Request, body: bytes) -> bool:
         is_valid = hmac.compare_digest(expected_signature, signature)
         
         if is_valid:
-            logger.debug("Webhook signature verified using HMAC-SHA256")
             return True
         else:
             logger.error(
@@ -247,7 +243,10 @@ async def remnawave_webhook(request: Request):
         try:
             diff_result = await sync_service.handle_webhook_event(event, event_data)
         except Exception as sync_exc:
-            logger.warning("Failed to sync webhook event to database: %s", sync_exc)
+            # рассинхрон локальной БД с панелью — это ошибка, и без трейса
+            # её причину не восстановить
+            logger.error("Failed to sync webhook event %s to database: %s",
+                         event, sync_exc, exc_info=True)
         
         # Обрабатываем события по категориям
         if event.startswith("user."):
@@ -361,7 +360,6 @@ async def _handle_user_event(bot: Bot, event: str, event_data: dict, diff_result
         old_user_info = diff_result.get("old_data")
         changes = diff_result.get("changes")
     
-    logger.debug("User notification: event=%s action=%s uuid=%s", event, action, user_uuid)
     
     subscription_url = None
     if action == "created":

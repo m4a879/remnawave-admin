@@ -115,6 +115,7 @@ class NodeFleetItem(BaseModel):
     download_speed_bps: int = 0
     upload_speed_bps: int = 0
     metrics_updated_at: Optional[str] = None
+    agent_version: Optional[str] = None
 
 
 class NodeFleetResponse(BaseModel):
@@ -124,6 +125,8 @@ class NodeFleetResponse(BaseModel):
     online: int = 0
     offline: int = 0
     disabled: int = 0
+    # Эталонная версия node-agent — фронт сравнивает с agent_version ноды
+    latest_agent_version: str = ""
 
 
 class SystemComponentStatus(BaseModel):
@@ -964,6 +967,8 @@ async def get_node_fleet(
                         if db_node.get('metrics_updated_at') is not None:
                             mua = db_node['metrics_updated_at']
                             n['metrics_updated_at'] = mua.isoformat() if hasattr(mua, 'isoformat') else str(mua)
+                        if db_node.get('agent_version'):
+                            n['agent_version'] = db_node['agent_version']
         except Exception as e:
             logger.debug("Fleet: DB metrics enrichment failed: %s", e)
 
@@ -987,7 +992,12 @@ async def get_node_fleet(
             last_seen = n.get('last_seen_at')
             if last_seen and not isinstance(last_seen, str):
                 try:
-                    last_seen = last_seen.isoformat()
+                    # naive datetime = UTC у нас; без tz-суффикса JS-клиент
+                    # распарсит как локальное время и «был в сети» соврёт
+                    if getattr(last_seen, 'tzinfo', None) is None:
+                        last_seen = last_seen.isoformat() + 'Z'
+                    else:
+                        last_seen = last_seen.isoformat()
                 except Exception as e:
                     logger.debug("Date conversion failed: %s", e)
                     last_seen = str(last_seen)
@@ -1036,6 +1046,7 @@ async def get_node_fleet(
                 download_speed_bps=int(n.get('download_speed_bps') or 0),
                 upload_speed_bps=int(n.get('upload_speed_bps') or 0),
                 metrics_updated_at=metrics_updated,
+                agent_version=n.get('agent_version'),
             ))
 
         # Sort: offline first (problematic), then online, then disabled
@@ -1049,12 +1060,14 @@ async def get_node_fleet(
 
         fleet_items.sort(key=sort_key)
 
+        from shared.agent_version import LATEST_AGENT_VERSION
         return NodeFleetResponse(
             nodes=fleet_items,
             total=len(fleet_items),
             online=online,
             offline=offline,
             disabled=disabled,
+            latest_agent_version=LATEST_AGENT_VERSION,
         )
 
     except Exception as e:

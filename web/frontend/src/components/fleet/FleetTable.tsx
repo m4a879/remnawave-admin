@@ -8,7 +8,17 @@ import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { RotateCcw, Play, Square, Terminal } from '@/components/brand/icons'
 import { cn } from '@/lib/utils'
+import { Sparkline } from '@/components/charts/Sparkline'
 import { type FleetNode, getNodeStatus } from './NodeCard'
+
+/** Серии метрик за период для мини-графиков: uuid → cpu/memory/disk точки */
+export type FleetMetricsHistory = Record<string, { cpu: number[]; memory: number[]; disk: number[] }>
+
+function sparkColor(v: number | null | undefined): string {
+  if (v != null && v >= 95) return '#f87171'   // red-400
+  if (v != null && v >= 80) return '#facc15'   // yellow-400
+  return '#38bdf8'                              // sky-400
+}
 
 function statusPriority(n: FleetNode): number {
   if (!n.is_disabled && !n.is_connected) return 0 // offline
@@ -48,6 +58,8 @@ export interface FleetTableProps {
   onDisable: (uuid: string) => void
   onTerminal: (node: FleetNode) => void
   isPending: boolean
+  /** История метрик за 24ч (спарклайны CPU/RAM/диск); нет данных — только цифры */
+  history?: FleetMetricsHistory
 }
 
 export function FleetTable({
@@ -59,9 +71,10 @@ export function FleetTable({
   onDisable,
   onTerminal,
   isPending,
+  history,
 }: FleetTableProps) {
   const { t } = useTranslation()
-  const { formatSpeed } = useFormatters()
+  const { formatSpeed, formatTimeAgo } = useFormatters()
 
   const columns: ColumnSpec<FleetNode>[] = useMemo(
     () => [
@@ -84,6 +97,7 @@ export function FleetTable({
 
   const { rows, sort, toggleSort, filters, setFilter } = useTableControls(nodes, columns, {
     initialSort: { key: 'status', dir: 'asc' },
+    storageKey: 'fleet', // сортировка переживает уход со страницы
   })
 
   const statusOptions = [
@@ -133,15 +147,35 @@ export function FleetTable({
                   <span className={cn('w-2 h-2 rounded-full shrink-0', STATUS_STYLE[status])} />
                   {t(`fleet.filter.${status}`)}
                 </span>
+                {status === 'offline' && node.last_seen_at && (
+                  <div className="text-[10px] text-red-300/80 mt-0.5" title={node.last_seen_at}>
+                    {formatTimeAgo(node.last_seen_at)}
+                  </div>
+                )}
               </TableCell>
-              <TableCell className={cn('text-right font-mono text-sm', usageColor(node.cpu_usage))}>
-                {node.cpu_usage != null ? `${node.cpu_usage.toFixed(0)}%` : '—'}
+              <TableCell className="text-right">
+                <div className="flex items-center justify-end gap-2">
+                  <Sparkline data={history?.[node.uuid]?.cpu ?? []} color={sparkColor(node.cpu_usage)} className="hidden sm:block shrink-0" />
+                  <span className={cn('font-mono text-sm', usageColor(node.cpu_usage))}>
+                    {node.cpu_usage != null ? `${node.cpu_usage.toFixed(0)}%` : '—'}
+                  </span>
+                </div>
               </TableCell>
-              <TableCell className={cn('text-right font-mono text-sm', usageColor(node.memory_usage))}>
-                {node.memory_usage != null ? `${node.memory_usage.toFixed(0)}%` : '—'}
+              <TableCell className="text-right">
+                <div className="flex items-center justify-end gap-2">
+                  <Sparkline data={history?.[node.uuid]?.memory ?? []} color={sparkColor(node.memory_usage)} className="hidden sm:block shrink-0" />
+                  <span className={cn('font-mono text-sm', usageColor(node.memory_usage))}>
+                    {node.memory_usage != null ? `${node.memory_usage.toFixed(0)}%` : '—'}
+                  </span>
+                </div>
               </TableCell>
-              <TableCell className={cn('text-right font-mono text-sm hidden md:table-cell', usageColor(node.disk_usage))}>
-                {node.disk_usage != null ? `${node.disk_usage.toFixed(0)}%` : '—'}
+              <TableCell className="text-right hidden md:table-cell">
+                <div className="flex items-center justify-end gap-2">
+                  <Sparkline data={history?.[node.uuid]?.disk ?? []} color={sparkColor(node.disk_usage)} className="hidden lg:block shrink-0" />
+                  <span className={cn('font-mono text-sm', usageColor(node.disk_usage))}>
+                    {node.disk_usage != null ? `${node.disk_usage.toFixed(0)}%` : '—'}
+                  </span>
+                </div>
               </TableCell>
               <TableCell className="text-right font-mono text-xs hidden lg:table-cell whitespace-nowrap">
                 <span className="text-blue-400">{formatSpeed(node.download_speed_bps)}</span>

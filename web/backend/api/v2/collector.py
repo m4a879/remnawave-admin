@@ -232,6 +232,7 @@ class BatchReport(BaseModel):
     connections: list[ConnectionReport] = Field(default=[], max_length=5000)
     torrent_events: list[TorrentEventReport] = Field(default=[], max_length=1000)
     system_metrics: Optional[SystemMetricsReport] = None
+    agent_version: Optional[str] = Field(default=None, max_length=32)
 
 
 # ── Auth ─────────────────────────────────────────────────────────
@@ -359,6 +360,13 @@ async def receive_connections(
         logger.warning("Node UUID mismatch: token=%s, report=%s", node_uuid, report.node_uuid)
         COLLECTOR_BATCHES_REJECTED.labels(reason="mismatch").inc()
         raise HTTPException(status_code=403, detail="Token does not match the reported node UUID")
+
+    # Версия агента (UPDATE только при изменении — не дёргаем БД каждым батчем)
+    if report.agent_version:
+        try:
+            await db_service.update_node_agent_version(node_uuid, report.agent_version)
+        except Exception as e:
+            logger.debug("Failed to update agent version for node %s: %s", node_uuid, e)
 
     # System metrics
     if report.system_metrics:
@@ -910,6 +918,14 @@ async def _handle_violation(
     is_whitelisted: bool,
 ):
     """Post-process a single detected violation: notify, save, auto-block."""
+    # Юзер уже отключён в панели (заблокирован админом/автоблоком) — не плодим
+    # новые нарушения и уведомления по остаточным коннектам: админ меру принял,
+    # а «нарушения по кругу» на всю сеть кросс-аккаунтов только заваливают его
+    status = str((user_info or {}).get("status") or "").upper()
+    if status == "DISABLED":
+        logger.debug("Skipping violation for disabled user %s", user_uuid)
+        return
+
     active_conns = await connection_monitor.get_user_active_connections(user_uuid, max_age_minutes=5)
 
     ip_metadata = {}

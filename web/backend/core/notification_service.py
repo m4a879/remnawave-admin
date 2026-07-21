@@ -295,30 +295,24 @@ async def send_telegram(
             return False
 
         text = f"<b>{title}</b>\n\n{body}"
-        payload: Dict[str, Any] = {
-            "chat_id": chat_id,
-            "text": text,
-            "parse_mode": "HTML",
-            "disable_web_page_preview": True,
-        }
-        if topic_id and str(topic_id) != "0":
-            payload["message_thread_id"] = int(topic_id)
-        if reply_markup:
-            payload["reply_markup"] = reply_markup
 
+        # Rich-уведомление (Bot API 10.1) с фолбэком на HTML внутри
+        from shared import tg_rich
         logger.debug("Sending Telegram notification to chat_id=%s", chat_id)
-        async with httpx.AsyncClient(timeout=15) as client:
-            resp = await client.post(
-                f"https://api.telegram.org/bot{bot_token}/sendMessage",
-                json=payload,
-            )
-            if resp.status_code == 200:
-                logger.info("Telegram notification sent to chat_id=%s", chat_id)
-                NOTIFICATIONS_SENT.labels(channel="telegram").inc()
-                return True
-            logger.error("Telegram send failed (chat_id=%s): %s %s", chat_id, resp.status_code, resp.text, exc_info=True)
-            NOTIFICATIONS_FAILED.labels(channel="telegram").inc()
-            return False
+        ok = await tg_rich.send_rich_or_html(
+            bot_token,
+            chat_id,
+            text,
+            message_thread_id=int(topic_id) if topic_id and str(topic_id) != "0" else None,
+            reply_markup=reply_markup,
+        )
+        if ok:
+            logger.debug("Telegram notification sent to chat_id=%s", chat_id)
+            NOTIFICATIONS_SENT.labels(channel="telegram").inc()
+            return True
+        logger.error("Telegram send failed (chat_id=%s)", chat_id)
+        NOTIFICATIONS_FAILED.labels(channel="telegram").inc()
+        return False
     except Exception as e:
         logger.error("Telegram notification error (chat_id=%s): %s", chat_id, e, exc_info=True)
         NOTIFICATIONS_FAILED.labels(channel="telegram").inc()
@@ -686,7 +680,7 @@ async def _dispatch_external(
                     topic_id = config.get("topic_id")
                     bot_token_override = config.get("bot_token")
                     if chat_id:
-                        logger.info("Dispatching Telegram to chat_id=%s for admin_id=%s", chat_id, admin_id)
+                        logger.debug("Dispatching Telegram to chat_id=%s for admin_id=%s", chat_id, admin_id)
                         await send_telegram(chat_id, title, body, topic_id, bot_token_override, reply_markup=reply_markup)
                     else:
                         logger.warning("Telegram channel for admin %s has no chat_id in config: %s", admin_id, config)
@@ -694,7 +688,7 @@ async def _dispatch_external(
                 elif ch_type == "webhook":
                     url = config.get("url")
                     if url:
-                        logger.info("Dispatching webhook to %s for admin_id=%s", url[:60], admin_id)
+                        logger.debug("Dispatching webhook to %s for admin_id=%s", url[:60], admin_id)
                         await send_webhook(url, title, body, severity)
                     else:
                         logger.warning("Webhook channel for admin %s has no url in config", admin_id)
@@ -702,7 +696,7 @@ async def _dispatch_external(
                 elif ch_type == "email":
                     email = config.get("email")
                     if email:
-                        logger.info("Dispatching email to %s for admin_id=%s", email, admin_id)
+                        logger.debug("Dispatching email to %s for admin_id=%s", email, admin_id)
                         await send_email(email, title, body, severity, link)
                     else:
                         logger.warning("Email channel for admin %s has no email in config", admin_id)

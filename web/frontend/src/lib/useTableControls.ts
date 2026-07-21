@@ -17,16 +17,48 @@ function isRange(v: FilterValue): v is RangeValue {
   return !Array.isArray(v)
 }
 
+type SortState = { key: string; dir: SortDir } | null
+
+function loadStoredSort(storageKey: string | undefined, columns: { key: string }[]): SortState | undefined {
+  if (!storageKey) return undefined
+  try {
+    const raw = localStorage.getItem(`tablesort:${storageKey}`)
+    if (!raw) return undefined
+    const v = JSON.parse(raw)
+    if (v === null) return null // пользователь явно выключил сортировку
+    if (v && typeof v.key === 'string' && (v.dir === 'asc' || v.dir === 'desc')
+        && columns.some((c) => c.key === v.key)) {
+      return v as { key: string; dir: SortDir }
+    }
+  } catch { /* битое значение — игнор */ }
+  return undefined
+}
+
 /**
  * Client-side sort + multi-column filtering for lists already loaded in full
  * (nodes/hosts/fleet). Sorting cycles asc → desc → off on repeated toggles.
+ * С opts.storageKey выбранная сортировка переживает уход со страницы
+ * (localStorage, как view mode); фильтры намеренно не персистятся.
  */
 export function useTableControls<T>(
   data: T[],
   columns: ColumnSpec<T>[],
-  opts?: { initialSort?: { key: string; dir: SortDir } },
+  opts?: { initialSort?: { key: string; dir: SortDir }; storageKey?: string },
 ) {
-  const [sort, setSort] = useState<{ key: string; dir: SortDir } | null>(opts?.initialSort ?? null)
+  const storageKey = opts?.storageKey
+  const [sort, setSortRaw] = useState<SortState>(() => {
+    const stored = loadStoredSort(storageKey, columns)
+    return stored !== undefined ? stored : (opts?.initialSort ?? null)
+  })
+  const setSort = useCallback((updater: (prev: SortState) => SortState) => {
+    setSortRaw((prev) => {
+      const next = updater(prev)
+      if (storageKey) {
+        try { localStorage.setItem(`tablesort:${storageKey}`, JSON.stringify(next)) } catch { /* quota */ }
+      }
+      return next
+    })
+  }, [storageKey])
   const [filters, setFilters] = useState<Record<string, FilterValue>>({})
 
   const colMap = useMemo(() => {

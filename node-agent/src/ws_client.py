@@ -68,7 +68,13 @@ class AgentWSClient:
             except asyncio.CancelledError:
                 break
             except Exception as e:
-                logger.warning("WS connection error: %s", e)
+                # первые обрывы — warning, дальше при затяжном падении — debug,
+                # чтобы флап бэкенда не лил стену переподключений в docker-логи
+                if self._reconnect_attempt < 3:
+                    logger.warning("WS connection error: %s", e)
+                else:
+                    logger.debug("WS connection error (attempt %d): %s",
+                                 self._reconnect_attempt, e)
 
             if shutdown_event.is_set():
                 break
@@ -78,7 +84,8 @@ class AgentWSClient:
                 min(self._reconnect_attempt, len(RECONNECT_DELAYS) - 1)
             ]
             self._reconnect_attempt += 1
-            logger.info("Reconnecting in %ds (attempt %d)...", delay, self._reconnect_attempt)
+            log_fn = logger.info if self._reconnect_attempt <= 3 else logger.debug
+            log_fn("Reconnecting in %ds (attempt %d)...", delay, self._reconnect_attempt)
 
             try:
                 await asyncio.wait_for(shutdown_event.wait(), timeout=delay)
@@ -92,7 +99,8 @@ class AgentWSClient:
     async def _connect_and_listen(self, shutdown_event: asyncio.Event) -> None:
         """Single connection lifecycle."""
         url = self.ws_url
-        logger.info("Connecting to %s", url.split("?")[0])  # Don't log token
+        log_fn = logger.info if self._reconnect_attempt <= 3 else logger.debug
+        log_fn("Connecting to %s", url.split("?")[0])  # Don't log token
 
         async with websockets.connect(
             url,
@@ -101,8 +109,12 @@ class AgentWSClient:
             max_size=10 * 1024 * 1024,  # 10 MB max message
         ) as ws:
             self._ws = ws
+            if self._reconnect_attempt > 3:
+                logger.info("Agent v2 WS reconnected after %d attempts",
+                            self._reconnect_attempt)
+            else:
+                logger.info("Agent v2 WS connected")
             self._reconnect_attempt = 0
-            logger.info("Agent v2 WS connected")
 
             # Run ping sender and message listener concurrently
             ping_task = asyncio.create_task(self._ping_loop(ws, shutdown_event))

@@ -156,7 +156,7 @@ async def export_config() -> dict:
             "backup_type": "config",
         }
     except Exception as e:
-        logger.error("Failed to export config: %s", e)
+        logger.error("Failed to export config: %s", e, exc_info=True)
         raise
 
 
@@ -573,23 +573,38 @@ async def _log_and_maybe_send(filename: str, backup_type: str, size_bytes: int, 
     if not send_tg:
         return
     try:
-        from web.backend.core.config import get_web_settings
-        settings = get_web_settings()
-        chat_id = settings.notifications_chat_id
+        chat_id, topic_id = resolve_backup_tg_destination()
         if not chat_id:
             logger.warning("Scheduled backup: Telegram enabled but notifications_chat_id not set")
             return
-        topic_id = None
-        topic_raw = settings.get_topic_for("service")
-        if topic_raw:
-            try:
-                topic_id = int(topic_raw)
-            except (TypeError, ValueError):
-                topic_id = None
-        await send_backup_to_telegram(filename=filename, chat_id=str(chat_id), topic_id=topic_id)
+        await send_backup_to_telegram(filename=filename, chat_id=chat_id, topic_id=topic_id)
         logger.info("Scheduled backup %s sent to Telegram", filename)
     except Exception as exc:
         logger.warning("Scheduled backup Telegram send failed: %s", exc)
+
+
+def resolve_backup_tg_destination() -> tuple:
+    """Куда слать бэкап в Telegram: (chat_id | None, topic_id | None).
+
+    Настройки заданные через UI живут в БД (bot_config), env — фолбэк.
+    Раньше web-backend читал ТОЛЬКО env: notifications_chat_id, сохранённый
+    из UI, игнорировался — и отправка бэкапа падала NO_CHAT_ID, хотя
+    обычные уведомления (их шлёт бот, читающий БД) в тот же чат доходили.
+    """
+    from shared.config_service import config_service
+    from web.backend.core.config import get_web_settings
+
+    settings = get_web_settings()
+    chat_id = config_service.get("notifications_chat_id") or settings.notifications_chat_id
+    topic_raw = (config_service.get("notifications_topic_service")
+                 or settings.get_topic_for("service"))
+    topic_id = None
+    if topic_raw:
+        try:
+            topic_id = int(topic_raw)
+        except (TypeError, ValueError):
+            topic_id = None
+    return (str(chat_id) if chat_id else None), topic_id
 
 
 async def _run_auto_backup_if_due() -> None:
@@ -641,7 +656,7 @@ async def _run_auto_backup_if_due() -> None:
     try:
         result = await create_database_backup(database_url)
     except Exception as exc:
-        logger.error("Scheduled DB backup failed: %s", exc)
+        logger.error("Scheduled DB backup failed: %s", exc, exc_info=True)
         await _notify_backup_failed("Бэкап БД не выполнен", f"Автоматический бэкап БД упал: {exc}")
         return
     logger.info("Scheduled DB backup created: %s (%s bytes)", result["filename"], result["size_bytes"])

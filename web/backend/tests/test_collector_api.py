@@ -42,6 +42,7 @@ def make_db_mock():
     db.is_connected = True
     db.get_node_by_uuid = AsyncMock(return_value={"name": "test-node"})
     db.update_node_metrics = AsyncMock()
+    db.update_node_agent_version = AsyncMock()
     db.insert_node_metrics_snapshot = AsyncMock()
     db.cleanup_old_metrics_snapshots = AsyncMock(return_value=0)
     db.cleanup_old_connections = AsyncMock(return_value=0)
@@ -400,3 +401,89 @@ class TestSharedHwidUserUuids:
         assert collector._shared_hwid_user_uuids(None) == set()
         assert collector._shared_hwid_user_uuids([{"hwid": "HW1"}]) == set()
         assert collector._shared_hwid_user_uuids([{"hwid": "HW1", "users": [{"username": "x"}]}]) == set()
+
+
+class TestAgentVersion:
+    """Версия агента из батча пишется в ноду (и не пишется, если не прислана)."""
+
+    @pytest.mark.asyncio
+    async def test_agent_version_saved(self, anon_client):
+        db = make_db_mock()
+        batch = make_batch()
+        batch["agent_version"] = "1.1.0"
+        with patch.object(collector, "db_service", db),              patch.object(collector, "get_node_by_token", AsyncMock(return_value=NODE_UUID)):
+            resp = await anon_client.post(
+                "/api/v2/collector/batch", json=batch, headers=AGENT_HEADERS,
+            )
+        assert resp.status_code == 200
+        db.update_node_agent_version.assert_awaited_once_with(NODE_UUID, "1.1.0")
+
+    @pytest.mark.asyncio
+    async def test_no_version_no_update(self, anon_client):
+        db = make_db_mock()
+        with patch.object(collector, "db_service", db),              patch.object(collector, "get_node_by_token", AsyncMock(return_value=NODE_UUID)):
+            resp = await anon_client.post(
+                "/api/v2/collector/batch", json=make_batch(), headers=AGENT_HEADERS,
+            )
+        assert resp.status_code == 200
+        db.update_node_agent_version.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_db_error_does_not_break_batch(self, anon_client):
+        db = make_db_mock()
+        db.update_node_agent_version = AsyncMock(side_effect=RuntimeError("db down"))
+        batch = make_batch()
+        batch["agent_version"] = "1.1.0"
+        with patch.object(collector, "db_service", db),              patch.object(collector, "get_node_by_token", AsyncMock(return_value=NODE_UUID)):
+            resp = await anon_client.post(
+                "/api/v2/collector/batch", json=batch, headers=AGENT_HEADERS,
+            )
+        assert resp.status_code == 200  # батч не падает из-за версии
+
+
+class TestConsoleNoiseFilter:
+    """Пульс коллектора глушится на консоли, но не в файлах (их читает UI)."""
+
+    def _rec(self, name, msg):
+        import logging
+        return logging.LogRecord(name, logging.INFO, __file__, 1, msg, None, None)
+
+    def test_batch_lines_muted_on_console(self):
+        from shared.logger import ConsoleNoiseFilter
+        f = ConsoleNoiseFilter()
+        assert f.filter(self._rec("web.backend.api.v2.collector", "Batch received      node=X")) is False
+        assert f.filter(self._rec("web.backend.api.v2.collector", "Batch upserted      node=X")) is False
+
+    def test_other_collector_lines_pass(self):
+        from shared.logger import ConsoleNoiseFilter
+        f = ConsoleNoiseFilter()
+        assert f.filter(self._rec("web.backend.api.v2.collector", "Node UUID mismatch")) is True
+
+    def test_same_prefix_other_logger_passes(self):
+        from shared.logger import ConsoleNoiseFilter
+        f = ConsoleNoiseFilter()
+        assert f.filter(self._rec("some.other.module", "Batch received whatever")) is True
+
+
+class TestHandleViolationDisabledUser:
+    """_handle_violation скипает юзеров со статусом DISABLED в панели.
+
+    Кейс из сообщества: заблокированный (отключённый) юзер продолжал
+    порождать нарушения по остаточным коннектам каждый детект-цикл —
+    «нарушения по кругу» на всю сеть кросс-аккаунтов.
+    """
+
+    @pytest.mark.asyncio
+    async def test_disabled_user_skipped(self):
+        db = make_db_mock()
+        db.save_violation = AsyncMock(return_value=(1, True))
+        monitor = MagicMock()
+        monitor.get_user_active_connections = AsyncMock(return_value=[])
+        with patch.object(collector, "db_service", db), \
+             patch.object(collector, "connection_monitor", monitor):
+            await collector._handle_violation(
+                USER_UUID, make_violation_score(100.0),
+                {"username": "alice", "status": "DISABLED"}, [], False,
+            )
+        monitor.get_user_active_connections.assert_not_awaited()
+        db.save_violation.assert_not_awaited()

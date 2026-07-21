@@ -232,9 +232,40 @@ def _ensure_log_dir() -> Path:
     return _LOG_DIR
 
 
+class ConsoleNoiseFilter(logging.Filter):
+    """Глушит на КОНСОЛИ рутинные строки-пульсы (в файлы/UI они попадают).
+
+    Пары (имя логгера-суффикс, префикс сообщения) — записи, которые валятся
+    раз в несколько секунд и в docker-логах превращаются в стену шума.
+    """
+
+    _QUIET: tuple = (
+        ("collector", "Batch received"),
+        ("collector", "Batch upserted"),
+    )
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        try:
+            msg = record.getMessage()
+        except Exception:  # noqa: BLE001
+            return True
+        for name_part, prefix in self._QUIET:
+            if name_part in record.name and msg.startswith(prefix):
+                return False
+        return True
+
+
 def setup_logger() -> logging.Logger:
     settings = get_settings()
     level = getattr(logging, settings.log_level.upper(), logging.INFO)
+
+    # Болтливые сторонние логгеры (urllib3/connectionpool — каждый FCM-запрос,
+    # httpx/httpcore — каждый HTTP): только предупреждения и ошибки.
+    for noisy in ("urllib3", "httpx", "httpcore", "google", "googleapiclient", "apscheduler"):
+        logging.getLogger(noisy).setLevel(logging.WARNING)
+    # Кэш-трейс шумит даже на DEBUG («expired/set/hit» на каждый api-вызов) —
+    # включается точечно: logging.getLogger("bot.cache").setLevel(DEBUG)
+    logging.getLogger("bot.cache").setLevel(logging.WARNING)
 
     root = logging.getLogger()
     root.handlers.clear()
@@ -253,6 +284,10 @@ def setup_logger() -> logging.Logger:
     # === Console handler (цветной вывод) ===
     console = logging.StreamHandler()
     console.setLevel(level)
+    # Пульс коллектора (Batch received/upserted каждые несколько секунд с
+    # каждой ноды) — полезен в UI админки (читает файл bot.log), но в docker
+    # compose превращается в стену шума. Файловые хендлеры фильтр не трогает.
+    console.addFilter(ConsoleNoiseFilter())
     console_formatter = structlog.stdlib.ProcessorFormatter(
         processors=[
             structlog.stdlib.ProcessorFormatter.remove_processors_meta,
@@ -441,7 +476,11 @@ def log_api_call(method: str, endpoint: str, status_code: Optional[int] = None, 
         kwargs["status_code"] = status_code
     if duration_ms is not None:
         kwargs["duration_ms"] = round(duration_ms)
-    log.info("api_call", **kwargs)
+    # GET-поллинги панели — фоновый пульс, мутации важнее и остаются INFO
+    if method.upper() == "GET":
+        log.debug("api_call", **kwargs)
+    else:
+        log.info("api_call", **kwargs)
 
 
 def log_api_error(method: str, endpoint: str, error: Exception, status_code: Optional[int] = None) -> None:

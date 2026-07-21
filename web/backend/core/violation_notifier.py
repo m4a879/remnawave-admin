@@ -171,7 +171,7 @@ async def send_violation_notification(
         if user_uuid in _violation_notification_cache:
             last = _violation_notification_cache[user_uuid]
             if now - last < timedelta(minutes=cooldown_minutes):
-                logger.info("Violation notification throttled for user %s (cooldown)", user_uuid)
+                logger.debug("Violation notification throttled for user %s (cooldown)", user_uuid)
                 return
 
         # DB check (persistent across restarts)
@@ -179,7 +179,7 @@ async def send_violation_notification(
             from shared.database import db_service
             last_notified = await db_service.get_user_last_violation_notification(user_uuid)
             if last_notified and now - last_notified < timedelta(minutes=cooldown_minutes):
-                logger.info("Violation notification throttled for user %s (DB cooldown)", user_uuid)
+                logger.debug("Violation notification throttled for user %s (DB cooldown)", user_uuid)
                 _violation_notification_cache[user_uuid] = last_notified  # Sync to memory
                 return
         except Exception:
@@ -271,16 +271,17 @@ async def send_violation_notification(
             "",
         ]
 
+        lines.append("\U0001f464 <b>Пользователь</b>")
         if email:
-            lines.append(f"\U0001f4e7 Email: <code>{_esc(email)}</code>")
+            lines.append(f"   \U0001f4e7 Email: <code>{_esc(email)}</code>")
         else:
-            lines.append(f"\U0001f4e7 Username: <code>{_esc(username)}</code>")
+            lines.append(f"   \U0001f4e7 Username: <code>{_esc(username)}</code>")
 
         if telegram_id is not None:
-            lines.append(f"\U0001f4f1 TG ID: <code>{telegram_id}</code>")
+            lines.append(f"   \U0001f4f1 TG ID: <code>{telegram_id}</code>")
 
         if description:
-            lines.append(f"\U0001f4dd Описание: <code>{_esc(description[:100])}</code>")
+            lines.append(f"   \U0001f4dd Описание: <code>{_esc(description[:100])}</code>")
 
         lines.append("")
         lines.append(f"\U0001f310 IP адресов: <b>{ip_count} из {device_limit}</b>")
@@ -306,7 +307,7 @@ async def send_violation_notification(
 
         if nodes_used:
             nodes_str = ", ".join(sorted(nodes_used))
-            lines.append(f"\U0001f5a5 Ноды: <code>{_esc(nodes_str)}</code>")
+            lines.append(f"   \U0001f5a5 Ноды: <code>{_esc(nodes_str)}</code>")
 
         lines.append("")
 
@@ -339,7 +340,8 @@ async def send_violation_notification(
             if hwid_count > 5:
                 device_parts.append(f"... и ещё {hwid_count - 5}")
             lines.append(f"\U0001f4f2 Всего устройств в аккаунте: <b>{hwid_count} из {device_limit}</b>")
-            lines.append(f"(перечисление: {', '.join(_esc(p) for p in device_parts)})")
+            for p in device_parts:
+                lines.append(f"   {_esc(p)}")
         elif os_list or client_list:
             device_parts = []
             if os_list and client_list and len(os_list) == len(client_list):
@@ -370,11 +372,11 @@ async def send_violation_notification(
                     seen.add(r)
                     unique_reasons.append(r)
             lines.append("")
-            lines.append("\U0001f50e Детали пересечения:")
+            lines.append("\U0001f50e <b>Детали пересечения</b>")
             for r in unique_reasons[:8]:
-                lines.append(f"   \u2022 {_esc(r)}")
+                lines.append(f"   {_esc(r)}")
             if len(unique_reasons) > 8:
-                lines.append(f"   ... и ещё {len(unique_reasons) - 8}")
+                lines.append(f"   … и ещё {len(unique_reasons) - 8}")
 
         # Recommended action
         action = violation_score.get("recommended_action", "")
@@ -389,7 +391,7 @@ async def send_violation_notification(
         action_key = action.value if hasattr(action, "value") else str(action)
         action_label = action_labels.get(action_key, action_key)
         lines.append("")
-        lines.append(f"\U0001f3af Действие: <b>{action_label.upper()}</b> ({action_label})")
+        lines.append(f"\U0001f3af Действие: <b>{action_label.upper()}</b>")
         if action_key == "hard_block":
             # Явно говорим админу, заблокирует ли система пользователя сама —
             # иначе блокировка выглядит как «сработала кнопка, которую я не жал»
@@ -434,8 +436,10 @@ async def send_violation_notification(
         try:
             from shared.database import db_service
             await db_service.mark_user_violations_notified(user_uuid)
-        except Exception:
-            pass  # In-memory cache is already updated
+        except Exception as e:  # noqa: BLE001
+            # кулдаун переживает рестарт только через БД: молчаливый провал =
+            # дубли уведомлений после перезапуска
+            logger.warning("Failed to persist violation cooldown for %s: %s", user_uuid, e)
 
         logger.info(
             "Violation notification sent: user_uuid=%s score=%.1f ip_count=%d",
@@ -537,8 +541,8 @@ async def send_torrent_notification(
         try:
             from shared.database import db_service
             await db_service.mark_user_violations_notified(user_uuid)
-        except Exception:
-            pass
+        except Exception as e:  # noqa: BLE001
+            logger.warning("Failed to persist torrent cooldown for %s: %s", user_uuid, e)
 
         logger.info("Torrent notification sent: user=%s events=%d", user_uuid, event_count)
 

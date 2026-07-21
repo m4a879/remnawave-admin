@@ -42,15 +42,18 @@ class PanelHealthChecker:
             start_time = datetime.now()
             await api_client.get_health()
             duration = (datetime.now() - start_time).total_seconds() * 1000
-            
+
+            was_down = self.consecutive_failures > 0
             self.last_check_time = datetime.now()
             self.last_status = True
             self.consecutive_failures = 0
-            
-            logger.debug(
-                "✅ Panel health: OK | %.0fms",
-                duration
-            )
+
+            # Одна строка на СМЕНУ состояния: восстановление — info, штатный
+            # пульс — debug (здоровая панель не должна занимать лог).
+            if was_down:
+                logger.info("✅ Panel health: recovered | %.0fms", duration)
+            else:
+                logger.debug("✅ Panel health: OK | %.0fms", duration)
             return True
         except ApiClientError as exc:
             self.last_check_time = datetime.now()
@@ -132,7 +135,7 @@ class PanelHealthChecker:
                 self.consecutive_failures
             )
         except Exception as exc:
-            logger.error("Failed to send unavailable notification: %s", exc)
+            logger.error("Failed to send unavailable notification: %s", exc, exc_info=True)
     
     async def start(self) -> None:
         """Запускает периодическую проверку панели."""
@@ -141,7 +144,7 @@ class PanelHealthChecker:
             return
         
         self.is_running = True
-        logger.info("🏥 Health checker started | interval=%ds", self.check_interval)
+        logger.debug("🏥 Health checker started | interval=%ds", self.check_interval)
         
         # Первая проверка сразу при старте
         await self.check_panel_health()

@@ -113,9 +113,8 @@ async def agent_websocket(
         from web.backend.core.agent_hmac import sign_command_with_ts
         cmd = {"type": "sync_blocked_ips", "ips": blocked, "mode": "replace"}
         payload, sig = sign_command_with_ts(cmd, token)
-        await agent_manager.send_command(node_uuid, {
-            "type": "command", "payload": payload, "signature": sig,
-        })
+        payload["_sig"] = sig
+        await agent_manager.send_command(node_uuid, payload)
         logger.info("Pushed %d blocked IPs to agent %s", len(blocked), node_uuid)
     except Exception as e:
         logger.debug("Failed to push blocked IPs to agent %s: %s", node_uuid, e)

@@ -68,18 +68,17 @@ async def telegram_send(request: Request):
             raise HTTPException(status_code=400, detail="chat_id is required")
 
         message_text = f"<b>{html.escape(title)}</b>\n\n{text}" if title else text
-        kwargs = {
-            "chat_id": chat_id,
-            "text": message_text,
-            "parse_mode": "HTML",
-            "disable_web_page_preview": True,
-        }
-        if topic_id and str(topic_id) != "0":
-            kwargs["message_thread_id"] = int(topic_id)
-        if reply_markup:
-            kwargs["reply_markup"] = reply_markup
 
-        await bot.send_message(**kwargs)
+        # Rich-уведомление (Bot API 10.1): заголовок → настоящий heading,
+        # строки-поля → список; при отказе — фолбэк на обычный HTML внутри.
+        from shared import tg_rich
+        await tg_rich.send_rich_or_html(
+            bot.token,
+            chat_id,
+            message_text,
+            message_thread_id=int(topic_id) if topic_id and str(topic_id) != "0" else None,
+            reply_markup=reply_markup,
+        )
         return JSONResponse(status_code=200, content={"status": "ok"})
     except HTTPException:
         raise

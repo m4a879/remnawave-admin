@@ -116,9 +116,15 @@ class BillmanagerAdapter(HosterAdapter):
         base = (base_url or "").strip().rstrip("/")
         if not base:
             raise AdapterError("Не указан адрес биллинга")
-        # base_url может быть https://host, https://host/billmgr или .../billmgr?func=logon
+        # base_url может быть https://host, https://host/billmgr,
+        # .../billmgr?func=logon или нестандартный путь вида /billmgr-api
+        # (serv.host) — доклеиваем /billmgr только если последний сегмент
+        # ПУТИ ещё не billmgr* (хост вида billmgr.example.com не считается)
         base = base.split("?")[0].rstrip("/")
-        if not base.endswith("/billmgr"):
+        from urllib.parse import urlsplit
+        path = urlsplit(base).path.rstrip("/")
+        last_segment = path.rsplit("/", 1)[-1] if path else ""
+        if not last_segment.startswith("billmgr"):
             base = base + "/billmgr"
         return base
 
@@ -213,7 +219,9 @@ class BillmanagerAdapter(HosterAdapter):
         for func in _UNIFIED_SERVICE_FUNCS:
             rows = await self._try_list(client, endpoint, func, credentials)
             if rows:
-                return self._services_from_rows(rows)
+                services = self._services_from_rows(rows)
+                logger.info("BILLmanager: услуг %d (func=%s)", len(services), func)
+                return services
         # 2) фолбэк: списки по типам, склеиваем и дедупим по id
         services: List[Service] = []
         seen: set = set()
@@ -225,22 +233,29 @@ class BillmanagerAdapter(HosterAdapter):
                     continue
                 seen.add(key)
                 services.append(svc)
-        if not services:
-            # 3) автообнаружение: у части инстансов услуги в подмодулях
-            # (Waicore: vds пуст, реальные VPS в vds.vps) — берём funcs из
-            # секции «Товары/услуги» клиентского меню и пробуем их
-            tried = set(_UNIFIED_SERVICE_FUNCS) | set(_TYPED_SERVICE_FUNCS)
-            for func in await self._menu_service_funcs(client, endpoint, credentials):
-                if func in tried:
+        # 3) автообнаружение по клиентскому меню — ВСЕГДА, не только при пустом
+        # списке: у части инстансов услуги в подмодулях, которых нет в typed-
+        # переборе (Waicore: vhost отдаёт бесплатный хостинг, а реальные VPS
+        # живут в vds.vps — без прохода по меню они терялись)
+        tried = set(_UNIFIED_SERVICE_FUNCS) | set(_TYPED_SERVICE_FUNCS)
+        for func in await self._menu_service_funcs(client, endpoint, credentials):
+            if func in tried:
+                continue
+            tried.add(func)
+            rows = await self._try_list(client, endpoint, func, credentials)
+            for svc in self._services_from_rows(rows):
+                key = svc.external_id or f"{func}:{svc.name}"
+                if key in seen:
                     continue
-                tried.add(func)
-                rows = await self._try_list(client, endpoint, func, credentials)
-                for svc in self._services_from_rows(rows):
-                    key = svc.external_id or f"{func}:{svc.name}"
-                    if key in seen:
-                        continue
-                    seen.add(key)
-                    services.append(svc)
+                seen.add(key)
+                services.append(svc)
+        # один итог вместо строки на каждую опрошенную функцию: детали
+        # перебора (что доступно/недоступно) живут на debug
+        if services:
+            logger.info("BILLmanager: услуг %d", len(services))
+        else:
+            logger.warning("BILLmanager: услуги не найдены — проверьте доступные "
+                           "модули инстанса (детали перебора на DEBUG)")
         return services
 
     async def _menu_service_funcs(self, client, endpoint, credentials) -> List[str]:
@@ -252,7 +267,7 @@ class BillmanagerAdapter(HosterAdapter):
         try:
             doc = await self._call(client, endpoint, "menu", credentials)
         except AdapterError as e:
-            logger.info("BILLmanager func=menu недоступна (%s)", e)
+            logger.debug("BILLmanager func=menu недоступна (%s)", e)
             return []
 
         def node_name(node: Dict[str, Any]) -> Optional[str]:
@@ -287,12 +302,12 @@ class BillmanagerAdapter(HosterAdapter):
 
         section = find_section(doc, "mainmenuservice")
         if section is None:
-            logger.info("BILLmanager: секция mainmenuservice в меню не найдена")
+            logger.debug("BILLmanager: секция mainmenuservice в меню не найдена")
             return []
         names: List[str] = []
         collect_names(section, names)
         funcs = [n for n in names if n != "mainmenuservice"][:20]
-        logger.info("BILLmanager funcs секции услуг: %s", funcs)
+        logger.debug("BILLmanager funcs секции услуг: %s", funcs)
         return funcs
 
     async def _try_list(self, client, endpoint, func, credentials) -> List[Dict[str, Any]]:
@@ -304,11 +319,11 @@ class BillmanagerAdapter(HosterAdapter):
         try:
             doc = await self._call(client, endpoint, func, credentials)
         except AdapterError as e:
-            logger.info("BILLmanager func=%s недоступна (%s)", func, e)
+            logger.debug("BILLmanager func=%s недоступна (%s)", func, e)
             return []
         rows = _rows(doc)
         if rows:
-            logger.info("BILLmanager func=%s: услуг %d", func, len(rows))
+            logger.debug("BILLmanager func=%s: услуг %d", func, len(rows))
         else:
             # функция отвечает, но список пуст — ключи и elem покажут,
             # в каком поле инстанс держит услуги (не doc.elem)

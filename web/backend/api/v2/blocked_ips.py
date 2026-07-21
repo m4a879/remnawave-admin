@@ -79,11 +79,8 @@ async def push_blocklist_to_agents() -> int:
                     "mode": "replace",
                 }
                 payload, sig = sign_command_with_ts(cmd, row["agent_token"])
-                sent = await agent_manager.send_command(node_uuid, {
-                    "type": "command",
-                    "payload": payload,
-                    "signature": sig,
-                })
+                payload["_sig"] = sig
+                sent = await agent_manager.send_command(node_uuid, payload)
                 if sent:
                     success += 1
             except Exception as e:

@@ -20,6 +20,30 @@ def _strip_html(text: str) -> str:
     return re.sub(r"<[^>]+>", "", text)
 
 
+async def _send_card(bot: Bot, message_kwargs: Dict[str, Any]) -> None:
+    """Отправить карточку уведомления rich-сообщением (Bot API 10.1).
+
+    Первая строка становится настоящим заголовком, поля с отступом — списком.
+    При отказе rich-пути (или выключенном тумблере notifications_rich_enabled)
+    внутри send_rich_or_html срабатывает фолбэк на обычный HTML — уведомление
+    доходит в любом случае. aiogram у бота старый (3.12, без Rich-типов),
+    поэтому шлём raw-запросом с токеном бота.
+    """
+    from shared import tg_rich
+
+    reply_markup = message_kwargs.get("reply_markup")
+    if reply_markup is not None and hasattr(reply_markup, "model_dump"):
+        reply_markup = reply_markup.model_dump(exclude_none=True, by_alias=True)
+
+    await tg_rich.send_rich_or_html(
+        bot.token,
+        message_kwargs["chat_id"],
+        message_kwargs["text"],
+        message_thread_id=message_kwargs.get("message_thread_id"),
+        reply_markup=reply_markup,
+    )
+
+
 def _push_dispatch(
     title: str,
     body: str,
@@ -145,7 +169,7 @@ async def send_user_notification(
         return  # Уведомления отключены
     
     topic_id = settings.get_topic_for_users()
-    logger.info(
+    logger.debug(
         "Sending user notification action=%s chat_id=%s topic_id=%s",
         action,
         settings.notifications_chat_id,
@@ -196,7 +220,8 @@ async def send_user_notification(
                 old_val = old_info.get(key)
                 new_val = info.get(key)
                 if old_val != new_val:
-                    diff_lines.append(f"   {label}: <code>{fmt(old_val)}</code> → <code>{fmt(new_val)}</code>")
+                    # новое значение — жирным: взгляд сразу цепляется за итог
+                    diff_lines.append(f"   {label}: <code>{fmt(old_val)}</code> → <b><code>{fmt(new_val)}</code></b>")
 
             # Сквад diff
             active_squads = info.get("activeInternalSquads", [])
@@ -217,7 +242,9 @@ async def send_user_notification(
             else:
                 lines.append(tr("notify.user.section.no_changes"))
 
-            # Краткая карточка с основными полями (контекст)
+            # Краткая карточка с основными полями — сворачиваемой секцией:
+            # diff главный, контекст не должен занимать пол-экрана простынёй.
+            # В rich это details, в HTML-фолбэке — expandable-цитата.
             lines.append("")
             card_parts = []
             status = info.get("status")
@@ -237,8 +264,8 @@ async def send_user_notification(
             description = info.get("description")
             if description:
                 card_parts.append(f"{tr('notify.user.field.description')}: <code>{_esc(description[:50])}</code>")
-            sep = tr("notify.user.label.card_separator")
-            lines.append("ℹ️ " + sep.join(card_parts))
+            lines.append("<blockquote expandable>" + tr("notify.user.section.card")
+                         + "\n" + "\n".join(card_parts) + "</blockquote>")
 
         else:
             # Для created/deleted/other: полная информация
@@ -312,7 +339,7 @@ async def send_user_notification(
         if topic_id is not None:
             message_kwargs["message_thread_id"] = topic_id
 
-        await bot.send_message(**message_kwargs)
+        await _send_card(bot, message_kwargs)
         logger.info("User notification sent successfully action=%s chat_id=%s", action, settings.notifications_chat_id)
 
         # Маппинг коротких action-имён → event_id из catalog
@@ -395,7 +422,7 @@ async def send_generic_notification(
         if topic_id is not None:
             message_kwargs["message_thread_id"] = topic_id
 
-        await bot.send_message(**message_kwargs)
+        await _send_card(bot, message_kwargs)
         logger.info("Generic notification sent successfully title=%s topic_id=%s", title, topic_id)
 
     except Exception as exc:
@@ -443,12 +470,12 @@ async def send_node_notification(
         addr_str = f"{_esc(str(address))}:{port}" if port != "—" else _esc(str(address))
         lines.append(f"   {tr('notify.node.label.address')}: <code>{addr_str}</code>  {country if country != '—' else ''}")
         if status != "—":
-            lines.append(f"📊 <b>{tr('notify.node.label.status')}:</b> <code>{status}</code>")
+            lines.append(f"   📊 {tr('notify.node.label.status')}: <code>{status}</code>")
 
         # Трафик (если есть)
         traffic_limit = node_info.get("trafficLimitBytes")
         if traffic_limit:
-            lines.append(f"📶 <b>{tr('notify.node.label.traffic_limit')}:</b> <code>{format_bytes(traffic_limit)}</code>")
+            lines.append(f"   📶 {tr('notify.node.label.traffic_limit')}: <code>{format_bytes(traffic_limit)}</code>")
 
         # Секция изменений
         if changes and event == "node.modified":
@@ -468,7 +495,7 @@ async def send_node_notification(
         if topic_id is not None:
             message_kwargs["message_thread_id"] = topic_id
 
-        await bot.send_message(**message_kwargs)
+        await _send_card(bot, message_kwargs)
         logger.info("Node notification sent successfully event=%s node_uuid=%s topic_id=%s", event, node_uuid, topic_id)
 
         # FCM push: критичные события про ноды отправляем как category=alerts,
@@ -527,25 +554,25 @@ async def send_service_notification(
             user_agent = la.get("userAgent") or "—"
             description = la.get("description") or "—"
 
-            lines.append(tr("notify.service.login.username", username=_esc(username)))
+            lines.append(f"   {tr('notify.service.login.username', username=_esc(username))}")
             if ip != "—":
-                lines.append(tr("notify.service.login.ip", ip=_esc(ip)))
+                lines.append(f"   {tr('notify.service.login.ip', ip=_esc(ip))}")
             if user_agent != "—":
-                lines.append(tr("notify.service.login.user_agent", user_agent=_esc(user_agent[:200])))
+                lines.append(f"   {tr('notify.service.login.user_agent', user_agent=_esc(user_agent[:200]))}")
             if description != "—":
-                lines.append(tr("notify.service.login.description", description=_esc(description)))
+                lines.append(f"   {tr('notify.service.login.description', description=_esc(description))}")
         elif event == "panel.unavailable":
             error_type = event_data.get("error_type", "—")
             error_message = event_data.get("error_message", "—")
             consecutive_failures = event_data.get("consecutive_failures", 0)
             last_check = event_data.get("last_check", "—")
 
-            lines.append(tr("notify.service.panel_unavailable.error_type", error_type=_esc(error_type)))
+            lines.append(f"   {tr('notify.service.panel_unavailable.error_type', error_type=_esc(error_type))}")
             if error_message != "—":
-                lines.append(tr("notify.service.panel_unavailable.error_message", error_message=_esc(error_message[:100])))
-            lines.append(tr("notify.service.panel_unavailable.failures", count=consecutive_failures))
+                lines.append(f"   {tr('notify.service.panel_unavailable.error_message', error_message=_esc(error_message[:100]))}")
+            lines.append(f"   {tr('notify.service.panel_unavailable.failures', count=consecutive_failures)}")
             if last_check != "—":
-                lines.append(tr("notify.service.panel_unavailable.last_check", last_check=last_check))
+                lines.append(f"   {tr('notify.service.panel_unavailable.last_check', last_check=last_check)}")
 
         text = "\n".join(lines)
 
@@ -558,7 +585,7 @@ async def send_service_notification(
         if topic_id is not None:
             message_kwargs["message_thread_id"] = topic_id
 
-        await bot.send_message(**message_kwargs)
+        await _send_card(bot, message_kwargs)
         logger.info("Service notification sent successfully event=%s topic_id=%s", event, topic_id)
 
         # Сервисные события (бэкап, рестарт панели и т.п.) — alert-категория,
@@ -614,20 +641,18 @@ async def send_hwid_notification(
             description = user_data.get("description", "")
             hwid_device_limit = user_data.get("hwidDeviceLimit", 0)
 
-            lines.append(tr("notify.hwid.label.user", username=_esc(username)))
-            lines.append(tr("notify.hwid.label.uuid", uuid=user_uuid))
-
+            lines.append(f"{tr('notify.hwid.label.user', username=_esc(username))}  <code>{user_uuid[:8]}</code>")
             if telegram_id is not None:
-                lines.append(tr("notify.hwid.label.tg_id", telegram_id=telegram_id))
+                lines.append(f"   {tr('notify.hwid.label.tg_id', telegram_id=telegram_id)}")
 
-            lines.append(tr("notify.hwid.label.status", status=status))
+            lines.append(f"   {tr('notify.hwid.label.status', status=status)}")
 
             if description:
-                lines.append(tr("notify.hwid.label.description", description=_esc(description[:100])))
+                lines.append(f"   {tr('notify.hwid.label.description', description=_esc(description[:100]))}")
 
             # Информация о лимите устройств
             limit_display = "∞" if hwid_device_limit == 0 else str(hwid_device_limit)
-            lines.append(tr("notify.hwid.label.device_limit", limit=limit_display))
+            lines.append(f"   {tr('notify.hwid.label.device_limit', limit=limit_display)}")
 
             lines.append("")
 
@@ -641,17 +666,17 @@ async def send_hwid_notification(
             created_at = hwid_data.get("createdAt")
 
             if hwid != "—":
-                lines.append(tr("notify.hwid.device.hwid", hwid=_esc(hwid)))
+                lines.append(f"   {tr('notify.hwid.device.hwid', hwid=_esc(hwid))}")
             if platform != "—":
-                lines.append(tr("notify.hwid.device.platform", platform=_esc(platform)))
+                lines.append(f"   {tr('notify.hwid.device.platform', platform=_esc(platform))}")
             if os_version != "—":
-                lines.append(tr("notify.hwid.device.os_version", os_version=_esc(os_version)))
+                lines.append(f"   {tr('notify.hwid.device.os_version', os_version=_esc(os_version))}")
             if device_model != "—":
-                lines.append(tr("notify.hwid.device.model", model=_esc(device_model)))
+                lines.append(f"   {tr('notify.hwid.device.model', model=_esc(device_model))}")
             if user_agent != "—":
-                lines.append(tr("notify.hwid.device.user_agent", user_agent=_esc(user_agent[:60])))
+                lines.append(f"   {tr('notify.hwid.device.user_agent', user_agent=_esc(user_agent[:60]))}")
             if created_at:
-                lines.append(tr("notify.hwid.device.added", created_at=format_datetime(created_at)))
+                lines.append(f"   {tr('notify.hwid.device.added', created_at=format_datetime(created_at))}")
         
         text = "\n".join(lines)
 
@@ -664,7 +689,7 @@ async def send_hwid_notification(
         if topic_id is not None:
             message_kwargs["message_thread_id"] = topic_id
 
-        await bot.send_message(**message_kwargs)
+        await _send_card(bot, message_kwargs)
         logger.info("HWID notification sent successfully event=%s topic_id=%s", event, topic_id)
 
         # FCM push: соответствует событиям user_hwid_devices.added/.deleted в
@@ -720,12 +745,12 @@ async def send_error_notification(
 
         lines.append(tr("notify.error.title"))
         lines.append("")
-        lines.append(tr("notify.error.type", event=_esc(event)))
+        lines.append(f"   {tr('notify.error.type', event=_esc(event))}")
 
         # Дополнительная информация
         message = event_data.get("message", "")
         if message:
-            lines.append(tr("notify.error.message", message=_esc(message)))
+            lines.append(f"   {tr('notify.error.message', message=_esc(message))}")
 
         text = "\n".join(lines)
 
@@ -738,7 +763,7 @@ async def send_error_notification(
         if topic_id is not None:
             message_kwargs["message_thread_id"] = topic_id
 
-        await bot.send_message(**message_kwargs)
+        await _send_card(bot, message_kwargs)
         logger.info("Error notification sent successfully event=%s topic_id=%s", event, topic_id)
 
         # Ошибки/системные алерты обязательно пушим — это то, ради чего пуши и нужны.
@@ -872,7 +897,7 @@ async def send_crm_notification(
         if topic_id is not None:
             message_kwargs["message_thread_id"] = topic_id
 
-        await bot.send_message(**message_kwargs)
+        await _send_card(bot, message_kwargs)
         logger.info("CRM notification sent successfully event=%s topic_id=%s", event, topic_id)
 
     except Exception as exc:
@@ -1005,24 +1030,33 @@ async def send_violation_notification(
                 os_list = device_data.os_list or []
                 client_list = getattr(device_data, 'client_list', None) or []
 
-        # Формируем сообщение
+        # Формируем сообщение: заголовок → сводка (кто и насколько плохо) →
+        # секции списками. Строки с «   »-отступом конвертер rich собирает
+        # в аккуратные списки, секции — жирные строки-параграфы.
         lines = []
         lines.append(tr("notify.violation.title"))
         lines.append("")
 
-        # Информация о пользователе
-        if email:
-            lines.append(tr("notify.violation.email", email=_esc(email)))
-        else:
-            lines.append(tr("notify.violation.username", username=_esc(username)))
-
-        if telegram_id is not None:
-            lines.append(tr("notify.violation.tg_id", telegram_id=telegram_id))
-
-        if description:
-            lines.append(tr("notify.violation.description", description=_esc(description[:100])))
-
+        # Сводка — главное с первого взгляда
+        lines.append(tr(
+            "notify.violation.summary",
+            username=_esc(username), score=f"{total_score:.0f}",
+            count=ip_count, limit=device_limit,
+        ))
         lines.append("")
+
+        # Информация о пользователе — секция со списком полей
+        user_lines = []
+        if email:
+            user_lines.append(f"   {tr('notify.violation.email', email=_esc(email))}")
+        if telegram_id is not None:
+            user_lines.append(f"   {tr('notify.violation.tg_id', telegram_id=telegram_id)}")
+        if description:
+            user_lines.append(f"   {tr('notify.violation.description', description=_esc(description[:100]))}")
+        if user_lines:
+            lines.append(tr("notify.violation.user_section"))
+            lines.extend(user_lines)
+            lines.append("")
 
         # IP адреса
         lines.append(tr("notify.violation.ip_count", count=ip_count, limit=device_limit))
@@ -1049,10 +1083,10 @@ async def send_violation_notification(
                 else:
                     lines.append(tr("notify.violation.ip_bare", ip=ip))
 
-        # Ноды
+        # Ноды — в тот же список, что и IP
         if nodes_used:
             nodes_str = ", ".join(sorted(nodes_used))
-            lines.append(tr("notify.violation.nodes", nodes=_esc(nodes_str)))
+            lines.append(f"   {tr('notify.violation.nodes', nodes=_esc(nodes_str))}")
 
         lines.append("")
 
@@ -1118,14 +1152,10 @@ async def send_violation_notification(
             else:
                 lines.append(tr("notify.violation.devices_empty"))
 
-        # Время в нарушении
+        # Хвост: длительность и время (скор уже в сводке сверху)
+        lines.append("")
         if violation_duration_sec > 0:
             lines.append(tr("notify.violation.duration", seconds=violation_duration_sec))
-
-        # Скор нарушения
-        lines.append(tr("notify.violation.score", score=f"{total_score:.1f}"))
-
-        # Время
         lines.append(tr("notify.violation.time_msk", time=moscow_time_str))
 
         text = "\n".join(lines)
@@ -1154,7 +1184,7 @@ async def send_violation_notification(
         if topic_id is not None:
             message_kwargs["message_thread_id"] = topic_id
 
-        await bot.send_message(**message_kwargs)
+        await _send_card(bot, message_kwargs)
 
         # Обновляем кэш после успешной отправки
         _violation_notification_cache[user_uuid] = datetime.utcnow()

@@ -61,7 +61,7 @@ class SyncService:
             return
 
         self._running = True
-        logger.info("🔄 Sync service started (interval: %ds)", settings.sync_interval_seconds)
+        logger.debug("Sync service started (interval: %ds)", settings.sync_interval_seconds)
 
         if background:
             # Non-blocking: initial sync + periodic loop in background
@@ -93,7 +93,7 @@ class SyncService:
     
     async def _run_initial_sync(self) -> None:
         """Run initial synchronization of all data."""
-        logger.info("🔄 Running initial sync...")
+        logger.debug("Running initial sync...")
 
         try:
             results = await asyncio.gather(
@@ -136,7 +136,7 @@ class SyncService:
             except asyncio.CancelledError:
                 break
             except Exception as e:
-                logger.error("Error in periodic sync: %s", e)
+                logger.error("Error in periodic sync: %s", e, exc_info=True)
                 # Continue running, will retry next interval
 
     @staticmethod
@@ -777,22 +777,23 @@ class SyncService:
         old_db_record = await db_service.get_user_by_uuid(uuid)
         if old_db_record and old_db_record.get("uuid"):
             result["old_data"] = old_db_record
-            logger.debug("Found old user data in DB for diff: %s", uuid)
-        
+
         if event == "user.deleted":
             await db_service.delete_user(uuid)
             logger.debug("Deleted user %s from database (webhook)", uuid)
         else:
             # Upsert new data
             await db_service.upsert_user({"response": event_data})
-            logger.debug("Updated user %s in database (webhook: %s)", uuid, event)
-            
-            # Calculate changes if we have old data
+
+            # Calculate changes if we have old data. Одна сводная строка
+            # вместо простыни (found/updated/по строке на поле/calculated).
             if result["old_data"]:
                 result["changes"] = _compare_user_data(result["old_data"], event_data)
-                logger.debug("Calculated %d changes for user %s", len(result["changes"]), uuid)
+                logger.debug("Webhook %s: user %s, %d change(s)",
+                             event, uuid, len(result["changes"]))
             else:
                 result["is_new"] = True
+                logger.debug("Webhook %s: user %s (new)", event, uuid)
         
         return result
     
@@ -1040,7 +1041,7 @@ class SyncService:
                 status="success",
                 records_synced=total_synced,
             )
-            logger.info("Synced node traffic  records=%-5d  nodes=%d", total_synced, len(active_nodes))
+            logger.debug("Synced node traffic  records=%-5d  nodes=%d", total_synced, len(active_nodes))
             return total_synced
 
         except Exception as e:
@@ -1342,8 +1343,7 @@ def _compare_user_data(old_data: Dict[str, Any], new_data: Dict[str, Any]) -> Li
             old_display = formatter(old_val) if formatter and old_val else (old_val or "—")
             new_display = formatter(new_val) if formatter and new_val else (new_val or "—")
             changes.append(f"• {label}: {old_display} → {new_display}")
-            logger.debug("User diff: %s changed from %r to %r", field, old_val, new_val)
-    
+
     return changes
 
 

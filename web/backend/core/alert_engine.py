@@ -55,7 +55,7 @@ class AlertEngine:
             return
         self._running = True
         self._task = asyncio.create_task(self._run_loop())
-        logger.info("Alert engine started (interval=%ds)", self.CHECK_INTERVAL)
+        logger.debug("Alert engine started (interval=%ds)", self.CHECK_INTERVAL)
 
     async def stop(self):
         """Stop the alert monitoring loop."""

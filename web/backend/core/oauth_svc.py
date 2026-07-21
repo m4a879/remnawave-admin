@@ -1,11 +1,17 @@
-"""OAuth2 SSO (Google / GitHub) — authorize-URL, обмен кода, userinfo, привязки.
+"""OAuth2 SSO (Google / GitHub / generic OIDC) — authorize-URL, обмен кода,
+userinfo, привязки.
 
 Модель безопасности: авто-создания аккаунтов НЕТ. Вход по OAuth работает только
 если (provider, external_id) привязан к существующему admin-аккаунту. Привязка
 делается залогиненным админом (self-service). Секреты провайдеров зашифрованы.
+
+Generic OIDC («oidc») — любой OpenID Connect провайдер (PocketID, Authentik,
+Keycloak, Zitadel…): задаётся issuer-URL, эндпоинты берутся из discovery
+(/.well-known/openid-configuration) с кэшем; имя кнопки настраивается.
 """
 import logging
 import secrets
+import time
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 from urllib.parse import urlencode
@@ -33,15 +39,30 @@ _PROVIDERS: Dict[str, Dict[str, str]] = {
         "token": "https://github.com/login/oauth/access_token",
         "scope": "read:user user:email",
     },
+    # Generic OIDC: authorize/token/userinfo приходят из discovery по issuer
+    "oidc": {
+        "name": "SSO",
+        "scope": "openid profile email",
+    },
 }
+
+OIDC_DEFAULT_NAME = "SSO"
 
 
 class OAuthError(Exception):
     """Ошибка OAuth с человекочитаемым сообщением."""
 
 
+def provider_display_name(slug: str) -> str:
+    if slug == "oidc":
+        from shared.config_service import config_service
+        return str(config_service.get("oauth_oidc_name", "") or "").strip() or OIDC_DEFAULT_NAME
+    return _PROVIDERS[slug]["name"]
+
+
 def providers() -> List[Dict[str, Any]]:
-    return [{"slug": s, "name": p["name"], "configured": is_configured(s)} for s, p in _PROVIDERS.items()]
+    return [{"slug": s, "name": provider_display_name(s), "configured": is_configured(s)}
+            for s in _PROVIDERS]
 
 
 def is_provider(slug: str) -> bool:
@@ -75,18 +96,73 @@ def get_client_secret(p: str) -> str:
         return ""
 
 
+def get_oidc_issuer() -> str:
+    from shared.config_service import config_service
+    return str(config_service.get("oauth_oidc_issuer", "") or "").strip().rstrip("/")
+
+
 def is_configured(p: str) -> bool:
-    return bool(get_client_id(p) and get_client_secret(p))
+    ok = bool(get_client_id(p) and get_client_secret(p))
+    if p == "oidc":
+        ok = ok and bool(get_oidc_issuer())
+    return ok
 
 
-async def save_creds(p: str, client_id: str, client_secret: str) -> None:
+async def save_creds(p: str, client_id: str, client_secret: str,
+                     issuer: Optional[str] = None, display_name: Optional[str] = None) -> None:
     await _write(_cid_key(p), client_id.strip())
     await _write(_secret_key(p), encrypt_field(client_secret.strip()) if client_secret.strip() else "")
+    if p == "oidc":
+        if issuer is not None:
+            await _write("oauth_oidc_issuer", issuer.strip().rstrip("/"))
+            _discovery_cache.pop(issuer.strip().rstrip("/"), None)
+        if display_name is not None:
+            await _write("oauth_oidc_name", display_name.strip())
 
 
 async def clear_creds(p: str) -> None:
     await _write(_cid_key(p), "")
     await _write(_secret_key(p), "")
+    if p == "oidc":
+        await _write("oauth_oidc_issuer", "")
+        await _write("oauth_oidc_name", "")
+
+
+# ── OIDC discovery (issuer → эндпоинты, кэш в памяти) ────────────
+
+_discovery_cache: Dict[str, tuple] = {}  # issuer -> (expires_ts, conf)
+_DISCOVERY_TTL = 3600.0
+
+
+async def _oidc_discovery() -> Dict[str, str]:
+    """Эндпоинты OIDC-провайдера из /.well-known/openid-configuration."""
+    issuer = get_oidc_issuer()
+    if not issuer:
+        raise OAuthError("OIDC: не задан issuer URL")
+    cached = _discovery_cache.get(issuer)
+    if cached and cached[0] > time.monotonic():
+        return cached[1]
+    url = f"{issuer}/.well-known/openid-configuration"
+    try:
+        async with httpx.AsyncClient(timeout=_TIMEOUT) as c:
+            r = await c.get(url, headers={"Accept": "application/json"})
+    except httpx.HTTPError as e:
+        raise OAuthError(f"OIDC discovery недоступен: {e}")
+    if r.status_code != 200:
+        raise OAuthError(f"OIDC discovery вернул HTTP {r.status_code}")
+    try:
+        d = r.json()
+    except ValueError:
+        raise OAuthError("OIDC discovery вернул не JSON")
+    conf = {
+        "authorize": d.get("authorization_endpoint"),
+        "token": d.get("token_endpoint"),
+        "userinfo": d.get("userinfo_endpoint"),
+    }
+    if not conf["authorize"] or not conf["token"]:
+        raise OAuthError("OIDC discovery: нет authorization/token endpoint")
+    _discovery_cache[issuer] = (time.monotonic() + _DISCOVERY_TTL, conf)
+    return conf
 
 
 async def _write(key: str, value: str) -> None:
@@ -150,12 +226,16 @@ def _read_state(state: str) -> Dict[str, Any]:
 
 # ── Authorize / callback ─────────────────────────────────────────
 
-def build_authorize_url(request, provider: str, mode: str, account_id: Optional[int]) -> str:
+async def build_authorize_url(request, provider: str, mode: str, account_id: Optional[int]) -> str:
     if provider not in _PROVIDERS:
         raise OAuthError("неизвестный провайдер")
     if not is_configured(provider):
-        raise OAuthError("Провайдер не настроен (нет client_id/secret)")
+        raise OAuthError("Провайдер не настроен (нет client_id/secret)"
+                         + (" или issuer" if provider == "oidc" else ""))
     prov = _PROVIDERS[provider]
+    authorize_url = prov.get("authorize")
+    if provider == "oidc":
+        authorize_url = (await _oidc_discovery())["authorize"]
     params = {
         "client_id": get_client_id(provider),
         "redirect_uri": _redirect_uri(request),
@@ -166,11 +246,14 @@ def build_authorize_url(request, provider: str, mode: str, account_id: Optional[
     if provider == "google":
         params["access_type"] = "online"
         params["prompt"] = "select_account"
-    return f"{prov['authorize']}?{urlencode(params)}"
+    return f"{authorize_url}?{urlencode(params)}"
 
 
 async def _exchange_code(provider: str, code: str, redirect_uri: str) -> str:
     prov = _PROVIDERS[provider]
+    token_url = prov.get("token")
+    if provider == "oidc":
+        token_url = (await _oidc_discovery())["token"]
     data = {
         "client_id": get_client_id(provider),
         "client_secret": get_client_secret(provider),
@@ -178,7 +261,7 @@ async def _exchange_code(provider: str, code: str, redirect_uri: str) -> str:
     }
     try:
         async with httpx.AsyncClient(timeout=_TIMEOUT) as c:
-            r = await c.post(prov["token"], data=data, headers={"Accept": "application/json"})
+            r = await c.post(token_url, data=data, headers={"Accept": "application/json"})
     except httpx.HTTPError as e:
         raise OAuthError(f"сеть: {e}")
     try:
@@ -194,6 +277,17 @@ async def _exchange_code(provider: str, code: str, redirect_uri: str) -> str:
 async def _userinfo(provider: str, access_token: str) -> Dict[str, Any]:
     headers = {"Authorization": f"Bearer {access_token}", "Accept": "application/json"}
     async with httpx.AsyncClient(timeout=_TIMEOUT) as c:
+        if provider == "oidc":
+            userinfo_url = (await _oidc_discovery()).get("userinfo")
+            if not userinfo_url:
+                raise OAuthError("OIDC: провайдер не отдал userinfo_endpoint")
+            r = await c.get(userinfo_url, headers=headers)
+            d = r.json() if r.status_code == 200 else {}
+            eid = d.get("sub")
+            if not eid:
+                raise OAuthError("OIDC-провайдер не вернул sub")
+            name = d.get("name") or d.get("preferred_username") or d.get("email")
+            return {"external_id": str(eid), "email": d.get("email"), "name": name}
         if provider == "google":
             r = await c.get("https://openidconnect.googleapis.com/v1/userinfo", headers=headers)
             d = r.json() if r.status_code == 200 else {}

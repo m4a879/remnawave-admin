@@ -83,7 +83,7 @@ class CacheService:
     async def connect(self, redis_url: Optional[str] = None) -> bool:
         """Try to connect to Redis. Returns True if successful."""
         if not redis_url:
-            logger.info("No REDIS_URL configured, using in-memory cache")
+            logger.debug("No REDIS_URL configured, using in-memory cache")
             CACHE_BACKEND.set(0)
             return False
         try:
@@ -98,7 +98,7 @@ class CacheService:
             await self._redis.ping()
             self._using_redis = True
             CACHE_BACKEND.set(1)
-            logger.info("Redis cache connected: %s", redis_url.split("@")[-1])
+            logger.debug("Redis cache connected: %s", redis_url.split("@")[-1])
             self._stats_task = asyncio.create_task(self._stats_loop())
             return True
         except Exception as e:

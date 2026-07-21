@@ -49,7 +49,7 @@ async def _flush() -> None:
 
 
 async def _loop() -> None:
-    logger.info("API key usage buffer started (interval=%ss)", _FLUSH_INTERVAL_SEC)
+    logger.debug("API key usage buffer started (interval=%ss)", _FLUSH_INTERVAL_SEC)
     while not _stop.is_set():
         try:
             await asyncio.wait_for(_stop.wait(), timeout=_FLUSH_INTERVAL_SEC)

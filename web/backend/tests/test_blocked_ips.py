@@ -234,3 +234,64 @@ class TestSyncEndpoint:
         data = resp.json()
         assert data["synced_agents"] == 3
         mock_push.assert_awaited_once()
+
+
+class TestPushBlocklistFormat:
+    """push_blocklist_to_agents шлёт ПЛОСКИЙ подписанный payload.
+
+    Контракт с агентом: {"type": "sync_blocked_ips", ..., "_ts", "_sig"} —
+    агент проверяет HMAC по payload без _sig. Раньше пуш заворачивался в
+    {"type": "command", "payload", "signature"} и агент его отбрасывал
+    («Unknown command type: command»).
+    """
+
+    @pytest.mark.asyncio
+    async def test_flat_signed_payload(self):
+        from web.backend.api.v2 import blocked_ips as mod
+
+        mock_svc = _mock_db_service(
+            get_all_active_blocked_ips_return=["10.0.0.1/32", "192.168.1.0/24"]
+        )
+        mock_conn = AsyncMock()
+        mock_conn.fetchrow.return_value = {"agent_token": "tok-123"}
+        acquire_cm = MagicMock()
+        acquire_cm.__aenter__ = AsyncMock(return_value=mock_conn)
+        acquire_cm.__aexit__ = AsyncMock(return_value=False)
+        mock_svc.acquire.return_value = acquire_cm
+
+        sent = []
+
+        async def _capture(node_uuid, payload):
+            sent.append((node_uuid, payload))
+            return True
+
+        mock_am = MagicMock()
+        mock_am.list_connected.return_value = ["node-1"]
+        mock_am.send_command = AsyncMock(side_effect=_capture)
+
+        with patch("shared.database.db_service", mock_svc), \
+             patch("web.backend.core.agent_manager.agent_manager", mock_am):
+            count = await mod.push_blocklist_to_agents()
+
+        assert count == 1
+        node_uuid, payload = sent[0]
+        assert node_uuid == "node-1"
+        # Плоский формат — тип команды виден агенту сразу
+        assert payload["type"] == "sync_blocked_ips"
+        assert payload["ips"] == ["10.0.0.1/32", "192.168.1.0/24"]
+        assert payload["mode"] == "replace"
+        assert "_ts" in payload and "_sig" in payload
+
+        # Подпись валидна с точки зрения агента (HMAC по payload без _sig)
+        import hashlib
+        import hmac as hmac_mod
+        import json
+        from web.backend.core.config import get_web_settings
+
+        body = {k: v for k, v in payload.items() if k != "_sig"}
+        canonical = json.dumps(body, sort_keys=True, separators=(",", ":"))
+        key = hashlib.sha256(
+            f"{get_web_settings().secret_key}:tok-123".encode()
+        ).digest()
+        expected = hmac_mod.new(key, canonical.encode(), hashlib.sha256).hexdigest()
+        assert payload["_sig"] == expected

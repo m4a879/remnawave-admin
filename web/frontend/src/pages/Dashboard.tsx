@@ -2177,7 +2177,7 @@ export default function Dashboard() {
             subtitle={backupStatus?.last_backup
               ? `${backupStatus.last_backup.backup_type} · ${formatBytes(backupStatus.last_backup.size_bytes)}`
               : t('dashboard.noBackup')}
-            onClick={() => navigate('/backup')}
+            onClick={() => navigate('/backups')}
             index={5}
           />
         )}

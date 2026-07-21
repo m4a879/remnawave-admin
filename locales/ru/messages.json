@@ -1068,7 +1068,8 @@
       "section": {
         "changes": "📋 <b>Изменения</b>",
         "no_changes": "<i>Изменения не определены</i>",
-        "traffic_limits": "📊 <b>Трафик и лимиты</b>"
+        "traffic_limits": "📊 <b>Трафик и лимиты</b>",
+        "card": "ℹ️ <b>Карточка пользователя</b>"
       },
       "subscription_link": "🔗 Ссылка: <code>{url}</code>",
       "external_squad": "External: {uuid}..."
@@ -1211,7 +1212,9 @@
         "macos": "macOS",
         "linux": "Linux",
         "unknown": "Unknown"
-      }
+      },
+      "summary": "👤 <code>{username}</code> · 📊 Скор: <b>{score}/100</b> · 🌐 IP: <b>{count}/{limit}</b>",
+      "user_section": "👤 <b>Пользователь</b>"
     },
     "push": {
       "node_fallback": "Событие ноды",

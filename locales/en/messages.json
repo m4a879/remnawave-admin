@@ -1068,6 +1068,7 @@
       "section": {
         "changes": "📋 <b>Changes</b>",
         "no_changes": "<i>Changes undefined</i>",
+        "card": "ℹ️ <b>User card</b>",
         "traffic_limits": "📊 <b>Traffic and limits</b>"
       },
       "subscription_link": "🔗 Link: <code>{url}</code>",
@@ -1211,7 +1212,9 @@
         "macos": "macOS",
         "linux": "Linux",
         "unknown": "Unknown"
-      }
+      },
+      "summary": "👤 <code>{username}</code> · 📊 Score: <b>{score}/100</b> · 🌐 IPs: <b>{count}/{limit}</b>",
+      "user_section": "👤 <b>User</b>"
     },
     "push": {
       "node_fallback": "Node event",

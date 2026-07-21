@@ -671,6 +671,7 @@ async def test_account(
     from web.backend.core.crypto import decrypt_field
 
     adapter_slug, base_url, credentials = data.adapter, data.base_url, data.credentials
+    account = None
     if data.account_id and not credentials:
         account = await db_service.get_finance_account(data.account_id)
         if not account:
@@ -685,7 +686,13 @@ async def test_account(
     try:
         adapter = get_adapter(adapter_slug)
         adapter.validate_credentials(credentials)
-        result = await adapter.test((base_url or "").strip().rstrip("/") or None, credentials)
+        import structlog
+        structlog.contextvars.bind_contextvars(
+            hoster=(account.get("name") if account else None) or adapter_slug)
+        try:
+            result = await adapter.test((base_url or "").strip().rstrip("/") or None, credentials)
+        finally:
+            structlog.contextvars.unbind_contextvars("hoster")
     except AdapterError as e:
         return {"status": "error", "error": str(e)}
     except Exception as e:

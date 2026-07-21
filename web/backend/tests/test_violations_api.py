@@ -336,3 +336,60 @@ class TestHwidBlacklistRequest:
         from web.backend.api.v2.violations import HwidBlacklistRequest
         req = HwidBlacklistRequest(hwid="xyz", action="block")
         assert req.action == "block"
+
+
+class TestResolveBlockIdempotent:
+    """POST /violations/{id}/resolve action=block на уже отключённом юзере.
+
+    Кейс из сообщества: панель отвечает ошибкой на disable уже отключённого
+    юзера → резолв падал 502 «Сервис API недоступен» и нарушение нельзя было
+    закрыть. Уже DISABLED = успех блокировки.
+    """
+
+    def _db(self):
+        mock_db = MagicMock()
+        mock_db.is_connected = True
+        mock_db.get_violation_by_id = AsyncMock(return_value={
+            "id": 1, "user_uuid": "aaa-111", "username": "alice",
+        })
+        mock_db.update_violation_action = AsyncMock(return_value=True)
+        return mock_db
+
+    @pytest.mark.asyncio
+    async def test_block_already_disabled_user_succeeds(self, app, client):
+        from web.backend.api.deps import get_db
+
+        mock_db = self._db()
+        app.dependency_overrides[get_db] = lambda: mock_db
+
+        with patch("shared.api_client.api_client.disable_user",
+                   AsyncMock(side_effect=Exception("User is already disabled"))), \
+             patch("shared.api_client.api_client.get_user_by_uuid",
+                   AsyncMock(return_value={"response": {"status": "DISABLED"}})), \
+             patch("web.backend.core.rbac.get_visible_user_uuids",
+                   AsyncMock(return_value=None)):
+            resp = await client.post("/api/v2/violations/1/resolve",
+                                     json={"action": "block"})
+
+        assert resp.status_code == 200
+        assert resp.json()["action"] == "block"
+        mock_db.update_violation_action.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_block_active_user_disable_failure_is_502(self, app, client):
+        from web.backend.api.deps import get_db
+
+        mock_db = self._db()
+        app.dependency_overrides[get_db] = lambda: mock_db
+
+        with patch("shared.api_client.api_client.disable_user",
+                   AsyncMock(side_effect=Exception("boom"))), \
+             patch("shared.api_client.api_client.get_user_by_uuid",
+                   AsyncMock(return_value={"response": {"status": "ACTIVE"}})), \
+             patch("web.backend.core.rbac.get_visible_user_uuids",
+                   AsyncMock(return_value=None)):
+            resp = await client.post("/api/v2/violations/1/resolve",
+                                     json={"action": "block"})
+
+        assert resp.status_code == 502
+        mock_db.update_violation_action.assert_not_awaited()

@@ -8,7 +8,12 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
-from shared.logger import logger
+import logging
+
+# Отдельный канал: кэш-трейс («hit/set/expired» на каждый вызов API) мусорит
+# даже DEBUG-сессии. По умолчанию приглушён в setup_logger; для отладки кэша:
+# logging.getLogger("bot.cache").setLevel(logging.DEBUG)
+logger = logging.getLogger("bot.cache")
 
 
 @dataclass

@@ -241,21 +241,25 @@ _DEFAULT_MESSAGES: dict[str, str] = {
 
 def api_error(
     status_code: int,
-    code: ErrorCode,
+    code: ErrorCode | str,
     detail: str | None = None,
 ) -> HTTPException:
     """Create an HTTPException with a structured error code.
 
     Args:
         status_code: HTTP status code (400, 404, 500, etc.)
-        code: ErrorCode enum value
+        code: ErrorCode enum value or a plain string code. Часть вызовов
+            передаёт код строкой ("NO_CHAT_ID") — раньше это роняло сам
+            api_error (AttributeError на .value) и превращало осмысленный
+            400 в невнятный 500.
         detail: Human-readable message. If None, uses default for the code.
 
     Returns:
         HTTPException with JSON body {"detail": "...", "code": "ERROR_CODE"}
     """
-    message = detail or _DEFAULT_MESSAGES.get(code, code.value)
+    code_value = code.value if isinstance(code, ErrorCode) else str(code)
+    message = detail or _DEFAULT_MESSAGES.get(code, code_value)
     return HTTPException(
         status_code=status_code,
-        detail={"detail": message, "code": code.value},
+        detail={"detail": message, "code": code_value},
     )

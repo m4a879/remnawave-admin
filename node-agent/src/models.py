@@ -61,3 +61,5 @@ class BatchReport(BaseModel):
     connections: list[ConnectionReport] = Field(default_factory=list)
     torrent_events: list[TorrentEvent] = Field(default_factory=list)
     system_metrics: Optional[SystemMetrics] = None
+    # Версия агента — панель сравнивает с эталоном и подсказывает обновление
+    agent_version: Optional[str] = None

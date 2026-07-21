@@ -127,7 +127,7 @@ class BaseHttpClient:
                 last_exc = exc
                 if attempt < max_retries - 1:
                     delay = 0.5 * (2 ** attempt)
-                    logger.warning("⏳ Timeout %s %s (%d/%d), retry in %.1fs", method, path, attempt + 1, max_retries, delay)
+                    logger.debug("⏳ Timeout %s %s (%d/%d), retry in %.1fs", method, path, attempt + 1, max_retries, delay)
                     await asyncio.sleep(delay)
                 else:
                     log_api_error(method, path, exc)
@@ -137,7 +137,7 @@ class BaseHttpClient:
                 last_exc = exc
                 if attempt < max_retries - 1:
                     delay = 0.5 * (2 ** attempt)
-                    logger.warning("⏳ Network error %s %s (%d/%d), retry in %.1fs", method, path, attempt + 1, max_retries, delay)
+                    logger.debug("⏳ Network error %s %s (%d/%d), retry in %.1fs", method, path, attempt + 1, max_retries, delay)
                     await asyncio.sleep(delay)
                 else:
                     log_api_error(method, path, exc)
@@ -153,7 +153,7 @@ class BaseHttpClient:
                 self._client = self._create_client()
                 if attempt < max_retries - 1:
                     delay = 0.5 * (2 ** attempt)
-                    logger.warning("⏳ Client closed %s %s (%d/%d), recreated, retry in %.1fs", method, path, attempt + 1, max_retries, delay)
+                    logger.debug("⏳ Client closed %s %s (%d/%d), recreated, retry in %.1fs", method, path, attempt + 1, max_retries, delay)
                     await asyncio.sleep(delay)
                 else:
                     log_api_error(method, path, exc)

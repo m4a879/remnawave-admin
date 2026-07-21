@@ -72,17 +72,35 @@ class TimewebProvider(DnsProvider):
         return True
 
     async def list_zones(self, creds: Dict[str, str]) -> List[DnsZone]:
-        data = await self._req(creds.get("token"), "GET", "/api/v1/domains?limit=100")
         out: List[DnsZone] = []
-        for d in (data.get("domains") or []):
-            if isinstance(d, dict) and d.get("fqdn"):
-                out.append(DnsZone(id=str(d["fqdn"]), name=str(d["fqdn"])))
+        offset = 0
+        while True:
+            data = await self._req(creds.get("token"), "GET",
+                                   f"/api/v1/domains?limit=100&offset={offset}")
+            page = [d for d in (data.get("domains") or []) if isinstance(d, dict) and d.get("fqdn")]
+            out.extend(DnsZone(id=str(d["fqdn"]), name=str(d["fqdn"])) for d in page)
+            total = (data.get("meta") or {}).get("total")
+            offset += len(page)
+            if not page or not isinstance(total, int) or offset >= total:
+                break
         return out
 
     async def list_records(self, creds: Dict[str, str], zone_id: str) -> List[DnsRecord]:
-        data = await self._req(creds.get("token"), "GET",
-                               f"/api/v1/domains/{zone_id}/dns-records?limit=1000")
-        return [_record(r) for r in (data.get("dns_records") or []) if isinstance(r, dict)]
+        # Timeweb ограничивает limit ≤ 500 (limit=1000 → 400 «limit must not be
+        # greater than 500», и записи «не грузились» вовсе) — берём страницами.
+        out: List[DnsRecord] = []
+        offset = 0
+        while True:
+            data = await self._req(
+                creds.get("token"), "GET",
+                f"/api/v1/domains/{zone_id}/dns-records?limit=500&offset={offset}")
+            page = [r for r in (data.get("dns_records") or []) if isinstance(r, dict)]
+            out.extend(_record(r) for r in page)
+            total = (data.get("meta") or {}).get("total")
+            offset += len(page)
+            if not page or not isinstance(total, int) or offset >= total:
+                break
+        return out
 
     async def create_record(self, creds, zone_id, rec):
         data = await self._req(creds.get("token"), "POST",

@@ -20,7 +20,7 @@ class CloudflareProvider(DnsProvider):
     title = "Cloudflare"
     fields = [
         DnsField("token", "API-токен", type="password",
-                 help="My Profile → API Tokens → права Zone:Read + DNS:Edit."),
+                 help="API Tokens (профиля или аккаунта) → права Zone:Read + DNS:Edit."),
     ]
     record_types = ["A", "AAAA", "CNAME", "TXT", "MX", "NS", "SRV", "CAA"]
     proxyable = ["A", "AAAA", "CNAME"]
@@ -52,12 +52,15 @@ class CloudflareProvider(DnsProvider):
         return data
 
     async def verify(self, creds: Dict[str, str]) -> bool:
+        # Проверяем реальным рабочим вызовом, а не /user/tokens/verify:
+        # тот принимает только User-токены и отвергает Account owned tokens
+        # (Zone Read + DNS Write), хотя для зон/записей они полностью валидны.
+        # Заодно /zones подтверждает, что у токена есть Zone:Read.
         try:
-            data = await self._req(creds.get("token"), "GET", "/user/tokens/verify")
+            await self._req(creds.get("token"), "GET", "/zones?per_page=1")
         except DnsProviderError:
             return False
-        r = data.get("result") if isinstance(data, dict) else None
-        return bool(isinstance(r, dict) and r.get("status") == "active")
+        return True
 
     async def list_zones(self, creds: Dict[str, str]) -> List[DnsZone]:
         data = await self._req(creds.get("token"), "GET", "/zones?per_page=50&order=name")

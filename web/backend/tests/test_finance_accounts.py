@@ -63,6 +63,10 @@ class TestBillmanagerAdapter:
         assert a._endpoint("https://my.waicore.com") == "https://my.waicore.com/billmgr"
         assert a._endpoint("https://my.h2.nexus/billmgr?func=logon") == "https://my.h2.nexus/billmgr"
         assert a._endpoint("https://bill.1cent.host/billmgr/") == "https://bill.1cent.host/billmgr"
+        # serv.host: нестандартный путь /billmgr-api — не доклеиваем /billmgr
+        assert a._endpoint("https://my.serv.host/billmgr-api") == "https://my.serv.host/billmgr-api"
+        # billmgr в ИМЕНИ ХОСТА — это не путь, /billmgr всё равно нужен
+        assert a._endpoint("https://billmgr.example.com") == "https://billmgr.example.com/billmgr"
 
     @pytest.mark.asyncio
     async def test_fetch_falls_back_to_typed_when_unified_missing(self):
@@ -182,6 +186,55 @@ class TestBillmanagerAdapter:
         assert svc.external_id == "42"
         # funcs из меню, недоступные как списки (payment не пробуем — вне секции услуг)
         assert "payment" not in called
+
+    @pytest.mark.asyncio
+    async def test_fetch_menu_discovery_augments_nonempty_typed(self):
+        """Кейс Waicore: vhost отдаёт бесплатный хостинг (typed непустой),
+        а реальные VPS живут в vds.vps — меню должно опрашиваться ВСЕГДА,
+        иначе VPS теряются."""
+        from web.backend.core.finance.adapters.billmanager import BillmanagerAdapter
+
+        called = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            func = request.url.params.get("func")
+            called.append(func)
+            if func == "subaccount":
+                return httpx.Response(200, json={"doc": {"elem": [
+                    {"balance": {"$": "0.02"}, "currency": {"$": "rub"}},
+                ]}})
+            if func == "vhost":
+                return httpx.Response(200, json={"doc": {"elem": [
+                    {"id": {"$": "182426"}, "name": {"$": "Бесплатный #182426"},
+                     "cost": {"$": "0.00"}, "expiredate": {"$": "2026-11-14"},
+                     "status": {"$": "2"}},
+                ]}})
+            if func == "menu":
+                return httpx.Response(200, json={"doc": {"menu": [
+                    {"$name": "mainmenuservice", "node": [
+                        {"$name": "vds", "node": [{"$name": "vds.vps"}]},
+                        {"$name": "vhost"},
+                    ]},
+                ]}})
+            if func == "vds.vps":
+                return httpx.Response(200, json={"doc": {"elem": [
+                    {"id": {"$": "42"}, "name": {"$": "waicore-de-1"},
+                     "cost": {"$": "450.00"}, "expiredate": {"$": "2026-08-20"},
+                     "status": {"$": "2"}},
+                ]}})
+            if func in ("service", "item"):
+                return httpx.Response(200, json={"doc": {"error": {
+                    "$type": "missed", "msg": {"$": f"Не удалось найти функцию '{func}'."},
+                }}})
+            return httpx.Response(200, json={"doc": {"p_cnt": {"$": "0"}}})
+
+        adapter = BillmanagerAdapter()
+        with patch("httpx.AsyncClient", _patched_client(handler)):
+            result = await adapter.fetch("https://my.waicore.net", {"username": "u", "password": "p"})
+
+        assert "menu" in called and "vds.vps" in called
+        names = {s.name for s in result.services}
+        assert names == {"Бесплатный #182426", "waicore-de-1"}
 
     @pytest.mark.asyncio
     async def test_fetch_balance_survives_all_services_missing(self):

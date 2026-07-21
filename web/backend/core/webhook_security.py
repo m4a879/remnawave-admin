@@ -385,7 +385,7 @@ async def _process_retry_batch() -> int:
 
 
 async def _worker_loop() -> None:
-    logger.info("Webhook retry worker started (interval=%ss)", WEBHOOK_RETRY_WORKER_INTERVAL)
+    logger.debug("Webhook retry worker started (interval=%ss)", WEBHOOK_RETRY_WORKER_INTERVAL)
     while not _worker_stop.is_set():
         try:
             await _process_retry_batch()

@@ -206,6 +206,10 @@ def _setup_web_logging():
     # Console: цветной вывод
     console = logging.StreamHandler()
     console.setLevel(console_level)
+    # Пульс коллектора (Batch received/upserted) — только в файлы/UI,
+    # docker-вывод он превращает в стену шума
+    from shared.logger import ConsoleNoiseFilter
+    console.addFilter(ConsoleNoiseFilter())
     console.setFormatter(structlog.stdlib.ProcessorFormatter(
         processors=[
             structlog.stdlib.ProcessorFormatter.remove_processors_meta,
@@ -387,12 +391,6 @@ async def _run_migrations(database_url: str) -> bool:
                 script = ScriptDirectory.from_config(alembic_cfg)
                 heads = set(script.get_heads())
 
-                logger.info(
-                    "DB revision: current=%s, heads=%s",
-                    sorted(current_heads) or "None",
-                    sorted(heads),
-                )
-
                 pending = heads - current_heads
                 # ``unresolvable`` = revisions stamped in alembic_version
                 # that don't exist in our script graph at all — plugin
@@ -412,10 +410,13 @@ async def _run_migrations(database_url: str) -> bool:
                     )
 
                 if not pending:
-                    logger.info("Database schema up to date (no pending)")
+                    logger.info("📊 БД-схема: %s (актуальна)",
+                                ", ".join(sorted(current_heads)) or "пусто")
                     return True
 
-                logger.info("Pending migrations to apply: %s", sorted(pending))
+                logger.info("📊 БД-схема: %s → миграции: %s",
+                            ", ".join(sorted(current_heads)) or "пусто",
+                            ", ".join(sorted(pending)))
 
                 connection = engine.connect()
                 try:
@@ -477,6 +478,31 @@ async def _run_migrations(database_url: str) -> bool:
 # ── FastAPI app ───────────────────────────────────────────────────
 
 _bg_tasks: list[asyncio.Task] = []  # Background tasks to cancel on shutdown
+_bg_names: list[str] = []           # Имена поднятых циклов — для сводки запуска
+
+
+def _bg(name: str, coro) -> None:
+    """Запустить фоновый цикл под надзором.
+
+    Раньше 12 планировщиков стартовали молча (create_task без единого лога),
+    а их тихая смерть оставалась незамеченной. Теперь: имя попадает в сводку
+    запуска, а неожиданное завершение таска логируется ошибкой с трейсом.
+    """
+    task = asyncio.create_task(coro, name=name)
+
+    def _on_done(t: asyncio.Task) -> None:
+        if t.cancelled():
+            return  # штатная остановка на shutdown
+        exc = t.exception()
+        if exc is not None:
+            logger.error("Background loop %r crashed: %s", name, exc,
+                         exc_info=exc)
+        else:
+            logger.warning("Background loop %r exited unexpectedly", name)
+
+    task.add_done_callback(_on_done)
+    _bg_tasks.append(task)
+    _bg_names.append(name)
 
 def _get_app_mode() -> str:
     """Get application mode: 'api', 'collector', or 'full' (default)."""
@@ -503,7 +529,8 @@ async def lifespan(app: FastAPI):
             from shared.database import db_service
             connected = await db_service.connect(database_url=database_url)
             if connected:
-                logger.info("Database connected")
+                # сам факт коннекта логирует db-слой; здесь собираем сводку
+                _svc_names: list[str] = []
 
                 # First-run admin setup
                 # Verify RBAC tables exist
@@ -528,39 +555,42 @@ async def lifespan(app: FastAPI):
                 if app_mode in ("api", "full"):
                     from web.backend.core.automation_engine import engine as automation_engine
                     await automation_engine.start()
+                    _svc_names.append("automation")
 
                     from web.backend.core.alert_engine import alert_engine
                     await alert_engine.start()
+                    _svc_names.append("alerts")
 
                     try:
                         from web.backend.core.mail.mail_service import mail_service
                         await mail_service.start()
+                        _svc_names.append("mail")
                     except Exception as e:
                         logger.warning("Mail service start failed: %s", e)
 
                     from web.backend.api.v2.websocket import dashboard_publisher_loop
-                    _bg_tasks.append(asyncio.create_task(dashboard_publisher_loop()))
+                    _bg("dashboard_publisher", dashboard_publisher_loop())
 
                     from web.backend.core.task_scheduler import task_scheduler_loop
-                    _bg_tasks.append(asyncio.create_task(task_scheduler_loop()))
+                    _bg("task_scheduler", task_scheduler_loop())
 
                     from web.backend.core.backup_service import backup_scheduler_loop
-                    _bg_tasks.append(asyncio.create_task(backup_scheduler_loop()))
+                    _bg("backup_scheduler", backup_scheduler_loop())
 
                     from web.backend.core.bscheck_scheduler import bscheck_scheduler_loop
-                    _bg_tasks.append(asyncio.create_task(bscheck_scheduler_loop()))
+                    _bg("bscheck_scheduler", bscheck_scheduler_loop())
 
                     from web.backend.core.finance.rates import rates_update_loop
-                    _bg_tasks.append(asyncio.create_task(rates_update_loop()))
+                    _bg("finance_rates", rates_update_loop())
 
                     from web.backend.core.finance.reminders import reminders_loop
-                    _bg_tasks.append(asyncio.create_task(reminders_loop()))
+                    _bg("finance_reminders", reminders_loop())
 
                     from web.backend.core.finance.sync import autosync_loop
-                    _bg_tasks.append(asyncio.create_task(autosync_loop()))
+                    _bg("finance_autosync", autosync_loop())
 
                     from web.backend.core.finance.bedolaga_income import deposits_loop
-                    _bg_tasks.append(asyncio.create_task(deposits_loop()))
+                    _bg("bedolaga_deposits", deposits_loop())
 
                 # ── Services for collector and full mode ──
                 if app_mode in ("collector", "full"):
@@ -581,7 +611,7 @@ async def lifespan(app: FastAPI):
                             except Exception as exc:
                                 logger.warning("Baseline refresh failed: %s", exc)
                             await asyncio.sleep(1800)
-                    _bg_tasks.append(asyncio.create_task(_baseline_refresh_loop()))
+                    _bg("baseline_refresh", _baseline_refresh_loop())
 
                     # C3: периодический HWID-скан. Детектор по батчам node-agent проверяет только
                     # юзеров с активными подключениями СЕЙЧАС, поэтому кросс-аккаунт HWID у оффлайн-
@@ -601,7 +631,7 @@ async def lifespan(app: FastAPI):
                                 logger.warning("HWID scan loop failed: %s", exc)
                             interval = int(config_service.get("violations_hwid_scan_interval_minutes", 30) or 30)
                             await asyncio.sleep(max(5, interval) * 60)
-                    _bg_tasks.append(asyncio.create_task(_hwid_scan_loop()))
+                    _bg("hwid_scan", _hwid_scan_loop())
 
                 # ── Services for all modes ──
                 async def _maintenance_loop():
@@ -626,10 +656,11 @@ async def lifespan(app: FastAPI):
                                 logger.info("Retention cleanup: %s violations, %s connections, %s torrent events", v, c, t)
                         except Exception as exc:
                             logger.warning("Retention cleanup failed: %s", exc)
-                _bg_tasks.append(asyncio.create_task(_maintenance_loop()))
+                _bg("table_maintenance", _maintenance_loop())
 
                 # ── Plugins (api and full only) ──
                 if app_mode in ("api", "full"):
+                    installed = []
                     try:
                         from web.backend.core.plugin_installer import scan_and_install_wheels
                         installed = scan_and_install_wheels()
@@ -638,12 +669,16 @@ async def lifespan(app: FastAPI):
                     except Exception:
                         logger.exception("Plugin wheel scan failed")
 
-                    try:
-                        import importlib
-                        importlib.invalidate_caches()
-                        await _run_migrations(database_url)
-                    except Exception:
-                        logger.exception("Plugin migrations replay failed")
+                    # Повторный прогон миграций нужен только когда реально
+                    # ставились plugin-wheels — иначе он лишь дублировал в
+                    # логах весь блок миграций при каждом старте
+                    if installed:
+                        try:
+                            import importlib
+                            importlib.invalidate_caches()
+                            await _run_migrations(database_url)
+                        except Exception:
+                            logger.exception("Plugin migrations replay failed")
 
                     try:
                         from web.backend.core import plugin_licenses
@@ -669,12 +704,14 @@ async def lifespan(app: FastAPI):
                     try:
                         from shared.sync import sync_service
                         await sync_service.start(background=True)
+                        _svc_names.append("sync")
                     except Exception as e:
                         logger.warning("Sync service start failed: %s", e)
 
                     try:
                         from web.backend.core.traffic_rate_monitor import traffic_rate_monitor
                         await traffic_rate_monitor.start()
+                        _svc_names.append("traffic_monitor")
                     except Exception as e:
                         logger.warning("Traffic rate monitor start failed: %s", e)
 
@@ -683,6 +720,7 @@ async def lifespan(app: FastAPI):
                     try:
                         from web.backend.core.online_snapshot_recorder import online_snapshot_recorder
                         await online_snapshot_recorder.start()
+                        _svc_names.append("online_snapshots")
                     except Exception as e:
                         logger.warning("Online snapshot recorder start failed: %s", e)
 
@@ -700,18 +738,22 @@ async def lifespan(app: FastAPI):
                                 logger.warning("Blacklist sync failed: %s", exc)
                             interval_hours = config_service.get("user_blacklist_sync_hours", 6)
                             await asyncio.sleep(int(interval_hours) * 3600)
-                    _bg_tasks.append(asyncio.create_task(_blacklist_sync_loop()))
+                    _bg("blacklist_sync", _blacklist_sync_loop())
 
                 # ── Prometheus gauge updater (all modes) ──
                 try:
                     from web.backend.core.metrics import gauge_updater
                     await gauge_updater.start()
+                    _svc_names.append("prometheus")
                 except Exception as e:
                     logger.warning("Prometheus gauge updater start failed: %s", e)
             else:
                 logger.warning("Database connection failed")
         except Exception as e:
-            logger.error("Database error: %s", e)
+            # Этот catch-all оборачивает старт ВСЕХ сервисов — без трейса
+            # реальная причина сбоя (RBAC/планировщик/плагин…) не видна
+            logger.error("Startup services initialization failed: %s", e,
+                         exc_info=True)
     else:
         logger.info("No DATABASE_URL, running without database")
 
@@ -759,6 +801,32 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning("MaxMind DB download failed: %s", e)
 
+    # ── Сводка запуска: одна рамка вместо россыпи строк ────────────
+    try:
+        try:
+            _version = Path("/app/VERSION").read_text(encoding="utf-8").strip()
+        except OSError:
+            _version = (PROJECT_ROOT / "VERSION").read_text(encoding="utf-8").strip() \
+                if (PROJECT_ROOT / "VERSION").exists() else "unknown"
+        from shared.database import db_service as _dbs
+        from web.backend.core.cache import cache as _cache
+        db_state = "ok" if getattr(_dbs, "is_connected", False) else "OFF"
+        cache_state = "redis" if getattr(_cache, "_using_redis", False) else "memory"
+        logger.info("─" * 62)
+        logger.info("✅ Remnawave Admin v%s — Web API готов (режим: %s)",
+                    _version, mode_label)
+        logger.info("   БД: %s · Кэш: %s · Слушаем: %s:%s",
+                    db_state, cache_state, settings.host, settings.port)
+        _services = locals().get("_svc_names") or []
+        if _services:
+            logger.info("   Сервисы (%d): %s", len(_services), ", ".join(_services))
+        if _bg_names:
+            logger.info("   Фоновые циклы (%d): %s",
+                        len(_bg_names), ", ".join(_bg_names))
+        logger.info("─" * 62)
+    except Exception as e:  # сводка не должна уметь ронять старт
+        logger.debug("Startup summary failed: %s", e)
+
     yield
 
     # Shutdown — cancel background tasks first
@@ -770,6 +838,7 @@ async def lifespan(app: FastAPI):
         except (asyncio.CancelledError, Exception):
             pass
     _bg_tasks.clear()
+    _bg_names.clear()
 
     # Stop webhook retry worker + API key usage buffer
     try:

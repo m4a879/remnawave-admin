@@ -1,6 +1,8 @@
 import asyncio
+import os
 import signal
 import sys
+from pathlib import Path
 
 from aiogram import Bot, Dispatcher
 from aiogram.client.session.aiohttp import AiohttpSession
@@ -75,12 +77,6 @@ async def run_migrations() -> bool:
                 script = ScriptDirectory.from_config(alembic_cfg)
                 heads = set(script.get_heads())
 
-                logger.info(
-                    "📊 DB revision: current=%s, heads=%s",
-                    sorted(current_heads) or "None",
-                    sorted(heads),
-                )
-
                 pending = heads - current_heads
                 # unresolvable — ревизии из alembic_version, которых нет в
                 # нашем графе вообще (плагин-ветки, чей wheel не загружен).
@@ -96,10 +92,13 @@ async def run_migrations() -> bool:
                     )
 
                 if not pending:
-                    logger.info("✅ Database up to date (no pending)")
+                    logger.info("📊 БД-схема: %s (актуальна)",
+                                ", ".join(sorted(current_heads)) or "пусто")
                     return True
 
-                logger.info("🔄 Pending migrations: %s", sorted(pending))
+                logger.info("📊 БД-схема: %s → миграции: %s",
+                            ", ".join(sorted(current_heads)) or "пусто",
+                            ", ".join(sorted(pending)))
 
                 # Одно соединение — используем его и в main.py, и в env.py
                 # (env.py проверяет config.attributes['connection'])
@@ -167,12 +166,11 @@ async def check_api_connection() -> bool:
     delay = 3
 
     api_url = str(settings.api_base_url).rstrip("/")
-    logger.info("🔗 Connecting to API: %s", api_url)
 
     for attempt in range(1, max_attempts + 1):
         try:
             await internal_api_client.get_health()
-            logger.info("✅ API connection OK")
+            logger.debug("API connection OK (%s)", api_url)
             return True
         except Exception as exc:
             logger.warning(
@@ -237,17 +235,9 @@ async def run_webhook_server(bot: Bot, port: int) -> None:
 async def main() -> None:
     settings = get_settings()
 
-    # Конфигурация администраторов
-    if settings.allowed_admins:
-        logger.info("🔐 Admins: %s", settings.allowed_admins)
-    else:
+    # Конфигурация администраторов (штатные значения — в сводке запуска)
+    if not settings.allowed_admins:
         logger.warning("⚠️ No administrators configured! Set ADMINS env var")
-
-    # Уведомления
-    if settings.notifications_chat_id:
-        logger.info("📢 Notifications: chat_id=%s", settings.notifications_chat_id)
-    else:
-        logger.info("📢 Notifications disabled")
 
     # Проверяем подключение к API перед стартом
     if not await check_api_connection():
@@ -261,7 +251,6 @@ async def main() -> None:
     # Подключаемся к базе данных (если настроена)
     db_connected = False
     if settings.database_enabled:
-        logger.info("🗄️ Connecting to PostgreSQL...")
         migrations_ok = await run_migrations()
         if not migrations_ok:
             logger.warning(
@@ -271,8 +260,9 @@ async def main() -> None:
             )
         db_connected = await db_service.connect()
         if db_connected:
-            logger.info("✅ Database connected")
+            # сам факт коннекта логирует db-слой («Database connection established»)
             # VACUUM ANALYZE runs in web-backend only (avoid double maintenance)
+            pass
         else:
             logger.warning("⚠️ Database connection failed, running without cache")
     else:
@@ -299,11 +289,10 @@ async def main() -> None:
     # Запускаем webhook сервер в фоне, если настроен порт
     webhook_task = None
     if settings.webhook_port:
-        logger.info("🌐 Webhook on port %d", settings.webhook_port)
         try:
             webhook_task = asyncio.create_task(run_webhook_server(bot, settings.webhook_port))
         except Exception as exc:
-            logger.error("Failed to start webhook server: %s", exc)
+            logger.error("Failed to start webhook server: %s", exc, exc_info=True)
             webhook_task = None
             # Don't exit the bot if webhook fails - it's optional
 
@@ -318,7 +307,7 @@ async def main() -> None:
     if db_connected:
         config_initialized = await config_service.initialize()
         if config_initialized:
-            logger.info("✅ Dynamic config initialized")
+            # config_service сам логирует «Dynamic config: N settings loaded»
             # Интервал из настройки (как в web-backend), а не хардкод — иначе
             # UI-значение config_auto_reload_interval на бот не влияло.
             reload_interval = int(config_service.get("config_auto_reload_interval", 30) or 30)
@@ -327,12 +316,30 @@ async def main() -> None:
         # sync_service запускается только в web-backend (единый источник синхронизации)
 
         report_scheduler = init_report_scheduler(bot)
-        await report_scheduler.start()
-        logger.info("📊 Report scheduler started")
+        await report_scheduler.start()  # сам логирует «Report scheduler started»
     else:
         report_scheduler = None
 
-    logger.info("🤖 Bot started")
+    # ── Сводка запуска ─────────────────────────────────────────────
+    try:
+        _ver_path = Path("/app/VERSION")
+        if not _ver_path.exists():
+            _ver_path = Path(__file__).resolve().parent.parent / "VERSION"
+        _version = _ver_path.read_text(encoding="utf-8").strip() if _ver_path.exists() else "unknown"
+        api_mode = "proxy (RBAC)" if os.environ.get("INTERNAL_API_SECRET") else "direct (legacy)"
+        logger.info("─" * 62)
+        logger.info("🤖 Remnawave Admin v%s — Bot готов", _version)
+        logger.info("   API: %s · БД: %s · Вебхук: %s",
+                    api_mode,
+                    "ok" if db_connected else "OFF",
+                    f"порт {settings.webhook_port}" if settings.webhook_port else "выкл")
+        logger.info("   Админы: %d · Уведомления: %s · Отчёты: %s",
+                    len(settings.allowed_admins or []),
+                    settings.notifications_chat_id or "выкл",
+                    "вкл" if report_scheduler and report_scheduler.is_running else "выкл")
+        logger.info("─" * 62)
+    except Exception as e:  # сводка не должна уметь ронять старт
+        logger.debug("Startup summary failed: %s", e)
 
     # Graceful shutdown: use an event so SIGTERM/SIGINT stop polling cleanly
     shutdown_event = asyncio.Event()
@@ -345,13 +352,44 @@ async def main() -> None:
     for sig in (signal.SIGTERM, signal.SIGINT):
         loop.add_signal_handler(sig, _signal_handler, sig)
 
+    # Надзор за фоновыми тасками: тихая смерть цикла должна попадать в логи
+    def _watch(name: str, task: asyncio.Task | None) -> None:
+        if task is None:
+            return
+
+        def _on_done(t: asyncio.Task) -> None:
+            if t.cancelled():
+                return
+            exc = t.exception()
+            if exc is not None:
+                logger.error("Background task %r crashed: %s", name, exc, exc_info=exc)
+            else:
+                logger.warning("Background task %r exited unexpectedly", name)
+
+        task.add_done_callback(_on_done)
+
+    _watch("webhook_server", webhook_task)
+    _watch("health_checker", health_checker_task)
+
     # Run polling in a task so we can cancel it on signal
     polling_task = asyncio.create_task(
         dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
     )
 
-    # Wait for shutdown signal
-    await shutdown_event.wait()
+    # Ждём сигнал ИЛИ падение поллинга. Раньше main() ждал только
+    # shutdown_event: упавший polling оставлял бот «живым», но мёртвым —
+    # без единой строки в логах до самого рестарта контейнера.
+    shutdown_wait_task = asyncio.create_task(shutdown_event.wait())
+    done, _pending = await asyncio.wait(
+        {polling_task, shutdown_wait_task}, return_when=asyncio.FIRST_COMPLETED,
+    )
+    if polling_task in done and not shutdown_event.is_set():
+        exc = polling_task.exception() if not polling_task.cancelled() else None
+        if exc is not None:
+            logger.critical("Polling crashed — shutting down: %s", exc, exc_info=exc)
+        else:
+            logger.critical("Polling stopped unexpectedly — shutting down")
+    shutdown_wait_task.cancel()
 
     # Stop polling gracefully
     logger.info("Shutting down...")

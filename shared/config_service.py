@@ -182,6 +182,15 @@ DEFAULT_CONFIG_DEFINITIONS: List[Dict[str, Any]] = [
         "sort_order": 1,
     },
     {
+        "key": "notifications_rich_enabled",
+        "value_type": "bool",
+        "category": "notifications",
+        "display_name": "Rich-оформление уведомлений",
+        "description": "Отправлять Telegram-уведомления «документами» Bot API 10.1: настоящие заголовки, списки, сворачиваемые секции. При отказе Telegram автоматически откатывается на обычный HTML",
+        "default_value": "true",
+        "sort_order": 2,
+    },
+    {
         "key": "notifications_topic_id",
         "value_type": "int",
         "category": "notifications",
@@ -419,6 +428,27 @@ DEFAULT_CONFIG_DEFINITIONS: List[Dict[str, Any]] = [
         "key": "oauth_github_client_secret", "value_type": "string", "category": "general",
         "display_name": "OAuth: GitHub secret (зашифр.)", "description": "Управляется в настройках OAuth",
         "default_value": "", "is_secret": True, "is_readonly": True, "sort_order": 106,
+    },
+    # Generic OIDC (PocketID / Authentik / Keycloak / Zitadel и т.п.)
+    {
+        "key": "oauth_oidc_client_id", "value_type": "string", "category": "general",
+        "display_name": "OAuth: OIDC client_id", "description": "Управляется в настройках OAuth",
+        "default_value": "", "is_readonly": True, "sort_order": 107,
+    },
+    {
+        "key": "oauth_oidc_client_secret", "value_type": "string", "category": "general",
+        "display_name": "OAuth: OIDC secret (зашифр.)", "description": "Управляется в настройках OAuth",
+        "default_value": "", "is_secret": True, "is_readonly": True, "sort_order": 108,
+    },
+    {
+        "key": "oauth_oidc_issuer", "value_type": "string", "category": "general",
+        "display_name": "OAuth: OIDC issuer URL", "description": "Управляется в настройках OAuth",
+        "default_value": "", "is_readonly": True, "sort_order": 109,
+    },
+    {
+        "key": "oauth_oidc_name", "value_type": "string", "category": "general",
+        "display_name": "OAuth: OIDC имя кнопки", "description": "Управляется в настройках OAuth",
+        "default_value": "", "is_readonly": True, "sort_order": 110,
     },
     # === SYNC ===
     {
@@ -1732,7 +1762,7 @@ class DynamicConfigService:
         if self._auto_reload_task is not None:
             return
         self._auto_reload_task = asyncio.create_task(self._auto_reload_loop())
-        logger.info("Config auto-reload started (every %ds)", interval_seconds)
+        logger.debug("Config auto-reload started (every %ds)", interval_seconds)
 
     def stop_auto_reload(self) -> None:
         """Останавливает фоновую задачу перезагрузки конфигурации."""

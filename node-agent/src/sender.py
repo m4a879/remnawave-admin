@@ -61,12 +61,15 @@ class CollectorSender:
         if not connections and not system_metrics and not torrent_events:
             return True
 
+        from .version import AGENT_VERSION
+
         report = BatchReport(
             node_uuid=self.settings.node_uuid,
             timestamp=datetime.now(timezone.utc).replace(tzinfo=None),
             connections=connections,
             torrent_events=torrent_events or [],
             system_metrics=system_metrics,
+            agent_version=AGENT_VERSION,
         )
         payload = report.model_dump(mode="json")
 

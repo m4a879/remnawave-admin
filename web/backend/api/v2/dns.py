@@ -73,6 +73,10 @@ async def list_providers(admin: AdminUser = Depends(require_permission("dns", "v
 async def set_creds(slug: str, data: CredsIn,
                     admin: AdminUser = Depends(require_permission("dns", "edit"))):
     prov = _provider(slug)
+    # Трим значений — токен, вставленный с пробелом/переносом строки,
+    # иначе молча валит verify у любого провайдера
+    data.creds = {k: v.strip() if isinstance(v, str) else v
+                  for k, v in data.creds.items()}
     try:
         prov.validate_creds(data.creds)
     except dnsmod.DnsProviderError as e:

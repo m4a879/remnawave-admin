@@ -1,5 +1,6 @@
 import { useState, useMemo, lazy, Suspense } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { advancedAnalyticsApi } from '@/api/advancedAnalytics'
 import { useTabParam } from '@/lib/useTabParam'
 import { toast } from 'sonner'
 import { useTranslation } from 'react-i18next'
@@ -412,6 +413,27 @@ export default function Fleet() {
     queryFn: fetchFleet,
     refetchInterval: 60_000,
   })
+
+  // История метрик за 24ч — один запрос на всю таблицу (сервер кэширует 5 мин);
+  // раскладываем в per-uuid серии для спарклайнов CPU/RAM/диска.
+  const { data: metricsHistory } = useQuery({
+    queryKey: ['node-metrics-history', '24h'],
+    queryFn: () => advancedAnalyticsApi.nodeMetricsHistory('24h'),
+    staleTime: 300_000,
+    enabled: viewMode === 'table',
+  })
+  const sparkHistory = useMemo(() => {
+    const out: Record<string, { cpu: number[]; memory: number[]; disk: number[] }> = {}
+    for (const point of metricsHistory?.timeseries || []) {
+      for (const [uuid, m] of Object.entries(point.nodes || {})) {
+        const s = (out[uuid] ??= { cpu: [], memory: [], disk: [] })
+        if (m.cpu != null) s.cpu.push(m.cpu)
+        if (m.memory != null) s.memory.push(m.memory)
+        if (m.disk != null) s.disk.push(m.disk)
+      }
+    }
+    return out
+  }, [metricsHistory])
 
   // ── Mutations ─────────────────────────────────────────────────
 
@@ -829,6 +851,7 @@ export default function Fleet() {
               onDisable={(uuid) => disableNode.mutate(uuid)}
               onTerminal={(n) => setTerminalNode({ uuid: n.uuid, name: n.name })}
               isPending={mutationPending}
+              history={sparkHistory}
             />
           ) : (
             <DndContext sensors={dndSensors} collisionDetection={closestCenter} onDragEnd={handleRowDragEnd}>

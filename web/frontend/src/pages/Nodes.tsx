@@ -31,6 +31,7 @@ import {
   Bot,
   BotOff,
   GripVertical,
+  ArrowUp,
   ArrowUpDown,
   RotateCcw,
 } from '@/components/brand/icons'
@@ -107,6 +108,7 @@ interface Node {
   has_agent_token?: boolean
   agent_v2_connected?: boolean
   agent_v2_last_ping?: string | null
+  agent_version?: string | null
   // null/undefined = no access-policy restriction
   allowed_actions?: string[] | null
 }
@@ -632,6 +634,11 @@ function AgentTokenModal({
               )}
             </div>
 
+            {/* Версия агента: что стоит на ноде и надо ли обновлять */}
+            {(node.has_agent_token || node.agent_v2_connected) && (
+              <AgentVersionRow node={node} />
+            )}
+
             {/* Generated token display */}
             {generatedToken && (
               <div className="p-3 bg-primary-500/5 border border-primary-500/20 rounded-lg space-y-3">
@@ -889,24 +896,74 @@ function NodeUsersIpsDialog({ node, open, onClose }: { node: Node; open: boolean
   )
 }
 
+// Строка версии агента в диалоге токена: «что стоит» vs «что актуально».
+// Обновление агента — обычный git pull на ноде (или fleet-скрипт «Обновление
+// агента»), после него версия в панели поднимется сама со следующим батчем.
+function AgentVersionRow({ node }: { node: Node }) {
+  const { t } = useTranslation()
+  const latest = useAgentLatestVersion()
+  const outdated = !!latest && node.agent_version !== latest
+  return (
+    <div className="p-3 bg-[var(--glass-bg)] rounded-lg space-y-1">
+      <div className="flex items-center justify-between">
+        <span className="text-sm text-dark-200">{t('nodes.agent.versionLabel')}</span>
+        <span className={cn('text-sm font-mono', outdated ? 'text-amber-300' : 'text-green-400')}>
+          {node.agent_version || t('nodes.agent.versionUnknownShort')}
+          {latest && !outdated && node.agent_version && ` · ${t('nodes.agent.upToDate')}`}
+        </span>
+      </div>
+      {outdated && (
+        <p className="text-xs text-amber-300/90">
+          {t('nodes.agent.updateHint', { version: latest })}
+        </p>
+      )}
+    </div>
+  )
+}
+
+// Эталонная версия агента с бэка — для бейджа «доступно обновление»
+function useAgentLatestVersion(): string {
+  const { data } = useQuery({
+    queryKey: ['agent-meta'],
+    queryFn: async () => (await client.get('/nodes/agent-meta')).data as { latest_agent_version: string },
+    staleTime: Infinity,
+  })
+  return data?.latest_agent_version || ''
+}
+
 // Compact agent-state badge shown next to status badge on each node card.
 function AgentBadge({ node }: { node: Node }) {
   const { t } = useTranslation()
   const { formatTimeAgo } = useFormatters()
+  const latest = useAgentLatestVersion()
 
   if (node.agent_v2_connected) {
+    // подключён, но версия отстаёт от эталона (или агент её ещё не репортит)
+    const outdated = !!latest && node.agent_version !== latest
+    const versionInfo = node.agent_version
+      ? t('nodes.agent.version', { version: node.agent_version })
+      : t('nodes.agent.versionUnknown')
+    const title = [
+      node.agent_v2_last_ping
+        ? t('nodes.agent.connectedSince', { ago: formatTimeAgo(node.agent_v2_last_ping) })
+        : t('nodes.agent.connected'),
+      versionInfo,
+      outdated ? t('nodes.agent.updateAvailable', { version: latest }) : '',
+    ].filter(Boolean).join(' · ')
     return (
       <Badge
         variant="outline"
-        className="border-emerald-500/40 bg-emerald-500/10 text-emerald-300 gap-1 px-1.5 py-0 text-[10px] h-5"
-        title={
-          node.agent_v2_last_ping
-            ? t('nodes.agent.connectedSince', { ago: formatTimeAgo(node.agent_v2_last_ping) })
-            : t('nodes.agent.connected')
-        }
+        className={cn(
+          'gap-1 px-1.5 py-0 text-[10px] h-5',
+          outdated
+            ? 'border-amber-500/40 bg-amber-500/10 text-amber-300'
+            : 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300',
+        )}
+        title={title}
       >
         <Bot className="w-3 h-3" />
         <span className="hidden sm:inline">{t('nodes.agent.connected')}</span>
+        {outdated && <ArrowUp className="w-3 h-3" aria-label={t('nodes.agent.updateAvailable', { version: latest })} />}
       </Badge>
     )
   }
@@ -1202,9 +1259,11 @@ function NodeSkeleton() {
 
 // ── Sorting presets ─────────────────────────────────────────────
 
-type SortPreset = 'auto' | 'name' | 'users' | 'today' | 'lastSeen' | 'created' | 'custom'
+type SortPreset = 'auto' | 'name' | 'address' | 'users' | 'today' | 'total' | 'lastSeen'
+  | 'created' | 'xray' | 'agent' | 'custom'
 
-const SORT_PRESETS: SortPreset[] = ['auto', 'name', 'users', 'today', 'lastSeen', 'created', 'custom']
+const SORT_PRESETS: SortPreset[] = ['auto', 'name', 'address', 'users', 'today', 'total',
+  'lastSeen', 'created', 'xray', 'agent', 'custom']
 
 interface SortState {
   preset: SortPreset
@@ -1246,14 +1305,25 @@ function autoPriority(n: Node): number {
   return 2
 }
 
+// Статус агента для сортировки: подключён → есть токен, но офлайн → нет агента
+function agentPriority(n: Node): number {
+  if (n.agent_v2_connected) return 0
+  if (n.has_agent_token) return 1
+  return 2
+}
+
 function compareByPreset(preset: SortPreset, a: Node, b: Node): number {
   switch (preset) {
     case 'name':
       return (a.name || '').localeCompare(b.name || '')
+    case 'address':
+      return (a.address || '').localeCompare(b.address || '', undefined, { numeric: true })
     case 'users':
       return (b.users_online || 0) - (a.users_online || 0)
     case 'today':
       return (b.traffic_today_bytes || 0) - (a.traffic_today_bytes || 0)
+    case 'total':
+      return (b.traffic_total_bytes || 0) - (a.traffic_total_bytes || 0)
     case 'lastSeen': {
       const at = a.last_seen_at ? Date.parse(a.last_seen_at) : 0
       const bt = b.last_seen_at ? Date.parse(b.last_seen_at) : 0
@@ -1261,6 +1331,12 @@ function compareByPreset(preset: SortPreset, a: Node, b: Node): number {
     }
     case 'created':
       return Date.parse(b.created_at || '') - Date.parse(a.created_at || '')
+    case 'xray':
+      return (b.xray_version || '').localeCompare(a.xray_version || '', undefined, { numeric: true })
+    case 'agent': {
+      const diff = agentPriority(a) - agentPriority(b)
+      return diff !== 0 ? diff : (a.name || '').localeCompare(b.name || '')
+    }
     case 'auto':
     default: {
       const diff = autoPriority(a) - autoPriority(b)

@@ -39,6 +39,7 @@ ALLOWED_COMMAND_TYPES = {
     "pty_input",
     "pty_resize",
     "service_status",
+    "sync_blocked_ips",
     "ping",
 }
 
@@ -135,6 +136,36 @@ class CommandRunner:
             await self._pty_resize(msg)
         elif msg_type == "service_status":
             await self._service_status(msg)
+        elif msg_type == "sync_blocked_ips":
+            await self._sync_blocked_ips(msg)
+
+    async def _run_shell(self, script: str, timeout: int) -> tuple:
+        """Run a shell script (on the HOST via nsenter when host_mode).
+
+        Returns (output, exit_code); exit_code -1 on timeout.
+        """
+        if self._settings.host_mode:
+            import shlex
+            shell_cmd = (
+                "nsenter --target 1 --mount --uts --ipc --net --pid -- "
+                f"/bin/sh -c {shlex.quote(script)}"
+            )
+        else:
+            shell_cmd = script
+
+        proc = await asyncio.create_subprocess_shell(
+            shell_cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+        )
+        try:
+            stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+            output = stdout.decode("utf-8", errors="replace") if stdout else ""
+            return output, proc.returncode or 0
+        except asyncio.TimeoutError:
+            proc.kill()
+            await proc.wait()
+            return "Command timed out", -1
 
     async def _exec_script(self, msg: dict) -> None:
         """Execute a script on this node."""
@@ -154,38 +185,22 @@ class CommandRunner:
             })
             return
 
-        logger.info("Executing script (cmd_id=%s, timeout=%ds, host_mode=%s)",
-                    command_id, timeout, self._settings.host_mode)
+        # Аудит: фиксируем, ЧТО именно выполняется (первая строка + хэш) —
+        # раньше в логах был только cmd_id, восстановить команду было нельзя
+        import hashlib
+        first_line = next(
+            (ln.strip() for ln in script_content.splitlines()
+             if ln.strip() and not ln.strip().startswith("#")), "")
+        script_hash = hashlib.sha256(script_content.encode()).hexdigest()[:12]
+        logger.info(
+            "Executing script (cmd_id=%s, timeout=%ds, host_mode=%s, "
+            "sha256=%s, %d bytes): %.120s",
+            command_id, timeout, self._settings.host_mode,
+            script_hash, len(script_content), first_line,
+        )
 
         try:
-            if self._settings.host_mode:
-                # Execute on HOST via nsenter (requires pid:host + privileged)
-                import shlex
-                shell_cmd = (
-                    "nsenter --target 1 --mount --uts --ipc --net --pid -- "
-                    f"/bin/sh -c {shlex.quote(script_content)}"
-                )
-            else:
-                shell_cmd = script_content
-
-            proc = await asyncio.create_subprocess_shell(
-                shell_cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.STDOUT,
-            )
-
-            try:
-                stdout, _ = await asyncio.wait_for(
-                    proc.communicate(),
-                    timeout=timeout,
-                )
-                output = stdout.decode("utf-8", errors="replace") if stdout else ""
-                exit_code = proc.returncode or 0
-            except asyncio.TimeoutError:
-                proc.kill()
-                await proc.wait()
-                output = "Command timed out"
-                exit_code = -1
+            output, exit_code = await self._run_shell(script_content, timeout)
 
             await self._send({
                 "type": "command_result",
@@ -204,6 +219,102 @@ class CommandRunner:
                 "output": str(e),
                 "exit_code": -1,
             })
+
+    async def _sync_blocked_ips(self, msg: dict) -> None:
+        """Apply the backend's IP blocklist on this node (ipset or iptables chain).
+
+        Payload: {"ips": ["1.2.3.4/32", ...], "mode": "replace"}.
+        The full list replaces the previous one atomically (ipset swap /
+        chain flush), so an empty list clears all blocks.
+        """
+        import ipaddress
+
+        command_id = msg.get("command_id")
+        raw_ips = msg.get("ips") or []
+
+        # Validate every entry — only clean CIDR strings reach the shell
+        v4, v6, skipped = [], [], 0
+        for item in raw_ips:
+            try:
+                net = ipaddress.ip_network(str(item), strict=False)
+                (v4 if net.version == 4 else v6).append(str(net))
+            except ValueError:
+                skipped += 1
+        if skipped:
+            logger.warning("sync_blocked_ips: skipped %d invalid entries", skipped)
+
+        script = self._build_blocklist_script(v4, v6)
+        output, exit_code = await self._run_shell(script, timeout=120)
+
+        if exit_code == 0:
+            logger.info("Blocklist applied: %d IPv4, %d IPv6", len(v4), len(v6))
+        else:
+            logger.error(
+                "Blocklist apply failed (exit=%d): %.500s", exit_code, output
+            )
+
+        if command_id:
+            await self._send({
+                "type": "command_result",
+                "command_id": command_id,
+                "status": "completed" if exit_code == 0 else "error",
+                "output": output[-10000:],
+                "exit_code": exit_code,
+            })
+
+    @staticmethod
+    def _build_blocklist_script(v4: list, v6: list) -> str:
+        """Build a POSIX script that atomically replaces the node blocklist."""
+        lines = ["set -e"]
+
+        # IPv4: ipset (atomic swap) with plain iptables-chain fallback
+        lines.append("if command -v ipset >/dev/null 2>&1; then")
+        lines.append("  ipset create remnawave-block hash:net -exist")
+        lines.append("  ipset create remnawave-block-tmp hash:net -exist")
+        lines.append("  ipset flush remnawave-block-tmp")
+        for ip in v4:
+            lines.append(f"  ipset add remnawave-block-tmp {ip} -exist")
+        lines.append("  ipset swap remnawave-block-tmp remnawave-block")
+        lines.append("  ipset destroy remnawave-block-tmp")
+        lines.append(
+            "  iptables -C INPUT -m set --match-set remnawave-block src -j DROP 2>/dev/null"
+            " || iptables -I INPUT 1 -m set --match-set remnawave-block src -j DROP"
+        )
+        lines.append(
+            "  iptables -C FORWARD -m set --match-set remnawave-block src -j DROP 2>/dev/null"
+            " || iptables -I FORWARD 1 -m set --match-set remnawave-block src -j DROP"
+        )
+        lines.append("else")
+        lines.append("  iptables -N REMNAWAVE-BLOCK 2>/dev/null || true")
+        lines.append("  iptables -F REMNAWAVE-BLOCK")
+        for ip in v4:
+            lines.append(f"  iptables -A REMNAWAVE-BLOCK -s {ip} -j DROP")
+        lines.append(
+            "  iptables -C INPUT -j REMNAWAVE-BLOCK 2>/dev/null"
+            " || iptables -I INPUT 1 -j REMNAWAVE-BLOCK"
+        )
+        lines.append(
+            "  iptables -C FORWARD -j REMNAWAVE-BLOCK 2>/dev/null"
+            " || iptables -I FORWARD 1 -j REMNAWAVE-BLOCK"
+        )
+        lines.append("fi")
+
+        # IPv6: only when ip6tables is present (skip silently otherwise)
+        lines.append("if command -v ip6tables >/dev/null 2>&1; then")
+        lines.append("  ip6tables -N REMNAWAVE-BLOCK 2>/dev/null || true")
+        lines.append("  ip6tables -F REMNAWAVE-BLOCK")
+        for ip in v6:
+            lines.append(f"  ip6tables -A REMNAWAVE-BLOCK -s {ip} -j DROP")
+        lines.append(
+            "  ip6tables -C INPUT -j REMNAWAVE-BLOCK 2>/dev/null"
+            " || ip6tables -I INPUT 1 -j REMNAWAVE-BLOCK"
+        )
+        lines.append(
+            "  ip6tables -C FORWARD -j REMNAWAVE-BLOCK 2>/dev/null"
+            " || ip6tables -I FORWARD 1 -j REMNAWAVE-BLOCK"
+        )
+        lines.append("fi")
+        return "\n".join(lines)
 
     async def _shell_session(self, msg: dict) -> None:
         """Start or close a shell session."""

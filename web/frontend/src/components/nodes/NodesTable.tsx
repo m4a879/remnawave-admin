@@ -110,6 +110,7 @@ export function NodesTable({
 
   const { rows, sort, toggleSort, filters, setFilter } = useTableControls(nodes, columns, {
     initialSort: { key: 'status', dir: 'asc' },
+    storageKey: 'nodes', // сортировка переживает уход со страницы
   })
 
   const statusOptions = [

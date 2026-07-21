@@ -122,3 +122,28 @@ class TestEnsureNodeSnakeCase:
         node = {"traffic_used_bytes": 100}
         result = _ensure_node_snake_case(node)
         assert result["traffic_total_bytes"] == 100
+
+
+class TestAgentMeta:
+    """GET /api/v2/nodes/agent-meta — статический роут НЕ должен проваливаться
+    в /{node_uuid} (боевой 500: get_node("agent-meta") уходил в Panel API)."""
+
+    @pytest.mark.asyncio
+    async def test_returns_latest_version(self, client):
+        from shared.agent_version import LATEST_AGENT_VERSION
+        resp = await client.get("/api/v2/nodes/agent-meta")
+        assert resp.status_code == 200
+        assert resp.json()["latest_agent_version"] == LATEST_AGENT_VERSION
+
+    @pytest.mark.asyncio
+    async def test_requires_auth(self, anon_client):
+        resp = await anon_client.get("/api/v2/nodes/agent-meta")
+        assert resp.status_code == 401
+
+
+class TestGetNodeInvalidUuid:
+    @pytest.mark.asyncio
+    async def test_non_uuid_is_clean_404(self, client):
+        """Мусор вместо UUID — 404, а не поход в панель и необработанный 500."""
+        resp = await client.get("/api/v2/nodes/definitely-not-a-uuid")
+        assert resp.status_code == 404
