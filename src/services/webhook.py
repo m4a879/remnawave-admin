@@ -243,7 +243,10 @@ async def remnawave_webhook(request: Request):
         try:
             diff_result = await sync_service.handle_webhook_event(event, event_data)
         except Exception as sync_exc:
-            logger.warning("Failed to sync webhook event to database: %s", sync_exc)
+            # рассинхрон локальной БД с панелью — это ошибка, и без трейса
+            # её причину не восстановить
+            logger.error("Failed to sync webhook event %s to database: %s",
+                         event, sync_exc, exc_info=True)
         
         # Обрабатываем события по категориям
         if event.startswith("user."):

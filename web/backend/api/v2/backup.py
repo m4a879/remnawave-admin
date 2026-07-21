@@ -294,6 +294,10 @@ async def restore_db_backup(
     if not database_url:
         raise api_error(500, E.DB_UNAVAILABLE, "DATABASE_URL not configured")
 
+    # Деструктивная операция обязана оставлять след в логах приложения:
+    # раньше и успех, и провал рестора проходили без единой строки.
+    logger.warning("DATABASE RESTORE requested by %s: file=%s",
+                   admin.username, body.filename)
     try:
         # Safety snapshot before the destructive restore (best-effort — a failed
         # snapshot must not block an intentional restore).
@@ -322,10 +326,15 @@ async def restore_db_backup(
             notes="Database restored",
         )
 
+        logger.warning("DATABASE RESTORE completed: file=%s by %s",
+                       body.filename, admin.username)
         return {"status": "ok", "message": "Database restored successfully"}
     except FileNotFoundError:
+        logger.error("DATABASE RESTORE failed: backup file not found: %s", body.filename)
         raise api_error(404, E.BACKUP_NOT_FOUND)
     except RuntimeError as e:
+        logger.error("DATABASE RESTORE failed: file=%s: %s", body.filename, e,
+                     exc_info=True)
         raise api_error(500, E.BACKUP_RESTORE_FAILED, str(e))
 
 

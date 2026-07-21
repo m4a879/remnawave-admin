@@ -56,7 +56,7 @@ async def _alert(node, ip, passed, total, prev):
         from web.backend.core.notification_service import notify_bscheck_drop
         await notify_bscheck_drop(node, ip, passed, total, prev)
     except Exception as e:  # noqa: BLE001
-        logger.debug("bscheck alert: %s", e)
+        logger.warning("BS-Check alert delivery failed: %s", e)
 
 
 async def _run_node(bs, db, job, cfg, budget, spent) -> None:
@@ -187,7 +187,7 @@ async def _run_reputation(bs, db, job, cfg) -> None:
                 rkn = next((r.get("rkn_domain") for r in clean if r.get("blocked")), None)
                 await notify_rkn_blocked(target, rkn)
             except Exception as e:  # noqa: BLE001
-                logger.debug("bscheck rkn alert: %s", e)
+                logger.warning("BS-Check RKN alert delivery failed: %s", e)
         await asyncio.sleep(2.5)   # троттлинг cheburcheck (~30/мин на IP)
 
 

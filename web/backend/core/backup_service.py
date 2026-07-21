@@ -156,7 +156,7 @@ async def export_config() -> dict:
             "backup_type": "config",
         }
     except Exception as e:
-        logger.error("Failed to export config: %s", e)
+        logger.error("Failed to export config: %s", e, exc_info=True)
         raise
 
 
@@ -656,7 +656,7 @@ async def _run_auto_backup_if_due() -> None:
     try:
         result = await create_database_backup(database_url)
     except Exception as exc:
-        logger.error("Scheduled DB backup failed: %s", exc)
+        logger.error("Scheduled DB backup failed: %s", exc, exc_info=True)
         await _notify_backup_failed("Бэкап БД не выполнен", f"Автоматический бэкап БД упал: {exc}")
         return
     logger.info("Scheduled DB backup created: %s (%s bytes)", result["filename"], result["size_bytes"])

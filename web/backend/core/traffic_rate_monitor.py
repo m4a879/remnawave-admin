@@ -75,14 +75,14 @@ class TrafficRateMonitor:
                 if not cfg["enabled"]:
                     continue
 
-                logger.info("Traffic rate check: threshold=%.1f GB, window=%d min, users tracked=%d",
+                logger.debug("Traffic rate check: threshold=%.1f GB, window=%d min, users tracked=%d",
                             cfg["threshold_gb"], cfg["window_minutes"], len(self._snapshots))
                 await self._check_traffic_rates(cfg)
 
             except asyncio.CancelledError:
                 break
             except Exception as e:
-                logger.error("Traffic rate monitor error: %s", e)
+                logger.error("Traffic rate monitor error: %s", e, exc_info=True)
                 await asyncio.sleep(30)
 
     async def _check_traffic_rates(self, cfg: dict):

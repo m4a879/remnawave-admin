@@ -473,7 +473,11 @@ def log_api_call(method: str, endpoint: str, status_code: Optional[int] = None, 
         kwargs["status_code"] = status_code
     if duration_ms is not None:
         kwargs["duration_ms"] = round(duration_ms)
-    log.info("api_call", **kwargs)
+    # GET-поллинги панели — фоновый пульс, мутации важнее и остаются INFO
+    if method.upper() == "GET":
+        log.debug("api_call", **kwargs)
+    else:
+        log.info("api_call", **kwargs)
 
 
 def log_api_error(method: str, endpoint: str, error: Exception, status_code: Optional[int] = None) -> None:

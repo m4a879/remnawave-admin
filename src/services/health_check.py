@@ -132,7 +132,7 @@ class PanelHealthChecker:
                 self.consecutive_failures
             )
         except Exception as exc:
-            logger.error("Failed to send unavailable notification: %s", exc)
+            logger.error("Failed to send unavailable notification: %s", exc, exc_info=True)
     
     async def start(self) -> None:
         """Запускает периодическую проверку панели."""

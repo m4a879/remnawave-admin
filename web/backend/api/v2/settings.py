@@ -291,7 +291,7 @@ async def update_setting(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error("Error updating setting %s: %s", key, e)
+        logger.error("Error updating setting %s: %s", key, e, exc_info=True)
         raise api_error(500, E.INTERNAL_ERROR)
 
 

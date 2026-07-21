@@ -136,7 +136,7 @@ class SyncService:
             except asyncio.CancelledError:
                 break
             except Exception as e:
-                logger.error("Error in periodic sync: %s", e)
+                logger.error("Error in periodic sync: %s", e, exc_info=True)
                 # Continue running, will retry next interval
 
     @staticmethod
@@ -1041,7 +1041,7 @@ class SyncService:
                 status="success",
                 records_synced=total_synced,
             )
-            logger.info("Synced node traffic  records=%-5d  nodes=%d", total_synced, len(active_nodes))
+            logger.debug("Synced node traffic  records=%-5d  nodes=%d", total_synced, len(active_nodes))
             return total_synced
 
         except Exception as e:

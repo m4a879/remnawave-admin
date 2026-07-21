@@ -154,8 +154,19 @@ class CommandRunner:
             })
             return
 
-        logger.info("Executing script (cmd_id=%s, timeout=%ds, host_mode=%s)",
-                    command_id, timeout, self._settings.host_mode)
+        # Аудит: фиксируем, ЧТО именно выполняется (первая строка + хэш) —
+        # раньше в логах был только cmd_id, восстановить команду было нельзя
+        import hashlib
+        first_line = next(
+            (ln.strip() for ln in script_content.splitlines()
+             if ln.strip() and not ln.strip().startswith("#")), "")
+        script_hash = hashlib.sha256(script_content.encode()).hexdigest()[:12]
+        logger.info(
+            "Executing script (cmd_id=%s, timeout=%ds, host_mode=%s, "
+            "sha256=%s, %d bytes): %.120s",
+            command_id, timeout, self._settings.host_mode,
+            script_hash, len(script_content), first_line,
+        )
 
         try:
             if self._settings.host_mode:

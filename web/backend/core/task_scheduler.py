@@ -131,10 +131,10 @@ async def task_scheduler_loop():
                     await _update_task_status(db_service, task_id, status)
 
                 except Exception as e:
-                    logger.error("Error processing scheduled task: %s", e)
+                    logger.error("Error processing scheduled task: %s", e, exc_info=True)
 
         except Exception as e:
-            logger.error("Task scheduler loop error: %s", e)
+            logger.error("Task scheduler loop error: %s", e, exc_info=True)
 
         await asyncio.sleep(60)
 

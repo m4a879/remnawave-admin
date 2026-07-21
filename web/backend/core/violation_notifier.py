@@ -171,7 +171,7 @@ async def send_violation_notification(
         if user_uuid in _violation_notification_cache:
             last = _violation_notification_cache[user_uuid]
             if now - last < timedelta(minutes=cooldown_minutes):
-                logger.info("Violation notification throttled for user %s (cooldown)", user_uuid)
+                logger.debug("Violation notification throttled for user %s (cooldown)", user_uuid)
                 return
 
         # DB check (persistent across restarts)
@@ -179,7 +179,7 @@ async def send_violation_notification(
             from shared.database import db_service
             last_notified = await db_service.get_user_last_violation_notification(user_uuid)
             if last_notified and now - last_notified < timedelta(minutes=cooldown_minutes):
-                logger.info("Violation notification throttled for user %s (DB cooldown)", user_uuid)
+                logger.debug("Violation notification throttled for user %s (DB cooldown)", user_uuid)
                 _violation_notification_cache[user_uuid] = last_notified  # Sync to memory
                 return
         except Exception:
@@ -436,8 +436,10 @@ async def send_violation_notification(
         try:
             from shared.database import db_service
             await db_service.mark_user_violations_notified(user_uuid)
-        except Exception:
-            pass  # In-memory cache is already updated
+        except Exception as e:  # noqa: BLE001
+            # кулдаун переживает рестарт только через БД: молчаливый провал =
+            # дубли уведомлений после перезапуска
+            logger.warning("Failed to persist violation cooldown for %s: %s", user_uuid, e)
 
         logger.info(
             "Violation notification sent: user_uuid=%s score=%.1f ip_count=%d",
@@ -539,8 +541,8 @@ async def send_torrent_notification(
         try:
             from shared.database import db_service
             await db_service.mark_user_violations_notified(user_uuid)
-        except Exception:
-            pass
+        except Exception as e:  # noqa: BLE001
+            logger.warning("Failed to persist torrent cooldown for %s: %s", user_uuid, e)
 
         logger.info("Torrent notification sent: user=%s events=%d", user_uuid, event_count)
 

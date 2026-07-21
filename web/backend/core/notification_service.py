@@ -680,7 +680,7 @@ async def _dispatch_external(
                     topic_id = config.get("topic_id")
                     bot_token_override = config.get("bot_token")
                     if chat_id:
-                        logger.info("Dispatching Telegram to chat_id=%s for admin_id=%s", chat_id, admin_id)
+                        logger.debug("Dispatching Telegram to chat_id=%s for admin_id=%s", chat_id, admin_id)
                         await send_telegram(chat_id, title, body, topic_id, bot_token_override, reply_markup=reply_markup)
                     else:
                         logger.warning("Telegram channel for admin %s has no chat_id in config: %s", admin_id, config)
@@ -688,7 +688,7 @@ async def _dispatch_external(
                 elif ch_type == "webhook":
                     url = config.get("url")
                     if url:
-                        logger.info("Dispatching webhook to %s for admin_id=%s", url[:60], admin_id)
+                        logger.debug("Dispatching webhook to %s for admin_id=%s", url[:60], admin_id)
                         await send_webhook(url, title, body, severity)
                     else:
                         logger.warning("Webhook channel for admin %s has no url in config", admin_id)
@@ -696,7 +696,7 @@ async def _dispatch_external(
                 elif ch_type == "email":
                     email = config.get("email")
                     if email:
-                        logger.info("Dispatching email to %s for admin_id=%s", email, admin_id)
+                        logger.debug("Dispatching email to %s for admin_id=%s", email, admin_id)
                         await send_email(email, title, body, severity, link)
                     else:
                         logger.warning("Email channel for admin %s has no email in config", admin_id)
