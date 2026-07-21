@@ -439,3 +439,27 @@ class TestAgentVersion:
                 "/api/v2/collector/batch", json=batch, headers=AGENT_HEADERS,
             )
         assert resp.status_code == 200  # батч не падает из-за версии
+
+
+class TestConsoleNoiseFilter:
+    """Пульс коллектора глушится на консоли, но не в файлах (их читает UI)."""
+
+    def _rec(self, name, msg):
+        import logging
+        return logging.LogRecord(name, logging.INFO, __file__, 1, msg, None, None)
+
+    def test_batch_lines_muted_on_console(self):
+        from shared.logger import ConsoleNoiseFilter
+        f = ConsoleNoiseFilter()
+        assert f.filter(self._rec("web.backend.api.v2.collector", "Batch received      node=X")) is False
+        assert f.filter(self._rec("web.backend.api.v2.collector", "Batch upserted      node=X")) is False
+
+    def test_other_collector_lines_pass(self):
+        from shared.logger import ConsoleNoiseFilter
+        f = ConsoleNoiseFilter()
+        assert f.filter(self._rec("web.backend.api.v2.collector", "Node UUID mismatch")) is True
+
+    def test_same_prefix_other_logger_passes(self):
+        from shared.logger import ConsoleNoiseFilter
+        f = ConsoleNoiseFilter()
+        assert f.filter(self._rec("some.other.module", "Batch received whatever")) is True

@@ -777,22 +777,23 @@ class SyncService:
         old_db_record = await db_service.get_user_by_uuid(uuid)
         if old_db_record and old_db_record.get("uuid"):
             result["old_data"] = old_db_record
-            logger.debug("Found old user data in DB for diff: %s", uuid)
-        
+
         if event == "user.deleted":
             await db_service.delete_user(uuid)
             logger.debug("Deleted user %s from database (webhook)", uuid)
         else:
             # Upsert new data
             await db_service.upsert_user({"response": event_data})
-            logger.debug("Updated user %s in database (webhook: %s)", uuid, event)
-            
-            # Calculate changes if we have old data
+
+            # Calculate changes if we have old data. Одна сводная строка
+            # вместо простыни (found/updated/по строке на поле/calculated).
             if result["old_data"]:
                 result["changes"] = _compare_user_data(result["old_data"], event_data)
-                logger.debug("Calculated %d changes for user %s", len(result["changes"]), uuid)
+                logger.debug("Webhook %s: user %s, %d change(s)",
+                             event, uuid, len(result["changes"]))
             else:
                 result["is_new"] = True
+                logger.debug("Webhook %s: user %s (new)", event, uuid)
         
         return result
     
@@ -1342,8 +1343,7 @@ def _compare_user_data(old_data: Dict[str, Any], new_data: Dict[str, Any]) -> Li
             old_display = formatter(old_val) if formatter and old_val else (old_val or "—")
             new_display = formatter(new_val) if formatter and new_val else (new_val or "—")
             changes.append(f"• {label}: {old_display} → {new_display}")
-            logger.debug("User diff: %s changed from %r to %r", field, old_val, new_val)
-    
+
     return changes
 
 
