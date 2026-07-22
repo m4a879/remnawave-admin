@@ -113,6 +113,7 @@ async def panel_event(request: Request):
         body = await request.json()
         event = body.get("event", "")
         event_data = body.get("data", {})
+        event_timestamp = body.get("timestamp")
         meta = body.get("meta") or {}
 
         logger.info("Panel event callback: %s", event)
@@ -172,7 +173,12 @@ async def panel_event(request: Request):
             else:
                 node_data = event_data
 
-            await send_node_notification(bot=bot, event=event, node_data=node_data)
+            await send_node_notification(
+                bot=bot,
+                event=event,
+                node_data=node_data,
+                event_timestamp=event_timestamp,
+            )
 
         elif event.startswith("service."):
             from src.utils.notifications import send_service_notification

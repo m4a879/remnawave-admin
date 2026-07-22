@@ -2,8 +2,9 @@
 import asyncio
 import io
 import re
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Optional
+from weakref import WeakValueDictionary
 
 import qrcode
 from aiogram import Bot
@@ -20,14 +21,15 @@ def _strip_html(text: str) -> str:
     return re.sub(r"<[^>]+>", "", text)
 
 
-async def _send_card(bot: Bot, message_kwargs: Dict[str, Any]) -> None:
+async def _send_card(bot: Bot, message_kwargs: Dict[str, Any]) -> bool:
     """Отправить карточку уведомления rich-сообщением (Bot API 10.1).
 
     Первая строка становится настоящим заголовком, поля с отступом — списком.
     При отказе rich-пути (или выключенном тумблере notifications_rich_enabled)
-    внутри send_rich_or_html срабатывает фолбэк на обычный HTML — уведомление
-    доходит в любом случае. aiogram у бота старый (3.12, без Rich-типов),
-    поэтому шлём raw-запросом с токеном бота.
+    внутри send_rich_or_html срабатывает фолбэк на обычный HTML. Возвращаем
+    булев результат Telegram API, чтобы health-вебхук мог запросить retry при
+    недоставке. aiogram у бота старый (3.12, без Rich-типов), поэтому шлём
+    raw-запросом с токеном бота.
     """
     from shared import tg_rich
 
@@ -35,12 +37,14 @@ async def _send_card(bot: Bot, message_kwargs: Dict[str, Any]) -> None:
     if reply_markup is not None and hasattr(reply_markup, "model_dump"):
         reply_markup = reply_markup.model_dump(exclude_none=True, by_alias=True)
 
-    await tg_rich.send_rich_or_html(
-        bot.token,
-        message_kwargs["chat_id"],
-        message_kwargs["text"],
-        message_thread_id=message_kwargs.get("message_thread_id"),
-        reply_markup=reply_markup,
+    return bool(
+        await tg_rich.send_rich_or_html(
+            bot.token,
+            message_kwargs["chat_id"],
+            message_kwargs["text"],
+            message_thread_id=message_kwargs.get("message_thread_id"),
+            reply_markup=reply_markup,
+        )
     )
 
 
@@ -91,6 +95,37 @@ def _push_dispatch(
     except Exception as e:
         # Падать в push не должны — бот шлёт TG в любом случае.
         logger.debug("push dispatch from bot skipped: %s", e)
+
+
+# Remnawave emits these events only on a state transition.  Keep a small
+# per-node delivery ledger as protection against webhook retries and aliases
+# emitted by the local collector (`node.offline`/`node.online`).
+_NODE_HEALTH_STATES = {
+    "node.connection_lost": "offline",
+    "node.connection_restored": "online",
+    "node.offline": "offline",
+    "node.online": "online",
+}
+_NODE_HEALTH_CANONICAL_EVENTS = {
+    "node.offline": "node.connection_lost",
+    "node.online": "node.connection_restored",
+}
+_NODE_HEALTH_DELIVERIES: Dict[str, Dict[str, Any]] = {}
+_NODE_HEALTH_LOCKS: WeakValueDictionary[str, asyncio.Lock] = WeakValueDictionary()
+_NODE_HEALTH_DELIVERY_LIMIT = 10_000
+
+
+def _parse_health_timestamp(value: Any) -> datetime | None:
+    """Normalize an event timestamp for ordering retries and transitions."""
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
 
 
 # Кэш для throttling уведомлений о нарушениях
@@ -435,42 +470,151 @@ async def send_node_notification(
     node_data: dict,
     old_node_data: dict | None = None,
     changes: list | None = None,
+    event_timestamp: str | None = None,
 ) -> None:
-    """Отправляет уведомление о событии с нодой с поддержкой изменений."""
+    """Отправляет событие ноды в общий чат и health-события лично админам."""
     settings = get_settings()
+    health_state = _NODE_HEALTH_STATES.get(event)
+    canonical_event = _NODE_HEALTH_CANONICAL_EVENTS.get(event, event)
 
-    if not settings.notifications_chat_id:
-        logger.debug("Notifications disabled: NOTIFICATIONS_CHAT_ID not set")
+    admin_ids = set(settings.allowed_admins or ())
+    targets: Dict[int, Dict[str, Any]] = {}
+
+    if settings.notifications_chat_id:
+        chat_id = int(settings.notifications_chat_id)
+        targets[chat_id] = {
+            "topic_id": None if chat_id in admin_ids else settings.get_topic_for_nodes(),
+            "is_admin": chat_id in admin_ids,
+        }
+
+    # Падение и восстановление должны разбудить админа даже без общего
+    # NOTIFICATIONS_CHAT_ID. Остальные node.* сохраняют прежнюю маршрутизацию.
+    if health_state is not None:
+        for admin_id in sorted(admin_ids):
+            target = targets.setdefault(int(admin_id), {"topic_id": None, "is_admin": True})
+            target["is_admin"] = True
+
+    if not targets:
+        logger.debug(
+            "Node notification skipped: no recipients event=%s",
+            event,
+        )
         return
 
-    topic_id = settings.get_topic_for_nodes()
+    node_lock = None
+    lock_acquired = False
 
     try:
         node_info = node_data.get("response", node_data) if isinstance(node_data, dict) else node_data
+        node_name = str(node_info.get("name") or "n/a")
+        node_uuid = str(node_info.get("uuid") or "n/a")
+        address = node_info.get("address") or "—"
+        port = node_info.get("port")
+        status_changed_at = node_info.get("lastStatusChange") or node_info.get("last_status_change")
+
+        health_delivery = None
+        pending_targets = targets
+        if health_state is not None and node_uuid != "n/a":
+            node_lock = _NODE_HEALTH_LOCKS.setdefault(node_uuid, asyncio.Lock())
+            await node_lock.acquire()
+            lock_acquired = True
+
+            health_delivery = _NODE_HEALTH_DELIVERIES.get(node_uuid)
+            transition_marker = str(status_changed_at or event_timestamp or "")
+            transition_time = (
+                _parse_health_timestamp(status_changed_at)
+                or _parse_health_timestamp(event_timestamp)
+            )
+
+            is_same_transition = bool(
+                health_delivery
+                and health_delivery.get("state") == health_state
+                and (
+                    not transition_marker
+                    or not health_delivery.get("transition_marker")
+                    or health_delivery.get("transition_marker") == transition_marker
+                )
+            )
+            latest_time = health_delivery.get("transition_time") if health_delivery else None
+            if (
+                health_delivery
+                and not is_same_transition
+                and transition_time is not None
+                and latest_time is not None
+                and transition_time < latest_time
+            ):
+                logger.info(
+                    "Stale node health notification suppressed event=%s node_uuid=%s marker=%s",
+                    canonical_event,
+                    node_uuid,
+                    transition_marker,
+                )
+                return
+
+            is_new_transition = not health_delivery or not is_same_transition
+            if is_new_transition:
+                if len(_NODE_HEALTH_DELIVERIES) >= _NODE_HEALTH_DELIVERY_LIMIT:
+                    _NODE_HEALTH_DELIVERIES.pop(next(iter(_NODE_HEALTH_DELIVERIES)))
+                health_delivery = {
+                    "state": health_state,
+                    "transition_marker": transition_marker,
+                    "transition_time": transition_time,
+                    "delivered": set(),
+                    "push_sent": False,
+                }
+                _NODE_HEALTH_DELIVERIES[node_uuid] = health_delivery
+
+            delivered = health_delivery["delivered"]
+            pending_targets = {
+                chat_id: target
+                for chat_id, target in targets.items()
+                if chat_id not in delivered
+            }
+            if not pending_targets:
+                logger.debug(
+                    "Duplicate node health notification suppressed event=%s node_uuid=%s",
+                    event,
+                    node_uuid,
+                )
+                return
 
         lines = []
 
         # Определяем заголовок по типу события
-        title_key = f"notify.node.title.{event}"
+        title_key = f"notify.node.title.{canonical_event}"
         title_value = tr(title_key)
         if title_value == title_key:
-            title_value = tr("notify.node.fallback", event=event)
+            title_value = tr("notify.node.fallback", event=canonical_event)
         lines.append(title_value)
         lines.append("")
 
         # Информация о ноде
-        node_name = node_info.get("name", "n/a")
-        node_uuid = node_info.get("uuid", "n/a")
-        address = node_info.get("address", "—")
-        port = node_info.get("port", "—")
         country = node_info.get("countryCode", "—")
-        status = node_info.get("status", "—")
+        status = node_info.get("status")
 
-        lines.append(f"🖥 <b>{_esc(node_name)}</b>  <code>{node_uuid[:8]}</code>")
-        addr_str = f"{_esc(str(address))}:{port}" if port != "—" else _esc(str(address))
-        lines.append(f"   {tr('notify.node.label.address')}: <code>{addr_str}</code>  {country if country != '—' else ''}")
-        if status != "—":
-            lines.append(f"   📊 {tr('notify.node.label.status')}: <code>{status}</code>")
+        lines.append(f"🖥 <b>{_esc(node_name)}</b>  <code>{_esc(node_uuid[:8])}</code>")
+        addr_str = (
+            f"{_esc(str(address))}:{_esc(str(port))}"
+            if port not in (None, "", "—")
+            else _esc(str(address))
+        )
+        country_display = _esc(country) if country not in (None, "—") else ""
+        lines.append(f"   {tr('notify.node.label.address')}: <code>{addr_str}</code>  {country_display}")
+        if health_state is not None:
+            connection_key = f"notify.node.connection.{health_state}"
+            lines.append(f"   📊 {tr('notify.node.label.status')}: <b>{tr(connection_key)}</b>")
+        elif status:
+            lines.append(f"   📊 {tr('notify.node.label.status')}: <code>{_esc(status)}</code>")
+
+        if health_state is not None:
+            reason = node_info.get("lastStatusMessage") or node_info.get("last_status_message")
+            if reason:
+                lines.append(f"   ⚠️ {tr('notify.node.label.reason')}: <code>{_esc(reason)}</code>")
+            if status_changed_at:
+                lines.append(
+                    f"   🕒 {tr('notify.node.label.last_status_change')}: "
+                    f"<code>{_esc(format_datetime(status_changed_at))}</code>"
+                )
 
         # Трафик (если есть)
         traffic_limit = node_info.get("trafficLimitBytes")
@@ -486,38 +630,87 @@ async def send_node_notification(
 
         text = "\n".join(lines)
 
-        message_kwargs = {
-            "chat_id": settings.notifications_chat_id,
-            "text": text,
-            "parse_mode": "HTML",
-        }
+        async def deliver_target(chat_id: int, target: Dict[str, Any]) -> tuple[int, bool]:
+            message_kwargs = {
+                "chat_id": chat_id,
+                "text": text,
+                "parse_mode": "HTML",
+            }
+            if target["topic_id"] is not None:
+                message_kwargs["message_thread_id"] = target["topic_id"]
 
-        if topic_id is not None:
-            message_kwargs["message_thread_id"] = topic_id
+            try:
+                delivered = await _send_card(bot, message_kwargs)
+                if not delivered:
+                    raise RuntimeError("Telegram API rejected the message")
+                if health_delivery is not None:
+                    health_delivery["delivered"].add(chat_id)
+                logger.info(
+                    "Node notification sent event=%s node_uuid=%s chat_id=%s topic_id=%s",
+                    canonical_event,
+                    node_uuid,
+                    chat_id,
+                    target["topic_id"],
+                )
+                return chat_id, True
+            except Exception as send_exc:
+                logger.error(
+                    "Node notification delivery failed event=%s node_uuid=%s chat_id=%s: %s",
+                    canonical_event,
+                    node_uuid,
+                    chat_id,
+                    send_exc,
+                )
+                return chat_id, False
 
-        await _send_card(bot, message_kwargs)
-        logger.info("Node notification sent successfully event=%s node_uuid=%s topic_id=%s", event, node_uuid, topic_id)
+        delivery_results = await asyncio.gather(
+            *(deliver_target(chat_id, target) for chat_id, target in pending_targets.items())
+        )
+        failed_target_ids = [
+            chat_id
+            for chat_id, delivered in delivery_results
+            if not delivered
+        ]
 
         # FCM push: критичные события про ноды отправляем как category=alerts,
         # обычные изменения — как info. node.connection_lost = 🔴 → severity critical.
-        critical_events = {"node.connection_lost", "node.disabled", "node.deleted"}
-        push_severity = "critical" if event in critical_events else "info"
-        push_type = "alert" if event in critical_events else "info"
-        push_title = tr(title_key)
-        if push_title == title_key:
-            push_title = tr("notify.push.node_fallback")
-        _push_dispatch(
-            title=push_title,
-            body=f"{node_name} ({address})",
-            notification_type=push_type,
-            source="panel.webhook",
-            source_id=node_uuid,
-            severity=push_severity,
-            event=event,
-        )
+        should_push = health_delivery is None or not health_delivery["push_sent"]
+        if should_push:
+            critical_events = {"node.connection_lost", "node.disabled", "node.deleted"}
+            push_severity = "critical" if canonical_event in critical_events else "info"
+            push_type = "alert" if canonical_event in critical_events else "info"
+            push_title = tr(title_key)
+            if push_title == title_key:
+                push_title = tr("notify.push.node_fallback")
+            _push_dispatch(
+                title=push_title,
+                body=f"{node_name} ({address})",
+                notification_type=push_type,
+                source="panel.webhook",
+                source_id=node_uuid,
+                severity=push_severity,
+                event=canonical_event,
+            )
+            if health_delivery is not None:
+                health_delivery["push_sent"] = True
+
+        if canonical_event == "node.deleted" and node_uuid != "n/a":
+            _NODE_HEALTH_DELIVERIES.pop(node_uuid, None)
+
+        # Возвращаем 5xx принимающему webhook, если хотя бы одна health-доставка
+        # не удалась. Уже доставленные ID запомнены и при retry не дублируются.
+        if health_state is not None and failed_target_ids:
+            raise RuntimeError(
+                f"Failed to notify Telegram chats: {', '.join(map(str, failed_target_ids))}"
+            )
 
     except Exception as exc:
         logger.exception("Failed to send node notification event=%s error=%s", event, exc)
+        if health_state is not None:
+            raise
+    finally:
+        if lock_acquired and node_lock is not None:
+            node_lock.release()
 
 
 async def send_service_notification(

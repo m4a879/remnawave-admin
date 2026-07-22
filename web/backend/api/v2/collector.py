@@ -79,6 +79,15 @@ _stats = {
     "worker_started_at": None,   # When worker was last started
 }
 
+
+def _bot_callback_timeout_seconds() -> float:
+    """Allow enough time for rich Telegram delivery and its HTML fallback."""
+    try:
+        return max(5.0, float(os.environ.get("BOT_CALLBACK_TIMEOUT_SEC", "40")))
+    except (TypeError, ValueError):
+        return 40.0
+
+
 async def _violation_worker():
     """Single long-lived worker that drains _pending_violation_users in chunks."""
     import time
@@ -1242,13 +1251,14 @@ async def collector_webhook(request: Request):
     except Exception as e:
         logger.warning("Webhook sync failed for %s: %s", event, e)
 
-    # 2. Forward to bot for Telegram notifications (fire-and-forget)
+    # 2. Forward to bot for Telegram notifications. A forwarding failure must
+    # reach Remnawave as 502 so its webhook retry policy can redeliver it.
     # Uses INTERNAL_API_SECRET instead of X-Remnawave-Signature
     bot_callback_url = os.environ.get("BOT_CALLBACK_URL", "http://bot:8080/internal/panel-event")
     internal_secret = os.environ.get("INTERNAL_API_SECRET", "")
     if internal_secret:
         try:
-            async with httpx.AsyncClient(timeout=5) as client:
+            async with httpx.AsyncClient(timeout=_bot_callback_timeout_seconds()) as client:
                 resp = await client.post(
                     bot_callback_url,
                     content=body,
@@ -1259,8 +1269,12 @@ async def collector_webhook(request: Request):
                 )
                 if resp.status_code != 200:
                     logger.warning("Bot callback forward failed: %d", resp.status_code)
+                    raise HTTPException(status_code=502, detail="Bot callback rejected webhook")
+        except HTTPException:
+            raise
         except Exception as e:
             logger.warning("Bot callback forward error: %s", e)
+            raise HTTPException(status_code=502, detail="Bot callback unavailable")
     else:
         # Fallback: forward raw webhook to legacy bot webhook (deprecated)
         logger.warning(
@@ -1272,7 +1286,7 @@ async def collector_webhook(request: Request):
         )
         bot_webhook_url = os.environ.get("BOT_WEBHOOK_URL", "http://bot:8080/webhook")
         try:
-            async with httpx.AsyncClient(timeout=5) as client:
+            async with httpx.AsyncClient(timeout=_bot_callback_timeout_seconds()) as client:
                 resp = await client.post(
                     bot_webhook_url,
                     content=body,
@@ -1283,7 +1297,11 @@ async def collector_webhook(request: Request):
                 )
                 if resp.status_code != 200:
                     logger.warning("Bot webhook forward failed: %d", resp.status_code)
+                    raise HTTPException(status_code=502, detail="Bot webhook rejected event")
+        except HTTPException:
+            raise
         except Exception as e:
             logger.warning("Bot webhook forward error: %s", e)
+            raise HTTPException(status_code=502, detail="Bot webhook unavailable")
 
     return JSONResponse(status_code=200, content={"status": "ok", "event": event})

@@ -272,17 +272,35 @@ class TestPanelEvent:
     async def test_node_event(self, set_secret):
         from src.services.bot_callbacks import panel_event
         bot = AsyncMock()
+        event_timestamp = "2026-07-22T10:15:29Z"
         req = MagicMock()
         req.app.state.bot = bot
         req.headers.get.return_value = "test-secret-123"
         req.json = AsyncMock(return_value={
             "event": "node.created",
             "data": {"uuid": "node-1", "name": "Node1"},
+            "timestamp": event_timestamp,
         })
         with patch("src.utils.notifications.send_node_notification", new=AsyncMock()) as mock_notif:
             resp = await panel_event(req)
         assert resp.status_code == 200
         mock_notif.assert_called_once()
+        assert mock_notif.call_args.kwargs["event_timestamp"] == event_timestamp
+
+    @pytest.mark.asyncio
+    async def test_internal_panel_event_is_allowed_by_webhook_middleware(self):
+        from src.services.webhook import catch_invalid_requests
+
+        request = MagicMock()
+        request.method = "POST"
+        request.url.path = "/internal/panel-event"
+        expected = MagicMock()
+        call_next = AsyncMock(return_value=expected)
+
+        response = await catch_invalid_requests(request, call_next)
+
+        assert response is expected
+        call_next.assert_awaited_once_with(request)
 
     async def test_service_event(self, set_secret):
         from src.services.bot_callbacks import panel_event

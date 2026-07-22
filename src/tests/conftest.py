@@ -9,6 +9,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 os.environ.setdefault("BOT_TOKEN", "123456:TEST-FAKE-TOKEN")
 os.environ.setdefault("API_BASE_URL", "http://localhost:3000")
+os.environ.setdefault("API_TOKEN", "test-api-token")
 
 # Mock aiogram before any test module imports it
 aiogram_mock = unittest.mock.MagicMock()

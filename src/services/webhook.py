@@ -26,6 +26,16 @@ from src.utils.notifications import (
 )
 app = FastAPI(title="Remnawave Admin Webhook")
 
+_ALLOWED_PATHS = {
+    "/",
+    "/webhook",
+    "/webhook/health",
+    "/webhook/test",
+    "/internal/telegram-send",
+    "/internal/panel-event",
+    "/internal/health",
+}
+
 # One-time warning about missing webhook secret
 _settings = get_settings()
 if not _settings.webhook_secret:
@@ -47,12 +57,8 @@ async def catch_invalid_requests(request: Request, call_next):
             # Некорректный метод - возвращаем 405 без логирования
             return JSONResponse(status_code=405, content={"error": "Method not allowed"})
         
-        # Проверяем путь - если это не наш endpoint, возвращаем 404 без логирования
-        if request.url.path not in ["/webhook", "/webhook/health", "/webhook/test", "/"]:
-            # Для корневого пути возвращаем простой ответ
-            if request.url.path == "/":
-                return JSONResponse(status_code=200, content={"service": "remnawave-admin-webhook", "status": "ok"})
-            # Для других путей - 404 без логирования
+        # Callback-маршруты подключаются к этому же приложению в main.py.
+        if request.url.path not in _ALLOWED_PATHS:
             return JSONResponse(status_code=404, content={"error": "Not found"})
         
         # Продолжаем обработку валидного запроса
@@ -252,7 +258,13 @@ async def remnawave_webhook(request: Request):
         if event.startswith("user."):
             await _handle_user_event(bot, event, event_data, diff_result, meta)
         elif event.startswith("node."):
-            await _handle_node_event(bot, event, event_data, diff_result)
+            await _handle_node_event(
+                bot,
+                event,
+                event_data,
+                diff_result,
+                event_timestamp=timestamp,
+            )
         elif event.startswith("service."):
             await _handle_service_event(bot, event, event_data)
         elif event.startswith("user_hwid_devices."):
@@ -378,7 +390,13 @@ async def _handle_user_event(bot: Bot, event: str, event_data: dict, diff_result
     )
 
 
-async def _handle_node_event(bot: Bot, event: str, event_data: dict, diff_result: dict = None) -> None:
+async def _handle_node_event(
+    bot: Bot,
+    event: str,
+    event_data: dict,
+    diff_result: dict = None,
+    event_timestamp: str | None = None,
+) -> None:
     """Обрабатывает события нод с поддержкой diff."""
     # Нормализуем структуру данных
     if "response" not in event_data:
@@ -401,6 +419,7 @@ async def _handle_node_event(bot: Bot, event: str, event_data: dict, diff_result
         node_data=node_data,
         old_node_data=old_node_data,
         changes=changes,
+        event_timestamp=event_timestamp,
     )
 
 

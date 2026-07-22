@@ -344,6 +344,61 @@ class TestCollectorHealth:
         assert resp.json()["status"] == "degraded"
 
 
+class TestCollectorWebhookForwarding:
+    """Remnawave must retry when the bot callback did not accept an event."""
+
+    @staticmethod
+    def _http_client(status_code: int):
+        client = AsyncMock()
+        client.post = AsyncMock(return_value=MagicMock(status_code=status_code))
+        context = MagicMock()
+        context.__aenter__ = AsyncMock(return_value=client)
+        context.__aexit__ = AsyncMock(return_value=False)
+        return context
+
+    @pytest.mark.asyncio
+    async def test_bot_callback_failure_returns_502(self, anon_client, monkeypatch):
+        monkeypatch.setenv("WEBHOOK_SECRET", "webhook-secret")
+        monkeypatch.setenv("INTERNAL_API_SECRET", "internal-secret")
+
+        with patch.object(
+            collector.httpx,
+            "AsyncClient",
+            return_value=self._http_client(500),
+        ), patch("shared.sync.sync_service.handle_webhook_event", new=AsyncMock()):
+            response = await anon_client.post(
+                "/api/v2/collector/webhook",
+                json={
+                    "event": "node.connection_lost",
+                    "data": {"uuid": NODE_UUID, "name": "test-node"},
+                },
+                headers={"X-Remnawave-Signature": "webhook-secret"},
+            )
+
+        assert response.status_code == 502
+
+    @pytest.mark.asyncio
+    async def test_bot_callback_success_acknowledges_webhook(self, anon_client, monkeypatch):
+        monkeypatch.setenv("WEBHOOK_SECRET", "webhook-secret")
+        monkeypatch.setenv("INTERNAL_API_SECRET", "internal-secret")
+
+        with patch.object(
+            collector.httpx,
+            "AsyncClient",
+            return_value=self._http_client(200),
+        ), patch("shared.sync.sync_service.handle_webhook_event", new=AsyncMock()):
+            response = await anon_client.post(
+                "/api/v2/collector/webhook",
+                json={
+                    "event": "node.connection_restored",
+                    "data": {"uuid": NODE_UUID, "name": "test-node"},
+                },
+                headers={"X-Remnawave-Signature": "webhook-secret"},
+            )
+
+        assert response.status_code == 200
+
+
 class TestCollectorStats:
     """GET /api/v2/collector/stats — только для админов (JWT)."""
 

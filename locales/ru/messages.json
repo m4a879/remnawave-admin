@@ -1089,8 +1089,14 @@
       "label": {
         "address": "Адрес",
         "status": "Статус",
+        "reason": "Причина",
+        "last_status_change": "Изменение статуса",
         "traffic_limit": "Лимит трафика",
         "changes": "📋 <b>Изменения</b>"
+      },
+      "connection": {
+        "offline": "OFFLINE",
+        "online": "ONLINE"
       }
     },
     "service": {
