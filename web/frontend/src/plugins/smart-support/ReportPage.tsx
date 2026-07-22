@@ -734,7 +734,7 @@ function fmtDate(value: string | null | undefined): string {
 function fmtBytes(value: number | null | undefined): string {
   if (value == null) return '—'
   if (value === 0) return '0 B'
-  const units = ['B', 'KB', 'MB', 'GB', 'TB']
+  const units = ['B', 'KB', 'MB', 'GB', 'TB', 'PB']
   let v = value
   let i = 0
   while (v >= 1024 && i < units.length - 1) {

@@ -76,10 +76,12 @@
       "mb": "МБ",
       "gb": "ГБ",
       "tb": "ТБ",
+      "pb": "ПБ",
       "kb_short": "К",
       "mb_short": "М",
       "gb_short": "Г",
-      "tb_short": "Т"
+      "tb_short": "Т",
+      "pb_short": "П"
     },
     "speed": {
       "bps": "б/с",

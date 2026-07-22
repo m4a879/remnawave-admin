@@ -76,10 +76,12 @@
       "mb": "MB",
       "gb": "GB",
       "tb": "TB",
+      "pb": "PB",
       "kb_short": "K",
       "mb_short": "M",
       "gb_short": "G",
-      "tb_short": "T"
+      "tb_short": "T",
+      "pb_short": "P"
     },
     "speed": {
       "bps": "bps",

@@ -285,9 +285,8 @@ function createFormatBytes(t: (key: string) => string) {
     const sign = bytes < 0 ? '-' : ''
     const abs = Math.abs(bytes)
     const k = 1024
-    const sizes = [t('common.bytes.b'), t('common.bytes.kb'), t('common.bytes.mb'), t('common.bytes.gb'), t('common.bytes.tb')]
-    const i = Math.floor(Math.log(abs) / Math.log(k))
-    if (i < 0 || i >= sizes.length) return `0 ${t('common.bytes.b')}`
+    const sizes = [t('common.bytes.b'), t('common.bytes.kb'), t('common.bytes.mb'), t('common.bytes.gb'), t('common.bytes.tb'), t('common.bytes.pb')]
+    const i = Math.min(Math.max(Math.floor(Math.log(abs) / Math.log(k)), 0), sizes.length - 1)
     return sign + parseFloat((abs / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i]
   }
 }
@@ -298,9 +297,8 @@ function createFormatBytesShort(t: (key: string) => string) {
     const sign = bytes < 0 ? '-' : ''
     const abs = Math.abs(bytes)
     const k = 1024
-    const sizes = [t('common.bytes.b'), t('common.bytes.kb_short'), t('common.bytes.mb_short'), t('common.bytes.gb_short'), t('common.bytes.tb_short')]
-    const i = Math.floor(Math.log(abs) / Math.log(k))
-    if (i < 0 || i >= sizes.length) return '0'
+    const sizes = [t('common.bytes.b'), t('common.bytes.kb_short'), t('common.bytes.mb_short'), t('common.bytes.gb_short'), t('common.bytes.tb_short'), t('common.bytes.pb_short')]
+    const i = Math.min(Math.max(Math.floor(Math.log(abs) / Math.log(k)), 0), sizes.length - 1)
     return sign + parseFloat((abs / Math.pow(k, i)).toFixed(1)) + sizes[i]
   }
 }
