@@ -281,10 +281,30 @@ panel_db_pool_used / panel_db_pool_size > 0.8
 
 Смотреть: **Prometheus UI → Alerts** (`http://server:9090/alerts`).
 
-Доставка уведомлений (Telegram / Slack / email) — через внешний
-Alertmanager или Grafana Alerting; правила совместимы с обоими. Пороги
-консервативные — правь `monitoring/alerts.yml` под свой SLO, Prometheus
-перечитает их при рестарте контейнера:
+Доступность ноды определяется именно метрикой
+`panel_node_connected{node="..."}`. Правило `NodeOffline` срабатывает, когда
+значение остаётся `0` пять минут, и закрывается после возврата к `1`.
+
+Для личных Telegram-уведомлений всем ID из `ADMINS` направь firing/resolved
+события `NodeOffline` из внешнего Alertmanager в бот. Укажи в `.env`:
+
+```env
+PROMETHEUS_WEBHOOK_SECRET=случайный_секрет
+```
+
+Возьми [`monitoring/alertmanager.yml.example`](../monitoring/alertmanager.yml.example),
+замени `CHANGE_ME` тем же секретом и подключи Alertmanager к Prometheus. Receiver
+отправляет события на `POST /internal/prometheus-alert` с Bearer-авторизацией;
+`send_resolved: true` включает уведомления о восстановлении. Если Alertmanager
+работает вне docker network, замени `http://bot:8080` на доступный URL бота.
+
+Прямые `node.connection_lost`/`node.connection_restored` webhooks Remnawave
+поддерживаются как резервный канал. Основной источник health-состояния — метрика
+и правило `NodeOffline`.
+
+Остальная доставка (Slack / email) также настраивается во внешнем Alertmanager
+или Grafana Alerting. Пороги консервативные — правь `monitoring/alerts.yml` под
+свой SLO, Prometheus перечитает их при рестарте контейнера:
 
 ```bash
 docker compose --profile monitoring restart prometheus

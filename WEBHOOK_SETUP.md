@@ -8,6 +8,14 @@
 2. **Админский бот** принимает webhook и отправляет уведомление в Telegram топик
 3. В уведомлении отображаются все изменения подписки (дата истечения, количество устройств, лимит трафика и т.д.)
 
+Падение нод отслеживается отдельно по Prometheus-метрике
+`panel_node_connected{node="..."}`. Правило `NodeOffline` из
+`monitoring/alerts.yml` ждёт пять минут, после чего внешний Alertmanager вызывает
+`POST /internal/prometheus-alert`. Бот отправляет firing и resolved лично всем
+администраторам из `ADMINS`. Пример receiver находится в
+`monitoring/alertmanager.yml.example`; его Bearer credentials должны совпадать с
+`PROMETHEUS_WEBHOOK_SECRET` в `.env`. Оставьте `send_resolved: true`.
+
 ## Настройка
 
 ### 1. Настройка админского бота
@@ -21,6 +29,9 @@ WEBHOOK_PORT=8080
 # Секретный ключ для проверки подписи webhook (рекомендуется минимум 32 символа)
 # Сгенерируйте ключ командой: openssl rand -hex 64
 WEBHOOK_SECRET=ваш_секретный_ключ_минимум_32_символа
+
+# Секрет для Alertmanager webhook с NodeOffline firing/resolved
+PROMETHEUS_WEBHOOK_SECRET=отдельный_случайный_секрет
 ```
 
 ### 2. Настройка панели Remnawave

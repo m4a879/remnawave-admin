@@ -33,6 +33,7 @@ _ALLOWED_PATHS = {
     "/webhook/test",
     "/internal/telegram-send",
     "/internal/panel-event",
+    "/internal/prometheus-alert",
     "/internal/health",
 }
 

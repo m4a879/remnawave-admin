@@ -32,6 +32,26 @@ def _verify_internal_secret(request: Request) -> bool:
     return True
 
 
+def _verify_prometheus_secret(request: Request) -> bool:
+    """Verify the Alertmanager bearer token."""
+    expected = os.environ.get("PROMETHEUS_WEBHOOK_SECRET", "")
+    if not expected:
+        logger.error("PROMETHEUS_WEBHOOK_SECRET not set, rejecting alert")
+        return False
+
+    authorization = request.headers.get("Authorization", "")
+    scheme, separator, received = authorization.partition(" ")
+    if (
+        not separator
+        or scheme.lower() != "bearer"
+        or not received
+        or not secrets.compare_digest(received, expected)
+    ):
+        logger.warning("Invalid PROMETHEUS_WEBHOOK_SECRET in alert callback")
+        return False
+    return True
+
+
 @app.post("/internal/telegram-send")
 async def telegram_send(request: Request):
     """Send a Telegram notification via the bot instance.
@@ -216,6 +236,84 @@ async def panel_event(request: Request):
     except Exception as exc:
         logger.exception("Error processing panel event: %s", exc)
         raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.post("/internal/prometheus-alert")
+async def prometheus_alert(request: Request):
+    """Translate Alertmanager NodeOffline transitions into Telegram alerts."""
+    if not _verify_prometheus_secret(request):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    bot: Optional[Bot] = request.app.state.bot
+    if not bot:
+        raise HTTPException(status_code=500, detail="Bot instance not available")
+
+    try:
+        body = await request.json()
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="Invalid JSON payload") from exc
+
+    alerts = body.get("alerts") if isinstance(body, dict) else None
+    if not isinstance(alerts, list):
+        raise HTTPException(status_code=400, detail="alerts must be a list")
+
+    from src.utils.notifications import send_node_notification
+
+    processed = 0
+    failures = []
+    for index, alert in enumerate(alerts):
+        if not isinstance(alert, dict):
+            continue
+
+        labels = alert.get("labels") or {}
+        if not isinstance(labels, dict) or labels.get("alertname") != "NodeOffline":
+            continue
+
+        status = str(alert.get("status") or body.get("status") or "").lower()
+        if status not in {"firing", "resolved"}:
+            logger.warning("NodeOffline alert has unsupported status=%r", status)
+            continue
+
+        node_name = labels.get("node")
+        if not node_name:
+            failures.append({"index": index, "error": "missing labels.node"})
+            continue
+
+        annotations = alert.get("annotations") or {}
+        if not isinstance(annotations, dict):
+            annotations = {}
+        node_uuid = labels.get("uuid") or alert.get("fingerprint") or node_name
+        transition_time = alert.get("startsAt") if status == "firing" else alert.get("endsAt")
+        node_info = {
+            "uuid": str(node_uuid),
+            "name": str(node_name),
+            "lastStatusChange": transition_time,
+        }
+        if status == "firing" and annotations.get("description"):
+            node_info["lastStatusMessage"] = str(annotations["description"])
+
+        try:
+            await send_node_notification(
+                bot=bot,
+                event="node.offline" if status == "firing" else "node.online",
+                node_data={"response": node_info},
+                event_timestamp=transition_time,
+            )
+            processed += 1
+        except Exception as exc:
+            logger.exception(
+                "Failed to process NodeOffline alert node=%s status=%s",
+                node_name,
+                status,
+            )
+            failures.append({"index": index, "node": str(node_name), "error": str(exc)})
+
+    if failures:
+        return JSONResponse(
+            status_code=502,
+            content={"status": "partial_failure", "processed": processed, "failures": failures},
+        )
+    return JSONResponse(status_code=200, content={"status": "ok", "processed": processed})
 
 
 @app.get("/internal/health")

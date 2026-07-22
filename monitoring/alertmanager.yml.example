@@ -1,0 +1,12 @@
+route:
+  receiver: remnawave-admin-bot
+
+receivers:
+  - name: remnawave-admin-bot
+    webhook_configs:
+      - url: http://bot:8080/internal/prometheus-alert
+        send_resolved: true
+        http_config:
+          authorization:
+            type: Bearer
+            credentials: CHANGE_ME

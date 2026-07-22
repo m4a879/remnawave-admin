@@ -1,4 +1,5 @@
 """Tests for src/services/bot_callbacks.py — notification dispatch & HTML escaping."""
+import json
 import os
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -396,3 +397,131 @@ class TestPanelEvent:
         assert "<script>" not in msg
         assert "&lt;script&gt;alert(1)&lt;/script&gt;" in msg
         assert "<b>bold</b>" not in msg
+
+
+class TestPrometheusAlert:
+    @staticmethod
+    def _request(payload, token="alert-secret"):
+        req = MagicMock()
+        req.app.state.bot = AsyncMock()
+        req.headers.get.side_effect = lambda name, default="": (
+            f"Bearer {token}" if name == "Authorization" else default
+        )
+        req.json = AsyncMock(return_value=payload)
+        return req
+
+    async def test_unauthorized(self, monkeypatch):
+        monkeypatch.setenv("PROMETHEUS_WEBHOOK_SECRET", "real-secret")
+        from src.services.bot_callbacks import prometheus_alert
+
+        req = self._request({"alerts": []}, token="wrong-secret")
+        with pytest.raises(HTTPException) as exc:
+            await prometheus_alert(req)
+        assert exc.value.status_code == 401
+
+    async def test_firing_dispatches_offline_with_alert_identity(self, monkeypatch):
+        monkeypatch.setenv("PROMETHEUS_WEBHOOK_SECRET", "alert-secret")
+        from src.services.bot_callbacks import prometheus_alert
+
+        payload = {
+            "status": "firing",
+            "alerts": [{
+                "status": "firing",
+                "labels": {"alertname": "NodeOffline", "node": "edge-1"},
+                "annotations": {"description": "Disconnected for five minutes"},
+                "startsAt": "2026-07-22T10:15:29Z",
+                "fingerprint": "abc123",
+            }],
+        }
+        req = self._request(payload)
+        with patch("src.utils.notifications.send_node_notification", new=AsyncMock()) as notify:
+            response = await prometheus_alert(req)
+
+        assert response.status_code == 200
+        assert json.loads(response.body) == {"status": "ok", "processed": 1}
+        kwargs = notify.call_args.kwargs
+        assert kwargs["event"] == "node.offline"
+        assert kwargs["event_timestamp"] == "2026-07-22T10:15:29Z"
+        assert kwargs["node_data"]["response"] == {
+            "uuid": "abc123",
+            "name": "edge-1",
+            "lastStatusChange": "2026-07-22T10:15:29Z",
+            "lastStatusMessage": "Disconnected for five minutes",
+        }
+
+    async def test_resolved_dispatches_online_and_prefers_uuid(self, monkeypatch):
+        monkeypatch.setenv("PROMETHEUS_WEBHOOK_SECRET", "alert-secret")
+        from src.services.bot_callbacks import prometheus_alert
+
+        req = self._request({"alerts": [{
+            "status": "resolved",
+            "labels": {"alertname": "NodeOffline", "node": "edge-1", "uuid": "node-uuid"},
+            "annotations": {"description": "old failure reason"},
+            "startsAt": "2026-07-22T10:15:29Z",
+            "endsAt": "2026-07-22T10:20:29Z",
+            "fingerprint": "abc123",
+        }]})
+        with patch("src.utils.notifications.send_node_notification", new=AsyncMock()) as notify:
+            response = await prometheus_alert(req)
+
+        assert response.status_code == 200
+        kwargs = notify.call_args.kwargs
+        assert kwargs["event"] == "node.online"
+        assert kwargs["event_timestamp"] == "2026-07-22T10:20:29Z"
+        assert kwargs["node_data"]["response"]["uuid"] == "node-uuid"
+        assert "lastStatusMessage" not in kwargs["node_data"]["response"]
+
+    async def test_unrelated_alert_is_ignored(self, monkeypatch):
+        monkeypatch.setenv("PROMETHEUS_WEBHOOK_SECRET", "alert-secret")
+        from src.services.bot_callbacks import prometheus_alert
+
+        req = self._request({"alerts": [{
+            "status": "firing",
+            "labels": {"alertname": "PanelDown", "node": "panel"},
+        }]})
+        with patch("src.utils.notifications.send_node_notification", new=AsyncMock()) as notify:
+            response = await prometheus_alert(req)
+
+        assert response.status_code == 200
+        assert json.loads(response.body)["processed"] == 0
+        notify.assert_not_awaited()
+
+    async def test_partial_failure_returns_502_after_processing_all(self, monkeypatch):
+        monkeypatch.setenv("PROMETHEUS_WEBHOOK_SECRET", "alert-secret")
+        from src.services.bot_callbacks import prometheus_alert
+
+        req = self._request({"alerts": [
+            {
+                "status": "firing",
+                "labels": {"alertname": "NodeOffline", "node": "edge-1"},
+                "fingerprint": "one",
+            },
+            {
+                "status": "firing",
+                "labels": {"alertname": "NodeOffline", "node": "edge-2"},
+                "fingerprint": "two",
+            },
+        ]})
+        notify = AsyncMock(side_effect=[RuntimeError("Telegram unavailable"), None])
+        with patch("src.utils.notifications.send_node_notification", new=notify):
+            response = await prometheus_alert(req)
+
+        assert response.status_code == 502
+        assert notify.await_count == 2
+        result = json.loads(response.body)
+        assert result["processed"] == 1
+        assert result["failures"][0]["node"] == "edge-1"
+
+    async def test_route_is_allowed_by_webhook_middleware(self):
+        from src.services.webhook import catch_invalid_requests
+
+        request = MagicMock()
+        request.method = "POST"
+        request.url.path = "/internal/prometheus-alert"
+        expected = MagicMock()
+        call_next = AsyncMock(return_value=expected)
+
+        response = await catch_invalid_requests(request, call_next)
+
+        assert response is expected
+        call_next.assert_awaited_once_with(request)
